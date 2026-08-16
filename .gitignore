@@ -3,10 +3,6 @@ dist/
 .env
 .env.*
 !.env.example
-data/
-*.sqlite
-*.sqlite-wal
-*.sqlite-shm
 .npm/
 uploads/
 *.log

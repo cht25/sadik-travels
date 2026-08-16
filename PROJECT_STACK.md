@@ -1,114 +1,32 @@
-# Sadik Travels Stack
+# Sadik Travels runtime architecture
 
-## Runtime
+## Runtime and deployment
 
-- Node.js 20+
-- Express 5
-- TypeScript
-- Vanilla HTML/CSS/JavaScript frontend
-- SQLite using `better-sqlite3` with a Render persistent disk
-- JWT access/refresh sessions
-- HttpOnly cookies
-- Zod validation
-- Helmet security headers
-- Pino request/error logging
-- Nodemailer SMTP email delivery
-- BulkSMSBD/custom SMS adapters
-- Cloudinary REST media service for permanent image uploads
-- Multer memory storage for bounded multipart processing only
+- Node.js 20 and Express 5
+- One Render web service serving public website, admin console, API, and static assets from one origin
+- `TRUST_PROXY=true` in Render so cookies, request IPs, and HTTPS proxy behavior are correct
 
-## Single project layout
+## Persistent services
 
-Frontend and backend intentionally run in one project. From the project root:
+| Concern | Production service |
+| --- | --- |
+| Application data | Managed MongoDB / MongoDB Atlas via `MONGODB_URI` |
+| Images | Cloudinary |
+| Session state | Signed HttpOnly JWT cookies, with server-side session records in MongoDB |
+| Delivery | Configured SMS, SMTP, travel, and payment providers |
 
-```powershell
-npm run dev
-```
+No runtime business data relies on SQLite, local files, or a Render persistent disk.
 
-The Express process serves:
+## MongoDB entity model
 
-- `/` — customer storefront
-- `/admin` and `/admin/*` — routed admin console
-- `/api/v1/*` — application API
-- `/healthz` and `/api/health` — health checks
-- `/readyz` and `/api/ready` — database readiness checks
+The Mongo repository stores typed entities with stable UUIDs in `sadik_entities`. Data is indexed by entity kind, ID, status, user ownership, update time, and slug. Domain types include users, OTP challenges, sessions, bookings, booking events, tours, payments, tickets, ticket messages, notifications, settings, content, media metadata, admin navigation, travel agents, campaign templates, segments, campaigns, recipients, notes, and audit logs.
 
-## Database
+This preserves the existing API contract while removing all SQLite-specific SQL, filesystem initialization, and disk persistence assumptions.
 
-SQLite is the only database layer in the current architecture. Tables are created or migrated additively in `src/store.ts`:
+## Media
 
-- users
-- OTP challenges
-- sessions
-- bookings and booking events
-- tours
-- payments
-- support tickets and support messages
-- notifications
-- customer notes
-- content items
-- media assets
-- audit logs
-- encrypted settings
+Cloudinary is accessed only by the backend. Uploads are validated from file bytes, limited in memory, stored in an organized Sadik Travels folder, and represented in MongoDB by media metadata. No Cloudinary secret is returned to browser code.
 
-No records are reset or wiped during startup. There are no demo users, tours, bookings, payments, tickets, notifications, or content seeded into the real database.
+## Testing
 
-For Render:
-
-```env
-SQLITE_PATH=/var/data/sadik.sqlite
-```
-
-A persistent Render disk is required for business data to survive deploys and restarts.
-
-## API client
-
-Both storefront and admin load `api.js` and use `window.SadikApi.request(path, options)`. It provides:
-
-- same-origin or configured API base handling
-- HttpOnly cookie credentials
-- refresh-session handling
-- JSON and multipart form handling
-- request timeouts
-- consistent network/API errors
-
-## Admin application
-
-The admin is a routed single-page application with:
-
-- responsive fixed sidebar and mobile drawer
-- dashboard KPIs/charts/empty states
-- booking lifecycle, claiming, assignment, notes and history
-- customer directory and details
-- payments and transaction history
-- notifications and delivery history
-- support conversations and assignment
-- tour/content CRUD
-- service visibility states: active, hidden, maintenance, archived
-- Cloudinary media library
-- encrypted integration settings
-- admin roles and server-side permissions
-- audit logs
-- admin navigation configuration
-- travel agents
-- campaigns, templates, customer segments and campaign recipient queue
-
-## Persistent media
-
-Permanent uploads are handled by `src/media.ts`. It validates image magic bytes, permits JPEG/PNG/WEBP, limits memory-backed multipart uploads, uploads to Cloudinary folders under `sadik-travels/`, stores metadata in `media_assets`, and performs safe replace/archive operations. `CLOUDINARY_API_SECRET` is never sent to browser code or stored in SQLite.
-
-## Render
-
-`render.yaml` configures one Node web service:
-
-```text
-Build: npm ci --include=dev && npm run build
-Start: npm start
-Health: /healthz
-```
-
-Production requires strong JWT/settings secrets, HTTPS cookie/origin configuration, the Render SQLite disk, and Cloudinary credentials for persistent media.
-
-## Degraded external services
-
-Travel inventory, payment gateways, SMS, SMTP, and Cloudinary are real provider integrations. If credentials are absent or a provider times out, the API returns a controlled unavailable/error response; the application does not generate fake inventory, fake delivery, fake payment success, or fake upload records.
+`TEST_MONGODB_URI` runs the integration suite against a dedicated disposable MongoDB database. Do not point it to a production database.

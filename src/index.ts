@@ -5,8 +5,9 @@ import { MessagingProvider } from './providers.js';
 import { CampaignWorker } from './campaign-worker.js';
 
 validateConfig();
-const { app, store } = buildApp();
+const { app, store, connection } = buildApp();
 try {
+  await connection;
   const created = await bootstrapSuperAdmin(store);
   if (created) console.log('Super admin bootstrap completed from deployment secrets');
 } catch (error) {

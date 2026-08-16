@@ -31,8 +31,8 @@ services:
         sync: false
       - key: SERVE_STATIC
         value: true
-      - key: SQLITE_PATH
-        value: /var/data/sadik.sqlite
+      - key: MONGODB_URI
+        sync: false
       - key: TRUST_PROXY
         value: true
       - key: COOKIE_SECURE
@@ -41,7 +41,3 @@ services:
         value: lax
       - key: DEV_OTP_ECHO
         value: false
-    disk:
-      name: sadik-travels-data
-      mountPath: /var/data
-      sizeGB: 1

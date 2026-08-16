@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import path from 'node:path';
 
 const isTrue = (value: string | undefined, fallback = false) => value === undefined ? fallback : ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
 const env = (key: string, fallback = '') => process.env[key] ?? fallback;
@@ -18,7 +17,7 @@ export const config = {
   corsOrigins: [...new Set([...configuredCors, appOrigin])],
   trustProxy: isTrue(process.env.TRUST_PROXY),
   serveStatic: isTrue(process.env.SERVE_STATIC, true),
-  sqlitePath: path.resolve(process.cwd(), env('SQLITE_PATH', './data/sadik.sqlite')),
+  mongoUri: env('MONGODB_URI'),
   jwtSecret: env('JWT_SECRET', 'local-only-change-me-local-only-change-me'),
   jwtIssuer: env('JWT_ISSUER', 'sadik-travels-api'),
   jwtAudience: env('JWT_AUDIENCE', 'sadik-travels-web'),
@@ -59,18 +58,19 @@ export const config = {
   paymentWebhookSecret: env('PAYMENT_WEBHOOK_SECRET'),
   devOtpEcho: isTrue(process.env.DEV_OTP_ECHO, false),
   logLevel: env('LOG_LEVEL', 'info'),
-  publicDir: path.resolve(process.cwd(), env('PUBLIC_DIR', '.'))
+  publicDir: process.cwd()
 };
 
 export function validateConfig() {
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) throw new Error('PORT must be a valid TCP port');
-  if (!config.sqlitePath) throw new Error('SQLITE_PATH is required');
+  if (!config.mongoUri) throw new Error('MONGODB_URI is required');
   if ((config.superAdminEmail && !config.superAdminPassword) || (!config.superAdminEmail && config.superAdminPassword)) throw new Error('SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD must be provided together');
   if (config.superAdminPassword && config.superAdminPassword.length < 12) throw new Error('SUPER_ADMIN_PASSWORD must be at least 12 characters');
   if (!Number.isInteger(config.smtpPort) || config.smtpPort < 1 || config.smtpPort > 65535) throw new Error('SMTP_PORT must be a valid TCP port');
   if (!Number.isInteger(config.mediaMaxUploadBytes) || config.mediaMaxUploadBytes < 1_000_000 || config.mediaMaxUploadBytes > 25_000_000) throw new Error('MEDIA_MAX_UPLOAD_BYTES must be between 1MB and 25MB');
   if (!Number.isInteger(config.mediaTimeoutMs) || config.mediaTimeoutMs < 1000 || config.mediaTimeoutMs > 120000) throw new Error('MEDIA_TIMEOUT_MS must be between 1000 and 120000');
   if (config.isProduction) {
+    if (/mongodb:\/\/(localhost|127\.0\.0\.1)/i.test(config.mongoUri)) throw new Error('Production requires a managed MONGODB_URI, not localhost');
     if (!config.cloudinaryCloudName || !config.cloudinaryApiKey || !config.cloudinaryApiSecret) throw new Error('CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET are required in production');
     if (config.jwtSecret.length < 32 || config.jwtSecret.includes('local-only')) throw new Error('JWT_SECRET must be a strong production secret');
     if (config.settingsMasterKey.length < 32 || config.settingsMasterKey.includes('local-only')) throw new Error('SETTINGS_MASTER_KEY must be a strong production secret');

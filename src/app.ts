@@ -110,7 +110,7 @@ const bookingTransitions: Record<BookingStatus, BookingStatus[]> = {
 };
 
 export function buildApp() {
-  const { store } = createStore();
+  const { store, connection } = createStore();
   const travel = new TravelProvider(store);
   const messaging = new MessagingProvider(store);
   const payment = new PaymentProvider(store);
@@ -131,7 +131,7 @@ export function buildApp() {
   app.use(['/api/v1/site', '/api/v1/tours'], (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
   app.get(['/healthz', '/api/health'], async (_req, res, next) => { try { await store.health(); res.json({ status: 'ok', ok: true, service: 'sadik-travels-api', database: 'connected', env: config.nodeEnv }); } catch (error) { next(new AppError(503, 'NOT_READY', 'Service dependencies are not ready', config.isProduction ? undefined : error)); } });
-  app.get(['/readyz', '/api/ready'], async (_req, res, next) => { try { await store.health(); res.json({ ok: true, database: 'sqlite' }); } catch (error) { next(new AppError(503, 'NOT_READY', 'Service dependencies are not ready', config.isProduction ? undefined : error)); } });
+  app.get(['/readyz', '/api/ready'], async (_req, res, next) => { try { await store.health(); res.json({ ok: true, database: 'mongodb' }); } catch (error) { next(new AppError(503, 'NOT_READY', 'Service dependencies are not ready', config.isProduction ? undefined : error)); } });
   app.get('/api/v1/site/settings', async (_req, res) => {
     const serviceVisibility = await store.getServiceVisibility();
     const serviceStatuses = Object.fromEntries(serviceVisibility.map(item => [item.key, item.status]));
@@ -376,5 +376,5 @@ export function buildApp() {
     if (config.serveStatic && !req.path.startsWith('/api/')) return res.status(normalized.statusCode).type('html').send(errorPageHtml(normalized.statusCode));
     res.status(normalized.statusCode).json({ error: { code: normalized.code, message: safeExpose ? normalized.message : 'An unexpected error occurred', ...(safeExpose && normalized.details ? { details: normalized.details } : {}) }, requestId: req.requestId });
   });
-  return { app, store };
+  return { app, store, connection };
 }
