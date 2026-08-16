@@ -365,6 +365,17 @@
             ${data.reviews?.length
               ? `<div class="sf-reviews">${data.reviews.map((review) => `<article class="sf-review"><div class="sf-review-head"><strong>${esc(review.userName || 'Customer')}</strong><span class="sf-stars">${'★'.repeat(review.rating)}${'☆'.repeat(5 - review.rating)}</span></div>${review.title ? `<h4>${esc(review.title)}</h4>` : ''}<p>${esc(review.body)}</p><small>${dateLabel(review.createdAt)}</small>${review.adminReply ? `<div class="sf-review-reply"><strong>Sadik Travels</strong><p>${esc(review.adminReply)}</p></div>` : ''}</article>`).join('')}</div>`
               : emptyState('No reviews yet', 'Reviews appear here once travellers complete this booking.')}
+            ${isLoggedIn() ? `
+              <form class="sf-review-form" id="sfReviewForm" data-product-id="${esc(product.id)}" data-product-type="${esc(product.type)}" data-product-title="${esc(product.title)}">
+                <h3>Write a review</h3>
+                <div class="sf-form-grid">
+                  <label class="sf-field"><span>Rating</span><select name="rating">${[5, 4, 3, 2, 1].map((value) => `<option value="${value}">${'★'.repeat(value)} ${value}</option>`).join('')}</select></label>
+                  <label class="sf-field"><span>Title</span><input name="title" maxlength="160" placeholder="Summarise your experience" /></label>
+                  <label class="sf-field sf-field-wide"><span>Your review *</span><textarea name="body" rows="3" required placeholder="What did you like? What could be better?"></textarea></label>
+                </div>
+                <button class="btn btn-primary" type="submit">Submit review</button>
+                <p class="sf-hint">Reviews can be posted after a confirmed booking and are published once moderated.</p>
+              </form>` : `<p class="sf-hint">${'Login after your trip to review this product.'}</p>`}
           </section>
         </div>
 
@@ -1507,6 +1518,23 @@
           form.reset();
           toast('Support ticket created', 'success');
         } catch (error) { box.innerHTML = errorState(error.message); }
+        return;
+      }
+
+      if (form.id === 'sfReviewForm') {
+        event.preventDefault();
+        const data = new FormData(form);
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        try {
+          const result = await api.post('/reviews', {
+            productType: form.dataset.productType, productId: form.dataset.productId, productTitle: form.dataset.productTitle,
+            rating: Number(data.get('rating')), title: String(data.get('title') || '').trim() || undefined, body: String(data.get('body') || '').trim()
+          });
+          toast(result.message || 'Review submitted', 'success');
+          form.reset();
+        } catch (error) { toast(error.message || 'Review could not be submitted', 'error'); }
+        finally { button.disabled = false; }
         return;
       }
 

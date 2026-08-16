@@ -447,3 +447,8 @@
 /* Homepage sections reuse the storefront card grid. */
 .sf-grid-home{grid-template-columns:repeat(auto-fill,minmax(240px,1fr));margin-top:8px}
 @media(max-width:560px){.sf-grid-home{grid-template-columns:1fr}}
+.sf-review-form{margin-top:16px;padding-top:16px;border-top:1px solid var(--sf-line);display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+.sf-review-form h3{margin:0;font-size:.95rem}
+.sf-review-form .sf-form-grid{width:100%}
+.sf-review-form textarea{width:100%;border:1px solid #cbd5e1;border-radius:9px;padding:11px 12px;font:inherit;font-size:.85rem;outline:none}
+.sf-review-form textarea:focus{border-color:var(--sf-brand);box-shadow:0 0 0 3px rgba(0,48,160,.10)}
