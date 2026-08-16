@@ -33,6 +33,56 @@ Flights, hotels, homes, visa, eSIM, Go Get Tour, Umrah packages/fare, holiday pa
 - Encrypted provider/settings workspace
 - Admin users, permissions and audit logs
 
+## Application shell and routing
+
+The website renders inside one application shell:
+
+```
+<div class="app-shell">
+  <aside class="travel-sidebar">…</aside>
+  <div class="app-main">
+    <header class="site-header">…</header>
+    <div class="page-content">…page…</div>
+    <footer class="site-footer">…</footer>
+  </div>
+</div>
+```
+
+The header is sticky inside the content column and the sidebar is a real
+grid/flex column on desktop, so page content is never covered by either.
+Below 1024px the sidebar becomes an overlay drawer (hamburger, backdrop,
+Escape and click-outside close). No page applies its own header or sidebar
+offset — layout lives only in the shell rules at the end of `styles.css`.
+
+Every sidebar entry is a real route that works on refresh and direct URL
+access: `/flights`, `/hotels`, `/homes`, `/visa`, `/tours`, `/esim`,
+`/special-umrah-fare`, `/umrah-packages`, `/holiday-packages`,
+`/medical-tourism`, `/card-offers`, `/airlines-offers`, `/explore`,
+`/travel-agents`, `/app`, `/cart`, `/wishlist`, `/checkout`, `/orders`,
+`/invoice/:id`, `/account`, `/track-booking` and `/support`.
+
+## Commerce engine
+
+`src/commerce-store.ts` and `src/commerce-routes.ts` add the catalogue and
+e-commerce layer on top of the existing booking APIs:
+
+| Collection | Purpose |
+| --- | --- |
+| `catalog_products` | eSIM, Umrah, holiday, medical, visa, homes, offers, destinations |
+| `carts`, `wishlist_items` | Persistent per-customer cart and wishlist |
+| `coupons`, `coupon_redemptions` | Server-validated discount rules and per-user limits |
+| `orders`, `invoices` | Unified order/booking engine with timeline and receipts |
+| `saved_travelers` | Reusable traveller profiles for auto-filled checkout |
+| `reviews` | Purchase-verified reviews with admin moderation |
+| `visa_applications` | Visa applications with passport data and status tracking |
+
+Prices, taxes, service fees, coupons and totals are always recalculated on
+the server from persisted records; browser values are never trusted. Every
+admin endpoint is guarded by a fine-grained permission
+(`catalog.create`, `order.refund`, `coupon.delete`, `review.moderate`,
+`visa.update`, …) and writes an audit entry. Super Admin bypasses
+restrictions; an admin can never grant itself permissions.
+
 ## Local development
 
 ```bash
