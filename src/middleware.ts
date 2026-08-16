@@ -3,21 +3,15 @@ import { randomUUID } from 'node:crypto';
 import { AppError } from './errors.js';
 import { verifyToken, ACCESS_COOKIE } from './security.js';
 import type { Store, User, UserRole } from './store.js';
+import { hasFinePermission, hasCoarsePermission, effectiveCoarsePermissions } from './permissions.js';
 
 export type AdminPermission = 'dashboard:view' | 'bookings:view' | 'bookings:manage' | 'payments:view' | 'payments:manage' | 'customers:view' | 'content:manage' | 'services:manage' | 'notifications:send' | 'support:manage' | 'settings:manage' | 'users:manage' | 'audit:view' | 'navigation:manage';
-const ALL_ADMIN_ROLES: UserRole[] = ['admin', 'manager', 'super_admin', 'support', 'content_manager', 'finance'];
-const ROLE_PERMISSIONS: Record<UserRole, AdminPermission[]> = {
-  customer: [],
-  super_admin: ['dashboard:view','bookings:view','bookings:manage','payments:view','payments:manage','customers:view','content:manage','services:manage','notifications:send','support:manage','settings:manage','users:manage','audit:view','navigation:manage'],
-  admin: ['dashboard:view','bookings:view','bookings:manage','payments:view','payments:manage','customers:view','content:manage','services:manage','notifications:send','support:manage','settings:manage','users:manage','audit:view','navigation:manage'],
-  manager: ['dashboard:view','bookings:view','bookings:manage','customers:view','notifications:send','support:manage'],
-  support: ['dashboard:view','bookings:view','customers:view','notifications:send','support:manage'],
-  content_manager: ['dashboard:view','content:manage','services:manage'],
-  finance: ['dashboard:view','bookings:view','payments:view','payments:manage','customers:view']
-};
+const ALL_ADMIN_ROLES: UserRole[] = ['admin', 'manager', 'super_admin', 'support', 'content_manager', 'finance', 'staff'];
 
-export function hasPermission(user: User | undefined, permission: AdminPermission) { return Boolean(user && ROLE_PERMISSIONS[user.role]?.includes(permission)); }
-export function permissionsFor(user: User | undefined) { return user ? ROLE_PERMISSIONS[user.role] ?? [] : []; }
+// Backward-compatible exports (now delegated to the granular permission engine).
+export const hasPermission = (user: User | undefined, permission: AdminPermission) => hasCoarsePermission(user, permission);
+export const permissionsFor = (user: User | undefined) => effectiveCoarsePermissions(user);
+export const hasFine = (user: User | undefined, key: string) => hasFinePermission(user, key);
 
 export function requestContext(): RequestHandler {
   return (req, res, next) => {
@@ -58,6 +52,16 @@ export function requireAdmin(store: Store): RequestHandler {
 
 export function requirePermission(store: Store, permission: AdminPermission): RequestHandler {
   return async (req, _res, next) => { try { const user = await authenticate(store, req, true); if (!hasPermission(user, permission)) throw new AppError(403, 'PERMISSION_DENIED', `Permission required: ${permission}`); next(); } catch (error) { next(error); } };
+}
+
+/** Granular permission guard (e.g. hotel.create, booking.refund). SUPER_ADMIN always passes. */
+export function requireFinePermission(store: Store, key: string): RequestHandler {
+  return async (req, _res, next) => { try { const user = await authenticate(store, req, true); if (!hasFinePermission(user, key)) throw new AppError(403, 'PERMISSION_DENIED', `Permission required: ${key}`); next(); } catch (error) { next(error); } };
+}
+
+/** SUPER_ADMIN-only guard for admin management, role/permission changes and system config. */
+export function requireSuperAdmin(store: Store): RequestHandler {
+  return async (req, _res, next) => { try { const user = await authenticate(store, req, true); if (user.role !== 'super_admin') throw new AppError(403, 'SUPER_ADMIN_REQUIRED', 'Only a Super Admin can perform this action'); next(); } catch (error) { next(error); } };
 }
 
 export function requireAuth(store: Store): RequestHandler {

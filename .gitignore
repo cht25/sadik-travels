@@ -7,3 +7,8 @@ dist/
 uploads/
 *.log
 .DS_Store
+
+# Local dev/preview harnesses (not part of the production app)
+/dev-server.mjs
+/dev-mock-server.mjs
+/verify-*.mjs
