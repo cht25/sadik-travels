@@ -2,80 +2,59 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { config } from './config.js';
 import { AppError } from './errors.js';
+import type { Store } from './store.js';
 
-async function requestJson(baseUrl: string, apiKey: string, path: string, payload: unknown, timeoutMs = 12_000) {
-  if (!baseUrl || !apiKey) throw new AppError(503, 'PROVIDER_NOT_CONFIGURED', 'The requested live provider is not configured');
+async function fetchWithTimeout(input: string | URL, init: RequestInit, timeoutMs = config.providerTimeoutMs) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(new URL(path, baseUrl).toString(), { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey }, body: JSON.stringify(payload) });
-    const body = await response.text();
-    let parsed: unknown;
-    try { parsed = body ? JSON.parse(body) : {}; } catch { parsed = { raw: body }; }
-    if (!response.ok) throw new AppError(502, 'PROVIDER_ERROR', `Provider returned HTTP ${response.status}`, config.isProduction ? undefined : parsed);
-    return parsed;
-  } catch (error) {
-    if (error instanceof AppError) throw error;
-    throw new AppError(502, 'PROVIDER_UNAVAILABLE', 'The external provider is unavailable');
-  } finally { clearTimeout(timeout); }
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try { return await fetch(input, { ...init, signal: controller.signal }); }
+  catch (error) { if (error instanceof AppError) throw error; throw new AppError(502, 'PROVIDER_TIMEOUT', 'The external provider did not respond in time'); }
+  finally { clearTimeout(timer); }
 }
 
+async function requestJson(baseUrl: string | undefined, apiKey: string | undefined, path: string, payload: unknown, timeoutMs = 12_000) {
+  if (!baseUrl || !apiKey) throw new AppError(503, 'PROVIDER_NOT_CONFIGURED', 'The requested live provider is not configured');
+  const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchWithTimeout(new URL(path, baseUrl).toString(), { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey }, body: JSON.stringify(payload) });
+    const body = await response.text(); let parsed: unknown; try { parsed = body ? JSON.parse(body) : {}; } catch { parsed = { raw: body }; }
+    if (!response.ok) throw new AppError(502, 'PROVIDER_ERROR', `Provider returned HTTP ${response.status}`, config.isProduction ? undefined : parsed);
+    return parsed;
+  } catch (error) { if (error instanceof AppError) throw error; throw new AppError(502, 'PROVIDER_UNAVAILABLE', 'The external provider is unavailable'); }
+  finally { clearTimeout(timeout); }
+}
+
+async function runtime(store: Store, key: string, fallback = '') { return (await store.getSetting(key)) ?? fallback; }
 export type Vertical = 'flight' | 'hotel' | 'home' | 'visa' | 'esim' | 'tour';
 
 export class TravelProvider {
-  async search(vertical: Vertical, payload: unknown) {
-    if (config.providerMode !== 'live') throw new AppError(503, 'PROVIDER_NOT_CONFIGURED', 'Live travel search is required; no static results are available');
-    return requestJson(config.providerBaseUrl, config.providerApiKey, `/v1/${vertical}/search`, payload, config.providerTimeoutMs);
-  }
-  async reserve(vertical: Vertical, payload: unknown) { return requestJson(config.providerBaseUrl, config.providerApiKey, `/v1/${vertical}/bookings`, payload, config.providerTimeoutMs); }
-  async cancel(vertical: Vertical, payload: unknown) { return requestJson(config.providerBaseUrl, config.providerApiKey, `/v1/${vertical}/bookings/cancel`, payload, config.providerTimeoutMs); }
+  constructor(private readonly store: Store) {}
+  private async credentials() { return { baseUrl: await runtime(this.store, 'travel_provider_url', config.providerBaseUrl), apiKey: await runtime(this.store, 'travel_provider_api_key', config.providerApiKey) }; }
+  async search(vertical: Vertical, payload: unknown) { const c = await this.credentials(); return requestJson(c.baseUrl, c.apiKey, `/v1/${vertical}/search`, payload, config.providerTimeoutMs); }
+  async reserve(vertical: Vertical, payload: unknown) { const c = await this.credentials(); return requestJson(c.baseUrl, c.apiKey, `/v1/${vertical}/bookings`, payload, config.providerTimeoutMs); }
+  async cancel(vertical: Vertical, payload: unknown) { const c = await this.credentials(); return requestJson(c.baseUrl, c.apiKey, `/v1/${vertical}/bookings/cancel`, payload, config.providerTimeoutMs); }
 }
 
-function normalizeBangladeshNumber(value: string) {
-  const raw = value.trim().replace(/[\s()-]/g, '');
-  if (raw.startsWith('+880')) return raw.slice(1);
-  if (raw.startsWith('880')) return raw;
-  if (raw.startsWith('01')) return `880${raw.slice(1)}`;
-  return raw;
-}
+function normalizeBangladeshNumber(value: string) { const raw = value.trim().replace(/[\s()-]/g, ''); if (raw.startsWith('+880')) return raw.slice(1); if (raw.startsWith('880')) return raw; if (raw.startsWith('01')) return `880${raw.slice(1)}`; return raw; }
 
 export class MessagingProvider {
-  private transporter() {
-    if (!config.smtpHost || !config.smtpUser || !config.smtpPassword || !config.smtpFrom) throw new AppError(503, 'EMAIL_NOT_CONFIGURED', 'SMTP email delivery is not configured');
-    return nodemailer.createTransport({ host: config.smtpHost, port: config.smtpPort, secure: config.smtpPort === 465, auth: { user: config.smtpUser, pass: config.smtpPassword } });
-  }
-  async sendSms(destination: string, message: string) {
-    if (!config.bulkSmsApiKey || !config.bulkSmsSenderId) throw new AppError(503, 'SMS_NOT_CONFIGURED', 'BulkSMSBD credentials are not configured');
-    const body = new URLSearchParams({ api_key: config.bulkSmsApiKey, senderid: config.bulkSmsSenderId, number: normalizeBangladeshNumber(destination), message });
-    const response = await fetch(config.bulkSmsApiUrl, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json,text/plain' }, body });
-    const raw = await response.text();
-    if (!response.ok || /(^|\b)(error|failed|invalid|insufficient)(\b|:)/i.test(raw)) throw new AppError(502, 'SMS_PROVIDER_ERROR', 'BulkSMSBD rejected the message');
-    return { delivered: true, providerResponse: raw.slice(0, 500) };
-  }
-  async sendEmail(destination: string, subject: string, message: string) {
-    await this.transporter().sendMail({ from: config.smtpFrom, to: destination, subject, text: message });
-    return { delivered: true };
-  }
-  async sendOtp(channel: 'sms' | 'email', destination: string, code: string): Promise<{ delivered: boolean; devCode?: string; providerResponse?: string }> {
-    try {
-      if (channel === 'sms') return await this.sendSms(destination, `Your Sadik Travels login code is ${code}. It expires in 5 minutes.`);
-      return await this.sendEmail(destination, 'Your Sadik Travels login code', `Your Sadik Travels login code is ${code}. It expires in 5 minutes.`);
-    } catch (error) {
-      if (!config.isProduction && config.devOtpEcho) return { delivered: false, devCode: code };
-      throw error;
-    }
-  }
-  async sendNotification(channel: 'sms' | 'email', destination: string, title: string, message: string) {
-    return channel === 'sms' ? this.sendSms(destination, `${title}: ${message}`) : this.sendEmail(destination, title, message);
-  }
+  constructor(private readonly store: Store) {}
+  private async smsConfig() { return { provider: await runtime(this.store, 'sms_provider', config.smsProvider), url: await runtime(this.store, 'sms_gateway_url', config.smsGatewayUrl), username: await runtime(this.store, 'sms_gateway_username', config.smsGatewayUsername), password: await runtime(this.store, 'sms_gateway_password', config.smsGatewayPassword), apiKey: await runtime(this.store, 'sms_api_key', config.bulkSmsApiKey), senderId: await runtime(this.store, 'sms_sender_id', config.bulkSmsSenderId) }; }
+  private async emailConfig() { return { host: await runtime(this.store, 'smtp_host', config.smtpHost), port: Number(await runtime(this.store, 'smtp_port', String(config.smtpPort))), user: await runtime(this.store, 'smtp_user', config.smtpUser), password: await runtime(this.store, 'smtp_password', config.smtpPassword), from: await runtime(this.store, 'smtp_from', config.smtpFrom) }; }
+  async sendSms(destination: string, message: string) { const c = await this.smsConfig(); const number = normalizeBangladeshNumber(destination); if (c.provider === 'custom_gateway') { if (!c.url || !c.username || !c.password) throw new AppError(503, 'SMS_NOT_CONFIGURED', 'Custom SMS gateway credentials are not configured'); const body = new URLSearchParams({ username: c.username, password: c.password, to: number, number, phone: number, mobile: number, message }); const response = await fetchWithTimeout(c.url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json,text/plain' }, body }); const raw = await response.text(); let parsed: any = {}; try { parsed = raw ? JSON.parse(raw) : {}; } catch { /* text response */ } if (!response.ok || parsed.success === false || parsed.error) throw new AppError(502, 'SMS_PROVIDER_ERROR', 'Custom SMS gateway rejected the message'); return { delivered: true, providerResponse: raw.slice(0, 500) }; } if (!c.url || !c.apiKey || !c.senderId) throw new AppError(503, 'SMS_NOT_CONFIGURED', 'BulkSMSBD credentials are not configured'); const body = new URLSearchParams({ api_key: c.apiKey, senderid: c.senderId, number, message }); const response = await fetchWithTimeout(c.url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json,text/plain' }, body }); const raw = await response.text(); if (!response.ok || /(^|\b)(error|failed|invalid|insufficient)(\b|:)/i.test(raw)) throw new AppError(502, 'SMS_PROVIDER_ERROR', 'SMS gateway rejected the message'); return { delivered: true, providerResponse: raw.slice(0, 500) }; }
+  async sendEmail(destination: string, subject: string, message: string, html?: string) { const c = await this.emailConfig(); if (!c.host || !c.user || !c.password || !c.from) throw new AppError(503, 'EMAIL_NOT_CONFIGURED', 'SMTP email delivery is not configured'); const transporter = nodemailer.createTransport({ host: c.host, port: c.port, secure: c.port === 465, connectionTimeout: config.providerTimeoutMs, greetingTimeout: config.providerTimeoutMs, socketTimeout: config.providerTimeoutMs, auth: { user: c.user, pass: c.password } }); await transporter.sendMail({ from: c.from, to: destination, subject, text: message, ...(html ? { html } : {}) }); return { delivered: true }; }
+  async sendOtp(channel: 'sms' | 'email', destination: string, code: string): Promise<{ delivered: boolean; devCode?: string; providerResponse?: string }> { try { if (channel === 'sms') return await this.sendSms(destination, `Your Sadik Travels login code is ${code}. It expires in 5 minutes.`); return await this.sendEmail(destination, 'Your Sadik Travels login code', `Your Sadik Travels login code is ${code}. It expires in 5 minutes.`); } catch (error) { if (!config.isProduction && config.devOtpEcho) return { delivered: false, devCode: code }; throw error; } }
+  async sendNotification(channel: 'sms' | 'email', destination: string, title: string, message: string) { return channel === 'sms' ? this.sendSms(destination, `${title}: ${message}`) : this.sendEmail(destination, title, message); }
 }
 
+function asString(value: unknown) { return value === undefined || value === null ? '' : String(value); }
+function appendPath(base: string, path: string) { return base.endsWith('/') ? `${base.slice(0, -1)}${path}` : `${base}${path}`; }
+
 export class PaymentProvider {
-  async createIntent(payload: unknown) { return requestJson(config.paymentBaseUrl, config.paymentApiKey, '/v1/payments/intents', payload, config.providerTimeoutMs); }
-  verifyWebhook(rawBody: Buffer, signature: string | undefined) {
-    if (!signature || !config.paymentWebhookSecret) return false;
-    const expected = createHmac('sha256', config.paymentWebhookSecret).update(rawBody).digest('hex');
-    const a = Buffer.from(expected); const b = Buffer.from(signature);
-    return a.length === b.length && timingSafeEqual(a, b);
-  }
+  constructor(private readonly store: Store) {}
+  private async paymentSettings() { return { provider: await runtime(this.store, 'payment_provider', 'sslcommerz'), sslStoreId: await runtime(this.store, 'sslcommerz_store_id'), sslStorePassword: await runtime(this.store, 'sslcommerz_store_password'), sslApiUrl: await runtime(this.store, 'sslcommerz_api_url'), sslValidationUrl: await runtime(this.store, 'sslcommerz_validation_url'), sslIpnUrl: await runtime(this.store, 'sslcommerz_ipn_url'), bkashBaseUrl: await runtime(this.store, 'bkash_base_url'), bkashAppKey: await runtime(this.store, 'bkash_app_key'), bkashAppSecret: await runtime(this.store, 'bkash_app_secret'), bkashUsername: await runtime(this.store, 'bkash_username'), bkashPassword: await runtime(this.store, 'bkash_password') }; }
+  async createIntent(payload: any) { const s = await this.paymentSettings(); if (s.provider === 'bkash') return this.createBkash(payload, s); return this.createSslCommerz(payload, s); }
+  private async createSslCommerz(payload: any, s: any) { if (!s.sslStoreId || !s.sslStorePassword || !s.sslApiUrl) throw new AppError(503, 'SSLCOMMERZ_NOT_CONFIGURED', 'SSLCommerz merchant settings are not configured'); const params = new URLSearchParams({ store_id: s.sslStoreId, store_passwd: s.sslStorePassword, total_amount: asString(payload.amount), currency: asString(payload.currency || 'BDT'), tran_id: asString(payload.paymentId), success_url: `${payload.returnUrl}?payment=success`, fail_url: `${payload.returnUrl}?payment=failed`, cancel_url: `${payload.returnUrl}?payment=cancelled`, ipn_url: s.sslIpnUrl || `${config.appOrigin}/api/v1/payments/webhook`, shipping_method: 'NO', product_name: 'Sadik Travels booking', product_category: 'Travel', cus_name: 'Sadik Travels customer', cus_email: 'customer@sadiktravels.com', cus_add1: 'Bangladesh', cus_phone: '01700000000', value_a: asString(payload.bookingId) }); const response = await fetchWithTimeout(s.sslApiUrl.includes('gwprocess') ? s.sslApiUrl : appendPath(s.sslApiUrl, '/gwprocess/v4/api.php'), { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: params }); const result: any = await response.json().catch(() => ({})); if (!response.ok || result.status !== 'SUCCESS') throw new AppError(502, 'SSLCOMMERZ_ERROR', 'SSLCommerz rejected the payment request'); return { provider: 'sslcommerz', status: 'pending', transactionRef: result.tran_id || payload.paymentId, checkoutUrl: result.GatewayPageURL, raw: result }; }
+  private async createBkash(payload: any, s: any) { if (!s.bkashBaseUrl || !s.bkashAppKey || !s.bkashAppSecret || !s.bkashUsername || !s.bkashPassword) throw new AppError(503, 'BKASH_NOT_CONFIGURED', 'bKash merchant settings are not configured'); const base = s.bkashBaseUrl.replace(/\/$/, ''); const authResponse = await fetchWithTimeout(`${base}/tokenized/checkout/token/grant`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', username: s.bkashUsername, password: s.bkashPassword }, body: JSON.stringify({ app_key: s.bkashAppKey, app_secret: s.bkashAppSecret }) }); const auth: any = await authResponse.json().catch(() => ({})); if (!authResponse.ok || !auth.id_token) throw new AppError(502, 'BKASH_AUTH_ERROR', 'bKash authentication failed'); const createResponse = await fetchWithTimeout(`${base}/tokenized/checkout/create`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', authorization: auth.id_token, 'x-app-key': s.bkashAppKey }, body: JSON.stringify({ mode: '0011', payerReference: asString(payload.customerId), callbackURL: asString(payload.returnUrl), amount: asString(payload.amount), currency: 'BDT', intent: 'sale', merchantInvoiceNumber: asString(payload.paymentId) }) }); const result: any = await createResponse.json().catch(() => ({})); if (!createResponse.ok || !result.bkashURL) throw new AppError(502, 'BKASH_ERROR', 'bKash rejected the payment request'); return { provider: 'bkash', status: 'pending', transactionRef: result.paymentID || payload.paymentId, checkoutUrl: result.bkashURL, raw: result }; }
+  async verifyWebhook(rawBody: Buffer, signature: string | undefined) { const secret = await runtime(this.store, 'payment_webhook_secret', config.paymentWebhookSecret); if (!signature || !secret) return false; const expected = createHmac('sha256', secret).update(rawBody).digest('hex'); const a = Buffer.from(expected); const b = Buffer.from(signature); return a.length === b.length && timingSafeEqual(a, b); }
 }

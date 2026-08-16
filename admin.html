@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Sadik Travels operations and management console" />
+  <title>Sadik Travels Admin Console</title>
+  <link rel="icon" type="image/png" href="/assets/sadik-travels-favicon-chat.png" />
+  <link rel="stylesheet" href="/admin.css?v=9" />
+</head>
+<body>
+  <div class="admin-toast-region" id="adminToast" aria-live="polite"></div>
+
+  <section class="admin-auth-screen" id="adminAuthScreen" aria-label="Admin authentication">
+    <div class="auth-atmosphere" aria-hidden="true"><span></span><span></span><span></span></div>
+    <div class="admin-login-card" id="adminLoginCard" data-tilt-card>
+      <canvas id="authScene" aria-hidden="true"></canvas>
+      <div class="admin-login-content">
+        <a class="auth-brand" href="/" aria-label="Return to Sadik Travels website"><img data-brand-logo src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels" /><span>Operations Console</span></a>
+        <div class="admin-lock" aria-hidden="true">◆</div>
+        <span class="admin-eyebrow">Secure workspace</span>
+        <h1>Welcome back</h1>
+        <p class="auth-lead">Sign in to manage bookings, customers, catalogue, payments and customer care.</p>
+
+        <div class="admin-login-step is-active" id="passwordLoginStep">
+          <div class="admin-step-label"><span>01</span><strong>Password access</strong><small>Recommended</small></div>
+          <form id="adminPasswordForm" novalidate>
+            <label class="admin-field"><span>Admin email</span><input id="adminPasswordIdentity" type="email" placeholder="admin@example.com" autocomplete="username" required /></label>
+            <label class="admin-field password-input"><span>Password</span><input id="adminPassword" type="password" placeholder="Enter password" autocomplete="current-password" required /><button type="button" class="password-toggle" data-password-toggle="adminPassword" aria-label="Show password">Show</button></label>
+            <button type="submit" class="admin-primary admin-primary-wide admin-password-button">Continue securely <span aria-hidden="true">→</span></button>
+          </form>
+          <button type="button" class="admin-link-button" id="showOtpLogin">Use one-time verification instead</button>
+        </div>
+
+        <div class="admin-login-step" id="otpLoginStep" hidden>
+          <div class="admin-step-label"><span>02</span><strong>One-time verification</strong><small>Passwordless</small></div>
+          <form id="adminLoginForm" novalidate>
+            <label class="admin-field"><span>Admin phone or email</span><input id="adminIdentity" autocomplete="username" placeholder="01XXXXXXXXX or email" required /></label>
+            <button type="button" class="admin-primary admin-primary-wide" id="adminSendOtp">Send verification code</button>
+            <p class="otp-countdown" id="adminOtpCountdown" aria-live="polite"></p>
+            <div id="adminOtpStep" hidden>
+              <label class="admin-field"><span>Verification code</span><input id="adminOtp" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="Enter 6 digit code" autocomplete="one-time-code" /></label>
+              <button type="submit" class="admin-primary admin-primary-wide">Verify admin access</button>
+            </div>
+          </form>
+          <button type="button" class="admin-link-button" id="backToPassword">Back to password login</button>
+        </div>
+        <p class="auth-security-note" id="adminAuthMessage">Passwords are hashed and never stored in source code. First-run deployment bootstrap is supported through secure environment secrets.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="admin-app" id="adminApp" hidden>
+    <aside class="admin-sidebar" id="adminSidebar" aria-label="Admin navigation" aria-hidden="true">
+      <div class="sidebar-brand-row"><a class="sidebar-brand" href="/" aria-label="Sadik Travels home"><img data-brand-logo src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels" /><span>Admin Console</span></a><button class="sidebar-close" id="sidebarClose" type="button" aria-label="Close navigation">×</button></div>
+      <div class="sidebar-workspace"><span class="workspace-dot"></span><div><strong>Sadik Travels</strong><small>Live operations</small></div><span class="workspace-chevron">⌄</span></div>
+      <nav class="admin-nav" id="adminNav"><div class="loading-state">Loading navigation…</div></nav>
+      <div class="sidebar-bottom"><a href="/" class="sidebar-bottom-link"><span data-icon="external"></span>View website</a><button type="button" class="sidebar-bottom-link" id="sidebarLogout"><span data-icon="logout"></span>Sign out</button></div>
+    </aside>
+    <div class="admin-scrim" id="adminScrim" hidden></div>
+    <div class="admin-main">
+      <header class="admin-topbar"><div class="topbar-left"><button type="button" class="menu-toggle" id="adminMenuToggle" aria-label="Open navigation" aria-expanded="false"><span></span><span></span><span></span></button><div class="breadcrumbs" id="adminBreadcrumbs"><span>Dashboard</span></div><div class="admin-global-search"><span data-icon="grid"></span><input id="adminGlobalSearch" placeholder="Search customers, bookings, tours…" autocomplete="off"/><div class="global-search-results" id="adminGlobalSearchResults" hidden></div></div></div><div class="topbar-actions"><button type="button" class="topbar-icon-button" id="adminNotificationButton" aria-label="Open notifications"><span data-icon="bell"></span><b id="adminNotificationBadge" hidden>0</b></button><a class="topbar-website" href="/" target="_blank" rel="noopener"><span data-icon="external"></span>View website</a><div class="profile-wrap"><button type="button" class="admin-profile-button" id="profileButton" aria-expanded="false"><span class="profile-avatar" id="profileAvatar">ST</span><span class="profile-copy"><strong id="profileName">Sadik Admin</strong><small id="profileRole">Administrator</small></span><span class="profile-chevron">⌄</span></button><div class="profile-menu" id="profileMenu" hidden><button type="button" data-route="/admin/profile">Profile</button><button type="button" data-route="/admin/profile?tab=security">Security</button><button type="button" data-route="/admin/notifications">Notifications</button><button type="button" id="profileLogout">Sign out</button></div></div></div></header>
+      <main class="admin-outlet" id="adminOutlet" tabindex="-1"></main>
+    </div>
+  </div>
+  <div class="admin-modal-root" id="adminModalRoot" hidden></div>
+  <script src="/assets/vendor/three.min.js"></script>
+  <script src="/api.js?v=3"></script>
+  <script src="/admin.js?v=10"></script>
+</body>
+</html>

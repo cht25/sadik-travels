@@ -1,85 +1,126 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 
-// The app reads configuration at import time. This is intentionally an isolated, non-persistent test profile.
+// Isolated SQLite file and real HTTP requests exercise the same public/admin boundary used in deployment.
+const sqlitePath = `/tmp/sadik-travels-smoke-${process.pid}.sqlite`;
 process.env.NODE_ENV = 'development';
-process.env.DATA_MODE = 'memory';
-process.env.DEV_OTP_ECHO = 'true';
-process.env.ADMIN_IDENTITIES = '01700000000';
-process.env.SERVE_STATIC = 'false';
+process.env.SQLITE_PATH = sqlitePath;
+process.env.SERVE_STATIC = 'true';
 process.env.LOG_LEVEL = 'silent';
-process.env.JWT_SECRET = 'test-only-secret-that-is-long-enough-for-jwt-signing';
+process.env.JWT_SECRET = 'test-only-jwt-secret-that-is-long-enough-to-sign-tokens';
+process.env.SETTINGS_MASTER_KEY = 'test-only-settings-secret-that-is-long-enough-to-encrypt';
+process.env.SUPER_ADMIN_EMAIL = 'admin@example.com';
+process.env.SUPER_ADMIN_PASSWORD = 'StrongAdminPassword123!';
+process.env.DEV_OTP_ECHO = 'true';
 
-const { buildApp } = await import('./app.js');
+const [{ buildApp }, { bootstrapSuperAdmin }] = await Promise.all([
+  import('./app.js'),
+  import('./admin-bootstrap.js')
+]);
 
-async function start() {
-  const { app } = buildApp();
-  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => {
-    const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
-  });
-  const address = server.address();
-  assert(address && typeof address !== 'string');
-  return { server, base: `http://127.0.0.1:${address.port}` };
-}
-
-function cookiePairs(response: Response) {
+function cookies(response: Response) {
   return response.headers.getSetCookie().map(value => value.split(';', 1)[0]).join('; ');
 }
 
-async function json(response: Response) {
-  const body = await response.json();
-  return { response, body };
+async function runServer() {
+  const built = buildApp();
+  await bootstrapSuperAdmin(built.store);
+  const server = await new Promise<ReturnType<typeof built.app.listen>>(resolve => {
+    const instance = built.app.listen(0, '127.0.0.1', () => resolve(instance));
+  });
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  return { ...built, server, base: `http://127.0.0.1:${address.port}` };
 }
 
-test('OTP-admin CMS lifecycle, agent profile, and in-app campaign are connected end to end', async () => {
-  const { server, base } = await start();
+async function responseJson(response: Response) {
+  return { response, body: await response.json() };
+}
+
+test('admin authentication, public catalogue, travel agents, and in-app notifications work end to end', async () => {
+  const { app: _app, store, server, base } = await runServer();
   try {
-    const csrfResponse = await fetch(`${base}/api/v1/auth/csrf`);
-    const { body: csrfBody } = await json(csrfResponse);
-    const csrf = csrfBody.csrfToken as string;
-    let cookies = cookiePairs(csrfResponse);
+    const health = await fetch(`${base}/healthz`);
+    assert.equal(health.status, 200);
 
-    const missingCsrf = await fetch(`${base}/api/v1/auth/request-otp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identity: '01700000000' }) });
-    assert.equal(missingCsrf.status, 403);
+    const login = await fetch(`${base}/api/v1/auth/password-login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identity: 'admin@example.com', password: 'StrongAdminPassword123!' })
+    });
+    const { body: adminLogin } = await responseJson(login);
+    assert.equal(login.status, 200);
+    assert.equal(adminLogin.user.role, 'super_admin');
+    const adminCookie = cookies(login);
 
-    const request = await fetch(`${base}/api/v1/auth/request-otp`, { method: 'POST', headers: { cookie: cookies, 'x-csrf-token': csrf, 'content-type': 'application/json' }, body: JSON.stringify({ identity: '01700000000' }) });
-    const { body: challenge } = await json(request);
-    assert.equal(request.status, 202);
-    assert.match(challenge.devCode, /^\d{6}$/);
+    const createdTour = await fetch(`${base}/api/v1/admin/tours`, {
+      method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ slug: 'umrah-smoke-package', title: 'Umrah Smoke Package', country: 'Saudi Arabia', tourType: 'Umrah', destinations: ['Makkah', 'Madinah'], durationDays: 10, durationNights: 9, description: 'Published package for the smoke test.', imageUrl: '', metadata: {}, priceBdt: 125000, status: 'published', featured: true })
+    });
+    const { body: tourPayload } = await responseJson(createdTour);
+    assert.equal(createdTour.status, 201);
 
-    const verify = await fetch(`${base}/api/v1/auth/verify-otp`, { method: 'POST', headers: { cookie: cookies, 'x-csrf-token': csrf, 'content-type': 'application/json' }, body: JSON.stringify({ challengeId: challenge.challengeId, code: challenge.devCode }) });
-    const { body: login } = await json(verify);
-    assert.equal(verify.status, 200);
-    assert.equal(login.user.role, 'admin');
-    cookies = `${cookies}; ${cookiePairs(verify)}`;
+    const publicTours = await fetch(`${base}/api/v1/tours`);
+    const publicToursBody = await publicTours.json();
+    assert.equal(publicTours.status, 200);
+    assert.equal(publicToursBody.tours[0].id, tourPayload.tour.id);
 
-    const create = await fetch(`${base}/api/v1/admin/content`, { method: 'POST', headers: { cookie: cookies, 'x-csrf-token': csrf, 'content-type': 'application/json' }, body: JSON.stringify({ type: 'travel-agent', slug: 'verified-agent', title: 'Verified Agent', excerpt: 'A published agent profile.', description: 'Full agent description.', imageUrl: '', gallery: [], currency: 'BDT', location: 'Dhaka', tags: ['agent'], ctaLabel: '', ctaUrl: '', status: 'published', featured: true, sortOrder: 0, data: { company: 'Sadik Agency', phone: '+8801700000000', email: 'agent@example.com', address: 'Dhaka' } }) });
-    const { body: created } = await json(create);
-    assert.equal(create.status, 201);
-
-    const publicAgent = await fetch(`${base}/api/v1/agents/verified-agent`);
+    const createdAgent = await fetch(`${base}/api/v1/admin/travel-agents`, {
+      method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ fullName: 'Sadik Travels Agent', jobTitle: 'Umrah Specialist', phone: '+8801700000000', email: 'agent@example.com', officeLocation: 'Dhaka', shortBio: 'Experienced travel consultant.', fullDescription: 'Full public agent profile.', languages: ['Bangla', 'English'], experienceYears: 8, status: 'active', featured: true, displayOrder: 0 })
+    });
+    const { body: agentPayload } = await responseJson(createdAgent);
+    assert.equal(createdAgent.status, 201);
+    const publicAgent = await fetch(`${base}/api/v1/site/agents/${agentPayload.agent.id}`);
     assert.equal(publicAgent.status, 200);
-    assert.equal((await publicAgent.json()).agent.data.company, 'Sadik Agency');
+    assert.equal((await publicAgent.json()).agent.fullName, 'Sadik Travels Agent');
 
-    const archive = await fetch(`${base}/api/v1/admin/content/${created.item.id}/archive`, { method: 'POST', headers: { cookie: cookies, 'x-csrf-token': csrf } });
-    assert.equal(archive.status, 200);
-    assert.equal((await fetch(`${base}/api/v1/agents/verified-agent`)).status, 404);
+    const otpRequest = await fetch(`${base}/api/v1/auth/request-otp`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identity: '01700000000' })
+    });
+    const { body: otp } = await responseJson(otpRequest);
+    assert.equal(otpRequest.status, 202);
+    const verify = await fetch(`${base}/api/v1/auth/verify-otp`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeId: otp.challengeId, code: otp.devCode })
+    });
+    const { body: customerLogin } = await responseJson(verify);
+    assert.equal(verify.status, 200);
 
-    const restore = await fetch(`${base}/api/v1/admin/content/${created.item.id}/restore`, { method: 'POST', headers: { cookie: cookies, 'x-csrf-token': csrf } });
-    assert.equal(restore.status, 200);
-    const publish = await fetch(`${base}/api/v1/admin/content/${created.item.id}/publish`, { method: 'POST', headers: { cookie: cookies, 'x-csrf-token': csrf } });
-    assert.equal(publish.status, 200);
+    const customerCookie = cookies(verify);
+    const bookingRequest = await fetch(`${base}/api/v1/bookings`, {
+      method: 'POST', headers: { cookie: customerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ vertical: 'tour', payload: { tourId: tourPayload.tour.id, travellers: 2, travelDate: '2026-12-01' } })
+    });
+    const { body: bookingPayload } = await responseJson(bookingRequest);
+    assert.equal(bookingRequest.status, 201);
+    const acceptBooking = await fetch(`${base}/api/v1/admin/bookings/${bookingPayload.booking.id}`, {
+      method: 'PATCH', headers: { cookie: adminCookie, 'content-type': 'application/json' }, body: JSON.stringify({ status: 'accepted' })
+    });
+    assert.equal(acceptBooking.status, 200);
+    const paymentStart = await fetch(`${base}/api/v1/payments/intents`, {
+      method: 'POST', headers: { cookie: customerCookie, 'content-type': 'application/json' },
+      // This amount must be ignored: only the persisted tour price × travellers is trusted.
+      body: JSON.stringify({ bookingId: bookingPayload.booking.id, amount: 1, currency: 'USD' })
+    });
+    const paymentError = await paymentStart.json();
+    assert.equal(paymentStart.status, 503);
+    assert.equal(paymentError.error.code, 'SSLCOMMERZ_NOT_CONFIGURED');
+    const paymentRecords = await store.listAdminPayments({ q: bookingPayload.booking.id });
+    assert.equal(paymentRecords.payments[0].amount, 250000);
+    assert.equal(paymentRecords.payments[0].currency, 'BDT');
 
-    const template = await fetch(`${base}/api/v1/admin/message-templates`, { method: 'POST', headers: { cookie: cookies, 'x-csrf-token': csrf, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Booking Update', subject: 'Booking Update', body: 'Hello {{name}}, your booking changed.', status: 'active' }) });
-    const templateBody = await template.json();
-    assert.equal(template.status, 201);
-    const campaign = await fetch(`${base}/api/v1/admin/messages/send`, { method: 'POST', headers: { cookie: cookies, 'x-csrf-token': csrf, 'content-type': 'application/json' }, body: JSON.stringify({ templateId: templateBody.template.id, userIds: [login.user.id], allUsers: false, channels: ['in_app'] }) });
-    assert.equal(campaign.status, 201);
-    const notifications = await fetch(`${base}/api/v1/notifications`, { headers: { cookie: cookies } });
-    const notificationBody = await notifications.json();
-    assert.equal(notificationBody.unread, 1);
-    assert.match(notificationBody.notifications[0].message, /Customer/);
+    const notification = await fetch(`${base}/api/v1/admin/notifications`, {
+      method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: customerLogin.user.id, title: 'Booking Update', message: 'Your booking has been updated successfully.', channels: ['in_app'] })
+    });
+    assert.equal(notification.status, 201);
+    const customerNotifications = await fetch(`${base}/api/v1/notifications`, { headers: { cookie: customerCookie } });
+    const notificationsPayload = await customerNotifications.json();
+    assert.equal(customerNotifications.status, 200);
+    assert.equal(notificationsPayload.unread, 1);
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));
+    store.close();
+    await fs.rm(sqlitePath, { force: true });
   }
 });

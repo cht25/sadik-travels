@@ -31,6 +31,9 @@ export async function hashOtp(code: string): Promise<string> {
   return `${salt.toString('hex')}:${derived.toString('hex')}`;
 }
 
+export async function hashPassword(password: string): Promise<string> { const salt = randomBytes(16); const derived = await scrypt(password, salt, 64) as Buffer; return `pwd:v1:${salt.toString('hex')}:${derived.toString('hex')}`; }
+export async function verifyPassword(password: string, encoded: string): Promise<boolean> { const [, version, saltHex, hashHex] = encoded.split(':'); if (version !== 'v1' || !saltHex || !hashHex) return false; const derived = await scrypt(password, Buffer.from(saltHex, 'hex'), 64) as Buffer; const expected = Buffer.from(hashHex, 'hex'); return expected.length === derived.length && timingSafeEqual(expected, derived); }
+
 export async function verifyOtpHash(code: string, encoded: string): Promise<boolean> {
   const [saltHex, hashHex] = encoded.split(':');
   if (!saltHex || !hashHex) return false;

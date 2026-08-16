@@ -1,101 +1,157 @@
 # Sadik Travels
 
-Sadik Travels is a full-stack, database-backed travel website and CMS. The public site reads only published content; the protected admin panel manages the catalogue, homepage, banners, campaigns, agents, navigation, customer accounts, messaging templates, and delivery history.
+Single-project Node.js travel platform for Sadik Travels. The frontend, Express backend, SQLite database layer, admin console, authentication, Go Get Tour catalogue, and notifications run from one folder.
 
-> The repository intentionally ships with **no fabricated packages, offers, images, or travel inventory**. Create real content in the CMS after deployment.
+## Run on Windows 11 or locally
 
-## What is included
-
-- Responsive public SPA with catalogue listings, details pages, travel-agent directory/profile pages, contact form, OTP sign-in, notifications, loading/error/empty states, and mobile drawer navigation.
-- Full admin CMS at `/admin` for Umrah, holidays, special fares, campaigns, travel agents, visa/eSIM/medical services, card/airline offers, Go Get Tour, flights, hotels, homes, explore, homepage, banners, promotions, contact, settings, and navigation.
-- CMS lifecycle actions: create, edit, publish, unpublish, archive, restore, order, and (super-admin) permanent delete.
-- Travel-agent fields via the **Additional details** JSON field: `company`, `phone`, `email`, `address`, and any other display-safe detail. Public cards lead to the matching agent profile.
-- Persistent media uploads using Cloudinary; no uploaded image is written to the application filesystem.
-- Passwordless OTP authentication, server-side role allowlist, HttpOnly sessions, token rotation, CSRF protection for cookie writes, rate limits, audit records, security headers, input validation, and signed payment webhooks.
-- Customer search/filter/select/bulk status management, reusable message templates, live SMS/email/in-app campaign delivery, and stored delivery status.
-
-## Local development
-
-Requirements: Node 20+; for the default development profile, MongoDB and Redis. Docker is optional.
-
-```bash
-cp .env.example .env
-npm ci
+```powershell
+npm install
+Copy-Item .env.example .env
 npm run dev
 ```
 
-The application is served at `http://localhost:8787` and the CMS is at `http://localhost:8787/admin`.
+Open:
 
-For an **ephemeral local UI/API smoke session only**, you may set:
+```text
+http://localhost:8787
+http://localhost:8787/admin
+```
 
-```dotenv
-DATA_MODE=memory
+SQLite is the only database layer. Configure:
+
+```env
+SQLITE_PATH=./data/sadik.sqlite
+ADMIN_IDENTITIES=
 DEV_OTP_ECHO=true
-ADMIN_IDENTITIES=017XXXXXXXXX
 ```
 
-Memory mode is explicitly blocked in production. It is never a persistence option.
+`DEV_OTP_ECHO=true` is only for local development when a real SMS provider is not configured. Use `false` in production.
 
-### First administrator
+For deployments without an interactive console, set `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` in the deployment secret store before the first start. The application creates the super admin against the configured SQLite database, stores only a password hash, and does not overwrite an existing password automatically. Remove those two bootstrap variables after the first successful deployment. Never put the password in source code or a start command.
 
-Set `ADMIN_IDENTITIES` to the actual mobile number or email of each administrator before they sign in. Numbers can be written as `017XXXXXXXXX` or `+8801XXXXXXXXX`; identities are normalized on the server. Sign in at `/admin` with the one-time code. There are no seeded accounts or hard-coded credentials.
+## Project structure
 
-## CMS content model
-
-All content sections share a validated record with title, slug, image, short/full copy, location, tags, price/currency, CTA, active dates, featured flag, display order, status, and an `Additional details` JSON object. This keeps ordinary content data editable without source changes while retaining one authorization and lifecycle implementation.
-
-Useful examples for the `Additional details` field:
-
-```json
-// Travel agent
-{ "company": "Sadik Agency", "phone": "+8801…", "email": "agent@example.com", "address": "Dhaka" }
-
-// Navigation
-{ "label": "Umrah", "path": "/umrah", "visible": true }
-
-// Homepage/banner
-{ "eyebrow": "Travel with confidence" }
+```text
+/
+├── index.html              # Sadik Travels storefront
+├── styles.css
+├── app.js
+├── api.js                  # Shared browser API client
+├── admin.html              # Admin console
+├── admin.css
+├── admin.js
+├── src/                    # Node.js + TypeScript backend
+│   ├── app.ts
+│   ├── index.ts
+│   ├── admin-bootstrap.ts  # Optional first-run admin bootstrap
+│   ├── store.ts            # SQLite database and repository methods
+│   ├── providers.ts        # Travel, payment, SMS and email providers
+│   ├── media.ts            # Cloudinary upload/delete/transform service
+│   ├── security.ts
+│   ├── middleware.ts
+│   └── rate-limit.ts
+├── package.json
+├── .env.example
+└── render.yaml
 ```
 
-When at least one published Navigation item exists, it controls the public menu. Otherwise the application shows its built-in, functional route menu so a new site cannot become unreachable.
+## Data
 
-## Required production configuration
+SQLite creates its tables automatically on startup. There are no demo tour rows or fake provider results. Create all Go Get Tour packages through `/admin`.
 
-Copy `.env.example` and provide every required live credential. `validateConfig()` refuses production startup unless all of these are configured safely:
+For Render, use a persistent disk and set:
 
-- TLS MongoDB (`MONGODB_URI`) and managed Redis (`REDIS_URL`)
-- a unique 32+ character `JWT_SECRET`, HTTPS `APP_ORIGIN`, explicit `CORS_ORIGINS`, secure cookies, and `TRUST_PROXY=true` behind Render
+```env
+SQLITE_PATH=/var/data/sadik.sqlite
+```
+
+Without a persistent disk, SQLite data is lost whenever the Render service is redeployed or restarted.
+
+## Render deployment
+
+This project includes `render.yaml`.
+
+Recommended Render settings:
+
+```text
+Build command: npm ci --include=dev && npm run build
+Start command: npm start
+Health check: /healthz
+```
+
+Set the required environment variables in Render, including:
+
+- `SQLITE_PATH=/var/data/sadik.sqlite`
+- `APP_ORIGIN` and `CORS_ORIGINS` (plain HTTPS origins)
+- `JWT_SECRET`
+- `SETTINGS_MASTER_KEY`
+- `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` for first-run bootstrap, then remove them
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
 - `ADMIN_IDENTITIES`
-- Cloudinary (`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`)
-- BulkSMSBD and SMTP credentials for real OTP/email delivery
-- a real travel provider and payment provider, including `PAYMENT_WEBHOOK_SECRET`
+- `SMS_PROVIDER`
+- `SMS_GATEWAY_URL`
+- `SMS_GATEWAY_USERNAME`
+- `SMS_GATEWAY_PASSWORD`
+- `BULKSMSBD_API_KEY` (fallback)
+- `BULKSMSBD_SENDER_ID` (fallback)
+- SMTP settings
+- Live travel provider credentials
+- Live payment provider credentials
 
-`DEV_OTP_ECHO` must remain `false` in production. No provider, payment gateway, or SMS/email response is faked when credentials are absent: the API returns a clear configuration/provider error instead.
+The Render service serves both frontend and backend from the same origin, so no CORS or separate frontend server is required.
 
-### Deploy on Render
+## Admin integrations and notifications
 
-`render.yaml` describes a web service. Add a managed MongoDB-compatible database and Redis, set the `sync: false` environment values in the Render dashboard, then deploy. Set `APP_ORIGIN` and `CORS_ORIGINS` to the final HTTPS public URL. The service listens on Render's injected `PORT`; it binds to `0.0.0.0`.
+The admin console contains a secure integrations workspace for SSLCommerz, bKash, BulkSMSBD, SMTP email, live travel providers, brand contact fields, role management, product visibility toggles for Flights, Hotels, Homes, Visa, Tours and eSIM, provider test actions, a real booking assignment/lifecycle queue, support-ticket management, dashboard metrics from SQLite, and a persisted content studio for destinations, hotels, homes, visa, eSIM, offers, banners, airlines, FAQs and company blocks, plus a Cloudinary media library, database-driven admin navigation, travel agent directory, campaigns, templates, customer segments, and an SQLite-backed background campaign worker. Secret values are encrypted with `SETTINGS_MASTER_KEY` and displayed masked after saving.
 
-### Docker
+Admin users can also send website notifications, SMS, and email from `/admin`. Signed-in users see website notifications under the notification bell.
 
-```bash
-cp .env.example .env
-# populate .env with non-development credentials before using production mode
-docker compose up --build
+SMS can use a configured form-data custom gateway or BulkSMSBD fallback. Email uses SMTP. If a provider is not configured, the UI reports an explicit unavailable state rather than simulating delivery. The temporary credentials previously shared during setup should be rotated and are not stored in this project.
+
+## Admin application routes
+
+The admin console is a single authenticated application with logical history routes, not one long static form. It includes:
+
+```text
+/admin
+/admin/bookings
+/admin/bookings/:id
+/admin/services
+/admin/flights
+/admin/hotels
+/admin/homes
+/admin/visa
+/admin/tours
+/admin/esim
+/admin/content
+/admin/media
+/admin/customers
+/admin/customers/:id
+/admin/payments
+/admin/notifications
+/admin/support
+/admin/support/:id
+/admin/settings
+/admin/users
+/admin/audit-logs
 ```
 
-The Docker compose Mongo/Redis volumes are for local operations only. Use managed backups, TLS, monitoring, secret rotation, and a managed object store in production.
+Service visibility is stored in SQLite-backed settings with `active`, `hidden`, `maintenance`, and `archived` states. Hiding or archiving a service updates customer-facing visibility but never deletes booking or catalogue records. Admin API permissions are enforced server-side for finance, support, content, service visibility, settings, user management, and audit operations.
 
-## Scripts
+## Persistent media
 
-```bash
+Permanent admin image uploads use Cloudinary through the centralized `src/media.ts` service. The service validates image magic bytes, accepts JPEG/PNG/WEBP only, enforces the configured size limit, stores metadata in the `media_assets` table, and uses organized folders under `sadik-travels/`. Existing local `uploads/` files are not used for production media. Cloudinary API secrets are server-only.
+
+## Payment quote safety
+
+The payment intent endpoint never accepts a browser-supplied amount. For Go Get Tour it calculates the amount from the persisted published package price and traveller count after an operator accepts the request. For live supplier bookings it only uses a supplier response containing a verified amount/currency. A booking without a verified quote cannot start payment.
+
+## Checks
+
+```powershell
 npm run typecheck
 npm run build
-npm run db:indexes  # after build, against the configured MongoDB
-npm start
-npm run dev
+npm audit
 ```
-
-## Important supplier integration note
-
-`src/providers.ts` is a deliberately narrow boundary for real supplier contracts. It uses the generic endpoints documented in `API.md`. If your flight/hotel/payment supplier uses a different payload or signature contract, update only that adapter, validate its sandbox flows, and keep user-facing payloads/provider secrets out of the browser.
