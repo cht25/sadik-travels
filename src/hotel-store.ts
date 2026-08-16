@@ -108,7 +108,7 @@ const BookingModel = makeModel('SadikHotelBooking', 'hotel_bookings', {
   paymentMethod: String, paymentStatus: { type: String, index: true }, status: { type: String, index: true },
   cancellationPolicy: cancellationSchema(), cancelledAt: String, refund: mixed, hotelSnapshot: mixed,
   createdBy: String, createdAt: String, updatedAt: String
-}, [[{ userId: 1, createdAt: -1 }], [{ status: 1, updatedAt: -1 }], [{ checkIn: 1 }]]);
+}, [[{ userId: 1, createdAt: -1 }], [{ status: 1, updatedAt: -1 }]]);
 
 const MODELS = [HotelModel, RoomModel, InventoryModel, BookingModel];
 const now = () => new Date().toISOString();
