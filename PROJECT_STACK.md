@@ -19,7 +19,7 @@ No runtime business data relies on SQLite, local files, or a Render persistent d
 
 ## MongoDB entity model
 
-The Mongo repository stores typed entities with stable UUIDs in `sadik_entities`. Data is indexed by entity kind, ID, status, user ownership, update time, and slug. Domain types include users, OTP challenges, sessions, bookings, booking events, tours, payments, tickets, ticket messages, notifications, settings, content, media metadata, admin navigation, travel agents, campaign templates, segments, campaigns, recipients, notes, and audit logs.
+The Mongo repository stores stable UUID-based records in dedicated Mongoose collections. Schemas and indexes cover IDs, lifecycle status, ownership, update time, and slugs. Domain types include users, OTP challenges, sessions, bookings, booking events, tours, payments, tickets, ticket messages, notifications, settings, content, media metadata, admin navigation, travel agents, campaign templates, segments, campaigns, recipients, notes, and audit logs.
 
 This preserves the existing API contract while removing all SQLite-specific SQL, filesystem initialization, and disk persistence assumptions.
 
@@ -30,3 +30,7 @@ Cloudinary is accessed only by the backend. Uploads are validated from file byte
 ## Testing
 
 `TEST_MONGODB_URI` runs the integration suite against a dedicated disposable MongoDB database. Do not point it to a production database.
+
+## Legacy import
+
+`src/migrate-sqlite-to-mongo.ts` is a one-time, opt-in importer for a previous SQLite deployment. It is never loaded by the Render service. It reads a supplied legacy file, maps the application tables to the Mongoose collections, and uses idempotent MongoDB upserts.

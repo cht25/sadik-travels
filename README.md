@@ -65,9 +65,22 @@ Set a managed MongoDB connection string:
 MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster.example.mongodb.net/sadik_travels?retryWrites=true&w=majority
 ```
 
-All application entities—users, sessions, OTP challenges, tours, bookings, payments, content, media metadata, agents, settings, navigation, campaigns, recipients, support, and audit logs—are persisted in MongoDB's `sadik_entities` collection. Compound and query indexes are created for typed records, IDs, status, user ownership, and slugs.
+All application entities—users, sessions, OTP challenges, tours, bookings, payments, content, media metadata, agents, settings, navigation, campaigns, recipients, support, and audit logs—are persisted in dedicated Mongoose collections (users, bookings, tours, content, agents, media, campaigns and supporting records). Schemas enforce field types, enums, unique IDs/slugs, lifecycle status, and query indexes.
 
 The server refuses to start without `MONGODB_URI`; production also rejects localhost MongoDB URLs.
+
+### One-time legacy SQLite import
+
+If an earlier deployment contains real SQLite data, import it once before retiring the old database. This utility is not part of the web-service runtime and does not make SQLite a production dependency:
+
+```bash
+npm install --no-save better-sqlite3
+MONGODB_URI='mongodb+srv://…/sadik_travels_staging' \
+LEGACY_SQLITE_PATH=/absolute/path/to/sadik.sqlite \
+npx tsx src/migrate-sqlite-to-mongo.ts
+```
+
+The migration imports users, sessions, OTPs, bookings/events, tours, payments, support, notifications, settings, content, media metadata, navigation, agents, campaigns, recipients, templates, segments, notes, and audit logs. Run it against a staging Atlas database first, compare counts, back up both databases, then point Render at the verified MongoDB URI.
 
 ## Cloudinary
 
