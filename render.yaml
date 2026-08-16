@@ -1,0 +1,66 @@
+services:
+  - type: web
+    name: sadik-travels
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 8787
+      - key: SERVE_STATIC
+        value: "true"
+      - key: TRUST_PROXY
+        value: "true"
+      - key: DATA_MODE
+        value: mongodb
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAMESITE
+        value: lax
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MONGODB_URI
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: APP_ORIGIN
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: ADMIN_IDENTITIES
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: TRAVEL_PROVIDER_BASE_URL
+        sync: false
+      - key: TRAVEL_PROVIDER_API_KEY
+        sync: false
+      - key: PAYMENT_PROVIDER_BASE_URL
+        sync: false
+      - key: PAYMENT_PROVIDER_API_KEY
+        sync: false
+      - key: PAYMENT_WEBHOOK_SECRET
+        sync: false
+      - key: BULKSMSBD_API_KEY
+        sync: false
+      - key: BULKSMSBD_SENDER_ID
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
