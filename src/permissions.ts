@@ -22,6 +22,12 @@ export const FINE_TO_COARSE: Record<string, CoarsePerm[]> = {
   'media.view': ['content:manage'], 'media.upload': ['content:manage'], 'media.delete': ['content:manage'],
   'offer.view': ['content:manage'], 'offer.create': ['content:manage'], 'offer.update': ['content:manage'], 'offer.delete': ['content:manage'],
   'service.manage': ['services:manage'],
+  'catalog.view': ['content:manage'], 'catalog.create': ['content:manage'], 'catalog.update': ['content:manage'], 'catalog.delete': ['content:manage'],
+  'order.view': ['bookings:view'], 'order.update': ['bookings:manage'], 'order.cancel': ['bookings:manage'], 'order.refund': ['payments:manage'],
+  'invoice.view': ['payments:view'],
+  'coupon.view': ['content:manage'], 'coupon.create': ['content:manage'], 'coupon.update': ['content:manage'], 'coupon.delete': ['content:manage'],
+  'review.view': ['content:manage'], 'review.moderate': ['content:manage'], 'review.delete': ['content:manage'],
+  'visa.view': ['bookings:view'], 'visa.update': ['bookings:manage'],
   'payment.view': ['payments:view'], 'payment.manage': ['payments:manage'],
   'customer.view': ['customers:view'],
   'user.manage': ['users:manage'],
@@ -65,6 +71,29 @@ export const PERMISSION_CATALOG: PermissionGroup[] = [
     { key: 'tour.create', label: 'Add tours', description: 'Create tour packages' },
     { key: 'tour.update', label: 'Edit tours', description: 'Update tour packages' },
     { key: 'tour.delete', label: 'Delete tours', description: 'Archive tours' } ] },
+  { group: 'Catalogue (eSIM, Umrah, Holiday, Medical, Visa, Homes, Offers, Destinations)', permissions: [
+    { key: 'catalog.view', label: 'View catalogue', description: 'Browse every catalogue product' },
+    { key: 'catalog.create', label: 'Create catalogue products', description: 'Add packages, eSIMs, visa services, offers and destinations' },
+    { key: 'catalog.update', label: 'Edit catalogue products', description: 'Update catalogue content, pricing and availability' },
+    { key: 'catalog.delete', label: 'Delete catalogue products', description: 'Archive or permanently remove catalogue products' } ] },
+  { group: 'Orders & E-commerce', permissions: [
+    { key: 'order.view', label: 'View orders', description: 'Browse orders and bookings' },
+    { key: 'order.update', label: 'Edit orders', description: 'Change order and payment status' },
+    { key: 'order.cancel', label: 'Cancel orders', description: 'Cancel customer orders' },
+    { key: 'order.refund', label: 'Refund orders', description: 'Mark orders as refunded' },
+    { key: 'invoice.view', label: 'View invoices', description: 'Open customer invoices' } ] },
+  { group: 'Coupons & Promotions', permissions: [
+    { key: 'coupon.view', label: 'View coupons', description: 'Browse discount coupons' },
+    { key: 'coupon.create', label: 'Create coupons', description: 'Create discount coupons' },
+    { key: 'coupon.update', label: 'Edit coupons', description: 'Update coupon rules and limits' },
+    { key: 'coupon.delete', label: 'Delete coupons', description: 'Remove coupons' } ] },
+  { group: 'Reviews & Ratings', permissions: [
+    { key: 'review.view', label: 'View reviews', description: 'Browse customer reviews' },
+    { key: 'review.moderate', label: 'Moderate reviews', description: 'Approve, reject and reply to reviews' },
+    { key: 'review.delete', label: 'Delete reviews', description: 'Remove reviews' } ] },
+  { group: 'Visa Applications', permissions: [
+    { key: 'visa.view', label: 'View visa applications', description: 'Browse submitted visa applications' },
+    { key: 'visa.update', label: 'Process visa applications', description: 'Change application status and add notes' } ] },
   { group: 'Content & Offers', permissions: [
     { key: 'content.view', label: 'View content', description: 'Visa, Umrah, holiday and medical content' },
     { key: 'offer.view', label: 'View offers', description: 'Browse card and airline offers' },
@@ -100,11 +129,11 @@ export const ALL_PERMISSIONS_INCL_SUPER = [...ALL_FINE_PERMISSIONS, ...SUPER_ONL
 const ROLE_DEFAULT_FINE: Record<string, string[]> = {
   super_admin: ALL_PERMISSIONS_INCL_SUPER,
   admin: ALL_FINE_PERMISSIONS,
-  manager: ['dashboard.view', 'reports.view', 'booking.view', 'booking.create', 'booking.update', 'booking.cancel', 'customer.view', 'support.view', 'support.reply', 'notifications.send'],
-  support: ['dashboard.view', 'booking.view', 'customer.view', 'support.view', 'support.reply', 'notifications.send'],
-  content_manager: ['dashboard.view', 'reports.view', 'hotel.view', 'hotel.create', 'hotel.update', 'hotel.delete', 'room.view', 'room.create', 'room.update', 'room.delete', 'agent.view', 'agent.create', 'agent.update', 'agent.delete', 'tour.view', 'tour.create', 'tour.update', 'tour.delete', 'content.view', 'offer.view', 'offer.create', 'offer.update', 'offer.delete', 'media.view', 'media.upload', 'media.delete', 'service.manage'],
-  finance: ['dashboard.view', 'reports.view', 'booking.view', 'payment.view', 'payment.manage', 'customer.view'],
-  staff: ['dashboard.view', 'booking.view', 'customer.view', 'support.view'],
+  manager: ['catalog.view', 'order.view', 'order.update', 'order.cancel', 'coupon.view', 'review.view', 'review.moderate', 'visa.view', 'visa.update', 'invoice.view', 'dashboard.view', 'reports.view', 'booking.view', 'booking.create', 'booking.update', 'booking.cancel', 'customer.view', 'support.view', 'support.reply', 'notifications.send'],
+  support: ['catalog.view', 'order.view', 'visa.view', 'review.view', 'dashboard.view', 'booking.view', 'customer.view', 'support.view', 'support.reply', 'notifications.send'],
+  content_manager: ['catalog.view', 'catalog.create', 'catalog.update', 'catalog.delete', 'coupon.view', 'coupon.create', 'coupon.update', 'review.view', 'review.moderate', 'dashboard.view', 'reports.view', 'hotel.view', 'hotel.create', 'hotel.update', 'hotel.delete', 'room.view', 'room.create', 'room.update', 'room.delete', 'agent.view', 'agent.create', 'agent.update', 'agent.delete', 'tour.view', 'tour.create', 'tour.update', 'tour.delete', 'content.view', 'offer.view', 'offer.create', 'offer.update', 'offer.delete', 'media.view', 'media.upload', 'media.delete', 'service.manage'],
+  finance: ['order.view', 'order.refund', 'invoice.view', 'catalog.view', 'dashboard.view', 'reports.view', 'booking.view', 'payment.view', 'payment.manage', 'customer.view'],
+  staff: ['catalog.view', 'order.view', 'dashboard.view', 'booking.view', 'customer.view', 'support.view'],
   customer: []
 };
 

@@ -75,33 +75,18 @@
 @media(prefers-reduced-motion:reduce){.chat-bubble{animation:none}}
 /* Sadik-style desktop rail and top search bar. */
 .global-search{position:relative;display:flex;align-items:center;width:245px;height:36px;margin-left:10px;border:1px solid var(--border);border-radius:6px;background:#fff;overflow:visible}.global-search input{width:100%;height:100%;border:0;outline:0;padding:7px 40px 7px 12px;color:var(--ink);font-size:.78rem}.global-search button{position:absolute;right:3px;top:3px;width:30px;height:30px;border:0;border-radius:5px;background:var(--brand);color:#fff;display:grid;place-items:center}.global-search button svg{font-size:.95rem}.global-search-suggestions{display:none;position:absolute;z-index:50;left:0;right:0;top:calc(100% + 6px);background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow-3);overflow:hidden}.global-search-suggestions.open{display:block}.global-search-suggestions button{position:static;width:100%;height:auto;background:#fff;color:var(--ink);border:0;border-bottom:1px solid var(--border);border-radius:0;display:block;text-align:left;padding:9px 11px;font-size:.75rem}.global-search-suggestions button:hover{background:var(--brand-soft);color:var(--brand)}.nav-app{border:0;background:transparent;color:var(--ink);display:inline-flex;align-items:center;gap:5px;padding:8px 4px;white-space:nowrap}.nav-app svg{color:var(--brand);font-size:1.08rem}.side-action{font-size:.83rem}
-@media(min-width:1024px){
-  .travel-sidebar{top:64px;transform:translateX(0);width:218px;padding:13px 10px;box-shadow:none;border-right:1px solid var(--border);visibility:visible;z-index:900}
-  .travel-sidebar .sidebar-head,.travel-sidebar .sidebar-account{display:none}
-  .travel-sidebar .sidebar-section-label{padding-top:13px}
-  main{padding-left:218px}
-  .chat-bubble{right:20px}
-}
+@media(min-width:1024px){.chat-bubble{right:20px}}
 @media(max-width:1050px) and (min-width:768px){.global-search{width:190px}.nav-app span{display:none}}
 @media(max-width:767px){.global-search{display:none}.nav-app{display:none!important}}
 .global-search-suggestions button strong{display:block;font-size:.76rem}.global-search-suggestions button small{display:block;color:var(--muted);font-size:.67rem;margin-top:2px}
-@media(min-width:1024px){.site-footer{margin-left:218px}}
+
 
 /* Interaction and accessibility hardening */
 :focus-visible{outline:3px solid rgba(0,79,220,.35);outline-offset:2px}
 body.sidebar-open{overflow:hidden}
 .store-badge{border:0;cursor:pointer;background:transparent;padding:0}
 .result-unavailable{color:#8b5b0a;background:#fff6dc;border-radius:6px;padding:6px 8px;font-size:.68rem;white-space:nowrap}
-@media(min-width:1024px){
-  .travel-sidebar.desktop-collapsed{transform:translateX(-105%);visibility:hidden}
-  body.desktop-sidebar-collapsed main{padding-left:0}
-  body.desktop-sidebar-collapsed .site-footer{margin-left:0}
-  body.desktop-sidebar-collapsed .nav-menu-toggle{background:var(--brand-soft);color:var(--brand)}
-}
-@media(max-width:1023px){
-  .travel-sidebar{visibility:visible}
-  .travel-sidebar[aria-hidden="true"]{pointer-events:none}
-}
+@media(min-width:1024px){body.desktop-sidebar-collapsed .nav-menu-toggle{background:var(--brand-soft);color:var(--brand)}}
 @media(prefers-reduced-motion:reduce){.slider-track,.card-track{transition:none!important}}
 
 /* Mobile service selector: one horizontally scrollable row, never a clipped multi-item strip. */
@@ -150,9 +135,7 @@ body.sidebar-open{overflow:hidden}
 .side-link.is-active .side-arrow{color:var(--brand)}
 .sidebar-footer{margin-top:10px;padding:10px 12px 0}
 /* Anchor offset so the fixed header never covers a section heading on scroll. */
-main [id]{scroll-margin-top:84px}
-@media(min-width:1024px){main [id]{scroll-margin-top:78px}}
-@media(max-width:767px){main [id]{scroll-margin-top:74px}}
+.page-content [id]{scroll-margin-top:88px}
 
 /* Generic home content sections built from the content API. */
 .hs-section{padding:0 0 18px}
@@ -278,17 +261,7 @@ main [id]{scroll-margin-top:84px}
 .id-card.skeleton .id-card-stats{border-color:transparent}
 @keyframes skeletonShimmer{0%{background-position:100% 50%}100%{background-position:0 50%}}
 .travel-sidebar{max-height:100dvh;overflow-y:auto;overflow-x:clip;scrollbar-width:none;-ms-overflow-style:none}.travel-sidebar::-webkit-scrollbar{display:none;width:0;height:0}
-@media(min-width:1024px){
-  .travel-sidebar{top:64px;bottom:0;height:calc(100dvh - 64px);max-height:calc(100dvh - 64px);width:var(--public-sidebar-width)}
-  main,.public-route-root{margin-left:var(--public-sidebar-width);padding-left:0;width:calc(100% - var(--public-sidebar-width));max-width:none}
-  .site-footer{margin-left:var(--public-sidebar-width);width:calc(100% - var(--public-sidebar-width))}
-  body.desktop-sidebar-collapsed main,body.desktop-sidebar-collapsed .public-route-root{margin-left:0;width:100%}
-  body.desktop-sidebar-collapsed .site-footer{margin-left:0;width:100%}
-}
-@media(max-width:1023px){
-  .travel-sidebar{max-height:100dvh;height:100dvh}
-  main,.public-route-root{width:100%;margin-left:0}
-}
+/* Sidebar/main offsets are handled by the application shell layout at the end of this file. */
 
 /* ============================================================
    HOTEL BOOKING ECOSYSTEM — public UI
@@ -552,3 +525,100 @@ main [id]{scroll-margin-top:84px}
   .booking-row-media{width:64px;height:64px}
   .booking-row-side{grid-column:1/-1;text-align:left;display:flex;justify-content:space-between;align-items:center}
 }
+
+/* ============================================================
+   APPLICATION SHELL — authoritative layout
+   Sidebar | (Header / Page content / Footer)
+   Nothing below may be overridden by earlier offsets: the shell
+   uses flow layout, so page content can never sit under the
+   header or the sidebar on any viewport.
+   ============================================================ */
+:root{
+  --shell-sidebar-w:244px;
+  --shell-header-h:64px;
+  --shell-gutter:clamp(14px,2.2vw,28px);
+  --shell-max:1440px;
+}
+html,body{overflow-x:clip;max-width:100%}
+.app-shell{display:flex;align-items:stretch;min-height:100vh;min-height:100dvh;width:100%;background:#f6f8fc}
+.app-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;background:#fff}
+.page-content{flex:1 1 auto;min-width:0;width:100%;display:block}
+.page-content>main,.page-content>.public-route-root{width:100%;min-width:0;margin:0;padding-left:0;max-width:none}
+
+/* Header: sticky inside the main column — never covers content. */
+.site-header{position:sticky;top:0;left:auto;right:auto;inset:auto;z-index:120;height:var(--shell-header-h);width:100%;background:#fff;border-bottom:1px solid var(--border);box-shadow:0 1px 0 rgba(16,36,80,.04);transition:box-shadow .2s ease}
+.site-header.scrolled{box-shadow:0 6px 22px rgba(15,27,45,.08)}
+.navbar{height:var(--shell-header-h)}
+.nav-inner{max-width:none;width:100%;padding-left:var(--shell-gutter);padding-right:var(--shell-gutter);gap:14px}
+
+/* Sidebar: a real column on desktop, an animated drawer below 1024px. */
+.travel-sidebar{position:sticky;top:0;left:auto;bottom:auto;align-self:flex-start;flex:0 0 var(--shell-sidebar-w);width:var(--shell-sidebar-w);height:100vh;height:100dvh;max-height:100dvh;transform:none;visibility:visible;z-index:130;display:flex;flex-direction:column;background:#fff;border-right:1px solid var(--border);box-shadow:none;padding:0;overflow:hidden}
+.travel-sidebar .sidebar-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;height:var(--shell-header-h);padding:0 14px;border-bottom:1px solid var(--border);margin:0}
+.travel-sidebar .sidebar-brand img{width:auto;height:38px}
+.travel-sidebar #sidebarClose{display:none}
+.sidebar-account{display:grid;margin:12px 12px 4px;padding:11px;border-radius:12px;background:var(--brand-soft);gap:9px;grid-template-columns:34px minmax(0,1fr) auto}
+.sidebar-account>div:nth-child(2){min-width:0}
+.sidebar-account strong{font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sidebar-account span{font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sidebar-nav{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:4px 10px 10px;scrollbar-width:thin}
+.sidebar-nav::-webkit-scrollbar{width:6px}
+.sidebar-nav::-webkit-scrollbar-thumb{background:#d8e0ec;border-radius:99px}
+.sidebar-section-label{font-size:.66rem;letter-spacing:.1em;font-weight:800;color:#8994a2;text-transform:uppercase;padding:14px 10px 5px}
+.sidebar-nav .side-link{display:flex;align-items:center;gap:11px;width:100%;min-height:44px;padding:9px 11px;margin:1px 0;border:0;border-radius:10px;background:transparent;color:var(--ink);font-size:.9rem;line-height:1.25;text-align:left;transition:background .18s ease,color .18s ease,transform .18s ease}
+.sidebar-nav .side-link:hover{background:var(--brand-soft);color:var(--brand);transform:translateX(2px)}
+.sidebar-nav .side-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sidebar-nav .side-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;font-size:1.18rem;color:var(--brand)}
+.sidebar-nav .side-arrow{flex:none;margin-left:0;color:#b6c0cd;font-size:1.1rem;line-height:1;transition:transform .18s ease,color .18s ease}
+.sidebar-nav .side-link:hover .side-arrow{color:var(--brand);transform:translateX(2px)}
+.sidebar-nav .side-link.is-active{background:var(--brand-soft);color:var(--brand);font-weight:600;box-shadow:inset 3px 0 0 var(--brand)}
+.sidebar-nav .side-link.is-active .side-arrow{color:var(--brand)}
+.side-badge{flex:none;min-width:20px;height:19px;padding:0 6px;border-radius:99px;background:var(--brand);color:#fff;font-size:.66rem;font-weight:800;display:inline-flex;align-items:center;justify-content:center}
+.side-badge[hidden]{display:none}
+.sidebar-footer{flex:0 0 auto;border-top:1px solid var(--border);margin:0;padding:11px 16px;display:flex;justify-content:space-between;color:var(--muted);font-size:.72rem;background:#fff}
+
+/* Page content resets: containers use the full available column width. */
+.public-route-root{min-height:auto;padding:26px 0 56px;background:#f6f8fc}
+.public-page{max-width:var(--shell-max);margin:0 auto;padding:0 var(--shell-gutter);width:100%}
+.container{max-width:1240px;padding-left:var(--shell-gutter);padding-right:var(--shell-gutter)}
+.site-footer{margin-left:0;width:100%}
+
+/* Header icon buttons (cart / wishlist). */
+.nav-icon-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--ink);transition:background .18s ease,color .18s ease,border-color .18s ease}
+.nav-icon-btn:hover{background:var(--brand-soft);color:var(--brand);border-color:rgba(0,48,160,.12)}
+.nav-icon-btn svg{font-size:1.2rem}
+.nav-count{position:absolute;top:1px;right:0;min-width:17px;height:17px;padding:0 4px;border-radius:99px;background:#e0393e;color:#fff;font-size:.62rem;font-weight:800;display:inline-flex;align-items:center;justify-content:center;border:2px solid #fff}
+.nav-count[hidden]{display:none}
+
+/* ---------- Tablet / mobile: sidebar becomes an overlay drawer ---------- */
+@media(max-width:1023.98px){
+  .app-shell{display:block}
+  .travel-sidebar{position:fixed;top:0;left:0;bottom:0;height:100dvh;max-height:100dvh;width:min(300px,86vw);flex:none;transform:translateX(-102%);transition:transform .28s cubic-bezier(.4,0,.2,1);box-shadow:22px 0 48px rgba(6,18,44,.18);z-index:1100;border-right:0}
+  .travel-sidebar.open{transform:translateX(0)}
+  .travel-sidebar[aria-hidden="true"]{pointer-events:none}
+  .travel-sidebar.open[aria-hidden="false"]{pointer-events:auto}
+  .travel-sidebar #sidebarClose{display:inline-flex}
+  .app-main{min-height:100dvh}
+  body.sidebar-open{overflow:hidden}
+}
+@media(min-width:1024px){
+  .page-backdrop{display:none!important}
+  .travel-sidebar.desktop-collapsed{flex-basis:0;width:0;border-right:0;overflow:hidden;padding:0;visibility:hidden}
+}
+@media(max-width:1440px){:root{--shell-sidebar-w:236px}}
+@media(max-width:1180px){:root{--shell-sidebar-w:230px}}
+@media(max-width:767px){
+  :root{--shell-header-h:58px}
+  .public-route-root{padding:16px 0 44px}
+  .nav-inner{gap:8px}
+}
+
+/* Sticky booking bars belong to the main column, not the viewport. */
+.hotel-sticky-bar{left:0;right:0}
+@media(min-width:768px){.hotel-sticky-bar{left:0}}
+
+/* Nothing may exceed the column width. */
+.page-content img,.page-content video,.page-content table{max-width:100%}
+.page-content section,.page-content .container,.page-content .public-page{min-width:0}
+/* Header is in normal flow now: heroes must not add a fixed-header offset. */
+.page-content .hero{margin-top:0}
+@media(max-width:1023.98px){.page-content .hero{margin-top:0}}

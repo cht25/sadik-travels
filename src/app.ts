@@ -19,6 +19,8 @@ import { SECRET_MASK } from './secrets.js';
 import { MediaService, optimizedMediaUrl } from './media.js';
 import { createHotelStore } from './hotel-store.js';
 import { registerHotelRoutes } from './hotel-routes.js';
+import { createCommerceStore } from './commerce-store.js';
+import { registerCommerceRoutes } from './commerce-routes.js';
 
 const verticalSchema = z.enum(['flight', 'hotel', 'home', 'visa', 'esim', 'tour']);
 const tourStatusSchema = z.enum(['draft', 'published', 'archived']);
@@ -119,7 +121,11 @@ export function buildApp() {
   const payment = new PaymentProvider(store);
   const media = new MediaService();
   const hotelStore = createHotelStore();
-  connection.then(async () => { try { await hotelStore.ensureIndexes(); } catch { /* index creation is best-effort */ } });
+  const commerce = createCommerceStore();
+  connection.then(async () => {
+    try { await hotelStore.ensureIndexes(); } catch { /* index creation is best-effort */ }
+    try { await commerce.ensureIndexes(); } catch { /* index creation is best-effort */ }
+  });
   const mediaUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.mediaMaxUploadBytes, files: 10 }, fileFilter: (_req, file, callback) => { if (!['image/jpeg','image/png','image/webp'].includes(file.mimetype)) callback(new AppError(415, 'UNSUPPORTED_IMAGE_FORMAT', 'Unsupported image format')); else callback(null, true); } });
   const app = express();
   app.disable('x-powered-by');
@@ -205,6 +211,15 @@ export function buildApp() {
   });
   app.post('/api/v1/auth/logout', async (req, res, next) => { try { const token = req.cookies?.[REFRESH_COOKIE] as string | undefined; if (token) { try { const claims = await verifyToken(token, 'refresh'); await store.revokeSession(claims.sid); await store.audit('auth.logout', { ...clientMeta(req), userId: claims.sub }); } catch { /* Always clear local cookies. */ } } clearAuthCookies(res); res.status(204).send(); } catch (error) { next(error); } });
   app.get('/api/v1/auth/me', requireAuth(store), (req, res) => res.json({ user: userView(req.user) }));
+  // Customer profile (self service). Only safe, self-owned fields may change here.
+  app.get('/api/v1/account/profile', requireAuth(store), async (req, res) => res.json({ user: userView(req.user, true) }));
+  app.patch('/api/v1/account/profile', requireAuth(store), async (req, res) => {
+    const input = toInput(z.object({ fullName: z.string().trim().min(2).max(120).optional() }).strict(), req.body);
+    const user = await store.updateUserProfile(req.user!.id, input);
+    assert(user, 404, 'USER_NOT_FOUND', 'Account not found');
+    await store.audit('account.profile_updated', { ...clientMeta(req), userId: req.user!.id, metadata: { keys: Object.keys(input) } });
+    res.json({ user: userView(user, true) });
+  });
   app.get('/api/v1/account/preferences', requireAuth(store), async (req,res)=>{const user=await store.findUserById(req.user!.id);res.json({preferences:{marketingEmailOptIn:user?.marketingEmailOptIn!==false,marketingSmsOptIn:user?.marketingSmsOptIn!==false,marketingInAppOptIn:user?.marketingInAppOptIn!==false}});});
   app.patch('/api/v1/account/preferences', requireAuth(store), async (req,res)=>{const input=toInput(preferencesPatchRequest,req.body);const user=await store.updateUserProfile(req.user!.id,input);assert(user,404,'USER_NOT_FOUND','Account not found');await store.audit('account.preferences_updated',{...clientMeta(req),userId:req.user!.id,metadata:{keys:Object.keys(input)}});res.json({preferences:{marketingEmailOptIn:user.marketingEmailOptIn!==false,marketingSmsOptIn:user.marketingSmsOptIn!==false,marketingInAppOptIn:user.marketingInAppOptIn!==false}});});
   app.get('/api/v1/notifications', requireAuth(store), async (req, res) => { const notifications = await store.listNotifications(req.user!.id); res.json({ notifications, unread: notifications.filter(item => !item.readAt).length }); });
@@ -393,8 +408,22 @@ export function buildApp() {
   // Hotel booking ecosystem (search, rooms, inventory, booking engine, admin).
   registerHotelRoutes(app, { store, hotelStore, media, payment });
 
+  // Catalogue, cart, wishlist, coupons, orders, invoices, reviews and visa applications.
+  registerCommerceRoutes(app, { store, commerce, payment });
+
   if (!config.serveStatic) app.get('/', (_req, res) => res.json({ service: 'Sadik Travels backend', status: 'online', health: '/healthz', ready: '/readyz' }));
-  if (config.serveStatic) { app.get(/^\/admin(?:\/.*)?$/, (_req, res) => res.sendFile(path.join(config.publicDir, 'admin.html'))); app.use(express.static(config.publicDir, { index: 'index.html', maxAge: config.isProduction ? '1h' : 0 })); app.get(/^\/(?:search(?:\/.*)?|payment\/return|flights(?:\/.*)?|hotels(?:\/.*)?|homes(?:\/.*)?|umrah-packages(?:\/.*)?|holiday-packages(?:\/.*)?|tours(?:\/.*)?|visa(?:\/.*)?|esim(?:\/.*)?|medical-tourism(?:\/.*)?|card-offers(?:\/.*)?|airline-offers(?:\/.*)?|special-umrah-fare(?:\/.*)?|offers(?:\/.*)?|explore(?:\/.*)?|travel-agents(?:\/.*)?|sadik-app(?:\/.*)?|booking(?:\/.*)?|bookings(?:\/.*)?|account(?:\/.*)?)?$/, (_req, res) => res.sendFile(path.join(config.publicDir, 'index.html'))); }
+  if (config.serveStatic) {
+    app.get(/^\/admin(?:\/.*)?$/, (_req, res) => res.sendFile(path.join(config.publicDir, 'admin.html')));
+    app.use(express.static(config.publicDir, { index: 'index.html', maxAge: config.isProduction ? '1h' : 0 }));
+    // Single page application fallback: any non-API GET that is not a static asset
+    // renders the storefront shell, so deep links and refreshes always work.
+    app.get(/.*/, (req, res, next) => {
+      if (req.path.startsWith('/api/') || req.path.startsWith('/assets/')) return next();
+      if (/\.[a-z0-9]{2,5}$/i.test(req.path)) return next();
+      if (!req.accepts('html')) return next();
+      res.sendFile(path.join(config.publicDir, 'index.html'));
+    });
+  }
   if (config.serveStatic) app.use((req, res, next) => { if (!req.path.startsWith('/api/')) return res.status(404).type('html').send(errorPageHtml(404)); next(); });
   app.use(notFound);
   app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {

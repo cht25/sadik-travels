@@ -55,3 +55,57 @@ body.admin-drawer-open{overflow:hidden;padding-right:var(--admin-scrollbar-compe
 .perm-item input:focus-visible ~ .switch{outline:3px solid rgba(0,79,220,.35);outline-offset:2px}
 .admin-perm-save{display:flex;align-items:center;gap:10px}
 .admin-perm-save .saved{color:#16a34a;font-size:.72rem;font-weight:700}
+
+/* ============================================================
+   Commerce & catalogue admin module (admin-commerce.js)
+   ============================================================ */
+.ac-stat-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:10px;margin-top:14px}
+.ac-stat{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border:1px solid var(--admin-border,#e3e8f0);border-radius:12px;background:#fff;color:inherit;transition:box-shadow .18s ease,transform .18s ease}
+a.ac-stat:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(16,36,80,.10)}
+.ac-stat strong{font-size:1.3rem;line-height:1.1}
+.ac-stat span{font-size:.76rem;color:#5d6b82}
+.ac-stat small{font-size:.68rem;color:#8b97aa}
+.ac-product-cell{display:flex;align-items:center;gap:10px;min-width:0}
+.ac-thumb{width:46px;height:36px;border-radius:8px;overflow:hidden;background:#eef2f8;flex:none}
+.ac-thumb img{width:100%;height:100%;object-fit:cover}
+.ac-row-actions{display:flex;gap:6px;flex-wrap:wrap}
+.ac-row-actions .danger{color:#c8323c}
+.ac-editor .admin-form-grid{max-height:min(62vh,620px);overflow-y:auto;padding-right:6px}
+.ac-checks{display:flex;gap:14px;flex-wrap:wrap;font-size:.82rem;align-items:center}
+.ac-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;align-items:start}
+.ac-totals{display:flex;flex-direction:column;gap:7px;margin-top:12px;font-size:.84rem;color:#5d6b82}
+.ac-totals>div{display:flex;justify-content:space-between}
+.ac-total{border-top:1px solid var(--admin-border,#e3e8f0);padding-top:8px;font-weight:800;color:#17253b;font-size:1rem}
+.ac-dl{display:flex;flex-direction:column;gap:8px;margin:0}
+.ac-dl>div{display:flex;justify-content:space-between;gap:12px;font-size:.83rem;border-bottom:1px dashed #eef1f6;padding-bottom:7px}
+.ac-dl dt{color:#7a869b}
+.ac-dl dd{margin:0;font-weight:600;text-align:right;word-break:break-word}
+.ac-plain-list{margin:8px 0 0;padding-left:16px;font-size:.82rem;color:#5d6b82}
+.ac-timeline{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.ac-timeline li{border-left:2px solid #dfe6f1;padding-left:12px}
+.ac-timeline strong{font-size:.84rem}
+.ac-timeline p{margin:3px 0;color:#5d6b82;font-size:.78rem}
+.ac-timeline small{color:#94a0b3;font-size:.7rem}
+.ac-review-list{display:flex;flex-direction:column;gap:12px}
+.ac-review{border:1px solid var(--admin-border,#e3e8f0);border-radius:12px;padding:14px}
+.ac-review-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}
+.ac-review-head small{display:block;color:#8b97aa;font-size:.72rem}
+.ac-review h4{margin:8px 0 4px;font-size:.88rem}
+.ac-review p{margin:4px 0 10px;color:#5d6b82;font-size:.82rem;line-height:1.6}
+.ac-review-reply{background:#f4f7fd;border-radius:10px;padding:10px 12px;margin-bottom:10px}
+.ac-review-reply strong{font-size:.76rem;color:#1438b8}
+.admin-field{display:flex;flex-direction:column;gap:5px}
+.admin-field>span{font-size:.75rem;font-weight:700;color:#42506a}
+.admin-field small{color:#8b97aa;font-size:.7rem}
+.admin-field-wide{grid-column:1/-1}
+.admin-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+.admin-filter-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.admin-filter-row input,.admin-filter-row select{min-width:150px;flex:1 1 160px}
+.admin-empty{text-align:center;padding:40px 20px;color:#7a869b}
+.admin-empty strong{display:block;color:#17253b;font-size:1rem;margin-bottom:6px}
+.admin-muted{color:#8b97aa;font-size:.8rem}
+.table-scroll{overflow-x:auto}
+@media(max-width:768px){
+  .ac-detail-grid{grid-template-columns:1fr}
+  .admin-filter-row input,.admin-filter-row select{flex:1 1 100%}
+}

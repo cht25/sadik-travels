@@ -6,7 +6,8 @@
   <title>Sadik Travels | Online Travel Agency</title>
   <meta name="description" content="Book flights, hotels, homes, visa services and eSIMs with Sadik Travels." />
   <link rel="icon" type="image/png" href="/assets/sadik-travels-favicon-chat.png" />
-  <link rel="stylesheet" href="/styles.css?v=13" />
+  <link rel="stylesheet" href="/styles.css?v=14" />
+  <link rel="stylesheet" href="/storefront.css?v=1" />
 </head>
 <body data-api-base="/api/v1" data-live-api="true">
   <svg class="svg-sprite" aria-hidden="true" width="0" height="0" focusable="false">
@@ -37,290 +38,317 @@
     <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="16" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="12" r="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="13" cy="18" r="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
     <symbol id="i-bed" viewBox="0 0 24 24"><path d="M3 18v-7a2 2 0 0 1 2-2h9a4 4 0 0 1 4 4M3 18v3M21 18v3M3 14h18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="11" r="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
     <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3 12.5 11.5 4H20v8.5L11.5 20 3 12.5Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="16" cy="8" r="1.4" fill="currentColor"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.3s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.9c0 5.4-7.5 10-7.5 10Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-heart-fill" viewBox="0 0 24 24"><path d="M12 20.3s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.9c0 5.4-7.5 10-7.5 10Z" fill="currentColor"/></symbol>
+    <symbol id="i-cart" viewBox="0 0 24 24"><path d="M3 4h2.2l2.3 11.2a1.6 1.6 0 0 0 1.6 1.3h8.1a1.6 1.6 0 0 0 1.6-1.2L21 8H6.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="10" cy="20" r="1.4" fill="currentColor"/><circle cx="17.5" cy="20" r="1.4" fill="currentColor"/></symbol>
+    <symbol id="i-card" viewBox="0 0 24 24"><rect x="2.8" y="5" width="18.4" height="14" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3 9.6h18M6.5 15h3.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-ticket" viewBox="0 0 24 24"><path d="M3 8.2A1.6 1.6 0 0 1 4.6 6.6h14.8A1.6 1.6 0 0 1 21 8.2v2a2 2 0 0 0 0 3.6v2a1.6 1.6 0 0 1-1.6 1.6H4.6A1.6 1.6 0 0 1 3 15.8v-2a2 2 0 0 0 0-3.6v-2Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 7v10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2.4"/></symbol>
+    <symbol id="i-medical" viewBox="0 0 24 24"><rect x="3.5" y="6.5" width="17" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M9 6.5V4.6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1.9M12 10.4v5.4M9.3 13.1h5.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3.4 12h17.2M12 3.4c2.4 2.5 3.6 5.4 3.6 8.6s-1.2 6.1-3.6 8.6c-2.4-2.5-3.6-5.4-3.6-8.6S9.6 5.9 12 3.4Z" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-kaaba" viewBox="0 0 24 24"><path d="M12 2.8 20 7v10l-8 4.2L4 17V7l8-4.2Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 7l8 4.2L20 7M12 11.2v10M4.4 13.4h15.2" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+    <symbol id="i-palm" viewBox="0 0 24 24"><path d="M12 21c0-6 .6-9.4 1.6-11.6M13.6 9.4c-2-2-5-2.2-7.4-.2M13.6 9.4c1.6-2.4 4.4-3.2 7-1.9M13.6 9.4c-.6-2.8.6-5.3 3-6.2M13.6 9.4c-2.8-.6-5.3.8-6.2 3.4M4 21h16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5.3l3.3 2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.6 6.6h14.8M9.5 6.6V4.8a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.8M6.6 6.6l.9 12.3a1.6 1.6 0 0 0 1.6 1.5h5.8a1.6 1.6 0 0 0 1.6-1.5l.9-12.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3.6v11M7.8 10.6 12 14.8l4.2-4.2M4.4 19.6h15.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><circle cx="17.6" cy="5.8" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="6.4" cy="12" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="17.6" cy="18.2" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m8.8 10.7 6.4-3.5m0 9.6-6.4-3.5" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 11v5.4M12 7.9h.01" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M3.4 7.6A2 2 0 0 1 5.4 5.6h11.2a2 2 0 0 1 2 2v1H20a1 1 0 0 1 1 1v4.8a1 1 0 0 1-1 1h-1.4v1a2 2 0 0 1-2 2H5.4a2 2 0 0 1-2-2v-8.8Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="16.6" cy="12" r="1.2" fill="currentColor"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3.6h7.4L19 9.2v11.2a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.6a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.2 3.8v5.6H18.8M8 13h8M8 16.4h5.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
     <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
   </svg>
 
   <div id="toastRegion" class="toast-region" aria-live="polite"></div>
   <div id="pageBackdrop" class="page-backdrop" hidden></div>
 
-  <header class="site-header" id="siteHeader">
-    <nav class="navbar" aria-label="Main navigation">
-      <div class="nav-inner">
-        <button class="icon-btn nav-menu-toggle" id="menuToggle" aria-label="Open menu" aria-expanded="false"><svg><use href="#i-menu"></use></svg></button>
-        <a class="brand" href="/" data-public-route="/" aria-label="Sadik Travels home"><img data-brand-logo src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels online travel agency" /></a>
-        <form class="global-search" id="globalSearch"><input id="globalSearchInput" placeholder="Search a city" autocomplete="off" /><button type="submit" aria-label="Search"><svg><use href="#i-search"></use></svg></button><div class="global-search-suggestions" id="globalSearchSuggestions"></div></form>
-        <div class="nav-actions">
-          <div class="notification-wrap"><button class="nav-notifications" id="notificationBtn" aria-label="Notifications" aria-expanded="false"><svg><use href="#i-bell"></use></svg><span id="notificationCount" hidden>0</span></button><div class="notification-panel" id="notificationPanel" hidden><div class="notification-panel-head"><strong>Notifications</strong><button type="button" id="markNotificationsRead" class="text-btn">Mark all read</button></div><div id="notificationList"><div class="notification-empty">Login to see notifications.</div></div></div></div>
-          <button class="nav-support" id="supportBtn"><svg><use href="#i-headset"></use></svg><span>Customer Support</span></button>
-          <button class="nav-app" id="appBtn"><svg><use href="#i-phone"></use></svg><span>App</span></button>
-          <button class="nav-currency" id="currencyBtn">BDT <span>⌄</span></button>
-          <button class="nav-login" id="loginBtn"><svg><use href="#i-user"></use></svg><span>Login</span></button>
-        </div>
-        <button class="mobile-login" id="mobileLoginBtn" aria-label="Login"><svg><use href="#i-user"></use></svg></button>
+  <div class="app-shell" id="appShell">
+    <aside class="travel-sidebar" id="travelSidebar" aria-label="Browse travel products" aria-hidden="true">
+      <div class="sidebar-head">
+        <a class="sidebar-brand" href="/" data-public-route="/"><img data-brand-logo src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels" /></a>
+        <button class="icon-btn" id="sidebarClose" aria-label="Close menu"><svg><use href="#i-close"></use></svg></button>
       </div>
-    </nav>
-  </header>
-
-  <aside class="travel-sidebar" id="travelSidebar" aria-label="Browse travel products" aria-hidden="true">
-    <div class="sidebar-head">
-      <a class="sidebar-brand" href="/" data-public-route="/"><img data-brand-logo src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels" /></a>
-      <button class="icon-btn" id="sidebarClose" aria-label="Close menu"><svg><use href="#i-close"></use></svg></button>
-    </div>
-    <div class="sidebar-account">
-      <div class="avatar"><svg><use href="#i-user"></use></svg></div>
-      <div><strong>Welcome to Sadik Travels</strong><span>Login to manage your trips</span></div>
-      <button class="sidebar-login" id="sidebarLogin">Login</button>
-    </div>
-    <div class="sidebar-section-label">Travel</div>
-    <a href="/#flights" class="side-link" data-scroll="flights"><span class="side-icon"><svg><use href="#i-plane"></use></svg></span>Flights<span class="side-arrow">›</span></a>
-    <a href="/#hotels" class="side-link" data-scroll="hotels"><span class="side-icon"><svg><use href="#i-hotel"></use></svg></span>Hotels<span class="side-arrow">›</span></a>
-    <a href="/#homes" class="side-link" data-scroll="homes"><span class="side-icon"><svg><use href="#i-home"></use></svg></span>Homes<span class="side-arrow">›</span></a>
-    <a href="/#visa-services" class="side-link" data-scroll="visa-services"><span class="side-icon"><svg><use href="#i-passport"></use></svg></span>Visa services<span class="side-arrow">›</span></a>
-    <a href="/#tours" class="side-link" data-scroll="tours"><span class="side-icon"><svg><use href="#i-map"></use></svg></span>Go Get Tour<span class="side-arrow">›</span></a>
-    <a href="/#esim" class="side-link" data-scroll="esim"><span class="side-icon"><svg><use href="#i-sim"></use></svg></span>eSIM<span class="side-arrow">›</span></a>
-    <a href="/#special-umrah-fare" class="side-link side-action" data-scroll="special-umrah-fare"><span class="side-icon"><svg><use href="#i-award"></use></svg></span>Special Umrah Fare<span class="side-arrow">›</span></a>
-    <a href="/#umrah-packages" class="side-link side-action" data-scroll="umrah-packages"><span class="side-icon"><svg><use href="#i-map"></use></svg></span>Umrah Packages<span class="side-arrow">›</span></a>
-    <a href="/#holiday-packages" class="side-link side-action" data-scroll="holiday-packages"><span class="side-icon"><svg><use href="#i-plane"></use></svg></span>Holiday Packages<span class="side-arrow">›</span></a>
-    <a href="/#medical-tourism" class="side-link side-action" data-scroll="medical-tourism"><span class="side-icon"><svg><use href="#i-hotel"></use></svg></span>Medical Tourism<span class="side-arrow">›</span></a>
-    <a href="/#card-offers" class="side-link side-action" data-scroll="card-offers"><span class="side-icon"><svg><use href="#i-check"></use></svg></span>Card Offers<span class="side-arrow">›</span></a>
-    <a href="/#airline-offers" class="side-link side-action" data-scroll="airline-offers"><span class="side-icon"><svg><use href="#i-plane"></use></svg></span>Airlines Offers<span class="side-arrow">›</span></a>
-    <a href="/#explore" class="side-link side-action" data-scroll="explore"><span class="side-icon"><svg><use href="#i-location"></use></svg></span>Explore<span class="side-arrow">›</span></a>
-    <a href="/travel-agents" class="side-link side-action" data-public-route="/travel-agents"><span class="side-icon"><svg><use href="#i-user"></use></svg></span>Travel Agents<span class="side-arrow">›</span></a>
-    <a href="/#sadik-app" class="side-link side-action" data-scroll="sadik-app"><span class="side-icon"><svg><use href="#i-phone"></use></svg></span>Sadik App<span class="side-arrow">›</span></a>
-    <div class="sidebar-section-label">Manage</div>
-    <button class="side-link side-button" data-scroll="track-booking" id="trackBookingBtn"><span class="side-icon"><svg><use href="#i-search"></use></svg></span>Track booking<span class="side-arrow">›</span></button>
-    <button class="side-link side-button" id="supportSideBtn"><span class="side-icon"><svg><use href="#i-headset"></use></svg></span>Sadik Travels Support<span class="side-arrow">›</span></button>
-    <div class="sidebar-footer"><span>Bangladesh</span><span>English</span></div>
-  </aside>
-
-  <main id="top">
-    <header class="hero" aria-label="Find flights and hotels">
-      <div class="hero-container container">
-        <div class="hero-intro">
-          <h1 class="tagline">উড়াল দিন</h1>
-          <div class="hero-features">
-            <div><svg><use href="#i-headset"></use></svg>24/7 Sadik Travels Support Team</div>
-            <div><svg><use href="#i-shield"></use></svg>Secure &amp; Easy Payment</div>
-            <div><svg><use href="#i-award"></use></svg>Award-winning</div>
+      <div class="sidebar-account">
+        <div class="avatar"><svg><use href="#i-user"></use></svg></div>
+        <div><strong id="sidebarAccountName">Welcome to Sadik Travels</strong><span id="sidebarAccountMeta">Login to manage your trips</span></div>
+        <button class="sidebar-login" id="sidebarLogin">Login</button>
+      </div>
+      <nav class="sidebar-nav" id="sidebarNav" aria-label="Sadik Travels sections">
+        <div class="sidebar-section-label">Travel</div>
+        <a href="/flights" class="side-link" data-public-route="/flights"><span class="side-icon"><svg><use href="#i-plane"></use></svg></span><span class="side-text">Flights</span><span class="side-arrow">›</span></a>
+        <a href="/hotels" class="side-link" data-public-route="/hotels"><span class="side-icon"><svg><use href="#i-hotel"></use></svg></span><span class="side-text">Hotels</span><span class="side-arrow">›</span></a>
+        <a href="/homes" class="side-link" data-public-route="/homes"><span class="side-icon"><svg><use href="#i-home"></use></svg></span><span class="side-text">Homes</span><span class="side-arrow">›</span></a>
+        <a href="/visa" class="side-link" data-public-route="/visa"><span class="side-icon"><svg><use href="#i-passport"></use></svg></span><span class="side-text">Visa Services</span><span class="side-arrow">›</span></a>
+        <a href="/tours" class="side-link" data-public-route="/tours"><span class="side-icon"><svg><use href="#i-map"></use></svg></span><span class="side-text">Go Get Tour</span><span class="side-arrow">›</span></a>
+        <a href="/esim" class="side-link" data-public-route="/esim"><span class="side-icon"><svg><use href="#i-sim"></use></svg></span><span class="side-text">eSIM</span><span class="side-arrow">›</span></a>
+        <a href="/special-umrah-fare" class="side-link" data-public-route="/special-umrah-fare"><span class="side-icon"><svg><use href="#i-award"></use></svg></span><span class="side-text">Special Umrah Fare</span><span class="side-arrow">›</span></a>
+        <a href="/umrah-packages" class="side-link" data-public-route="/umrah-packages"><span class="side-icon"><svg><use href="#i-kaaba"></use></svg></span><span class="side-text">Umrah Packages</span><span class="side-arrow">›</span></a>
+        <a href="/holiday-packages" class="side-link" data-public-route="/holiday-packages"><span class="side-icon"><svg><use href="#i-palm"></use></svg></span><span class="side-text">Holiday Packages</span><span class="side-arrow">›</span></a>
+        <a href="/medical-tourism" class="side-link" data-public-route="/medical-tourism"><span class="side-icon"><svg><use href="#i-medical"></use></svg></span><span class="side-text">Medical Tourism</span><span class="side-arrow">›</span></a>
+        <a href="/card-offers" class="side-link" data-public-route="/card-offers"><span class="side-icon"><svg><use href="#i-card"></use></svg></span><span class="side-text">Card Offers</span><span class="side-arrow">›</span></a>
+        <a href="/airlines-offers" class="side-link" data-public-route="/airlines-offers"><span class="side-icon"><svg><use href="#i-ticket"></use></svg></span><span class="side-text">Airlines Offers</span><span class="side-arrow">›</span></a>
+        <a href="/explore" class="side-link" data-public-route="/explore"><span class="side-icon"><svg><use href="#i-globe"></use></svg></span><span class="side-text">Explore</span><span class="side-arrow">›</span></a>
+        <a href="/travel-agents" class="side-link" data-public-route="/travel-agents"><span class="side-icon"><svg><use href="#i-user"></use></svg></span><span class="side-text">Travel Agents</span><span class="side-arrow">›</span></a>
+        <a href="/app" class="side-link" data-public-route="/app"><span class="side-icon"><svg><use href="#i-phone"></use></svg></span><span class="side-text">Sadik App</span><span class="side-arrow">›</span></a>
+        <div class="sidebar-section-label">Shop</div>
+        <a href="/cart" class="side-link" data-public-route="/cart"><span class="side-icon"><svg><use href="#i-cart"></use></svg></span><span class="side-text">My Cart</span><span class="side-badge" id="sidebarCartCount" hidden>0</span><span class="side-arrow">›</span></a>
+        <a href="/wishlist" class="side-link" data-public-route="/wishlist"><span class="side-icon"><svg><use href="#i-heart"></use></svg></span><span class="side-text">Wishlist</span><span class="side-badge" id="sidebarWishlistCount" hidden>0</span><span class="side-arrow">›</span></a>
+        <div class="sidebar-section-label">Manage</div>
+        <a href="/account" class="side-link" data-public-route="/account"><span class="side-icon"><svg><use href="#i-grid"></use></svg></span><span class="side-text">My Account</span><span class="side-arrow">›</span></a>
+        <a href="/orders" class="side-link" data-public-route="/orders"><span class="side-icon"><svg><use href="#i-file"></use></svg></span><span class="side-text">My Bookings</span><span class="side-arrow">›</span></a>
+        <a href="/track-booking" class="side-link" data-public-route="/track-booking"><span class="side-icon"><svg><use href="#i-search"></use></svg></span><span class="side-text">Track Booking</span><span class="side-arrow">›</span></a>
+        <a href="/support" class="side-link" data-public-route="/support"><span class="side-icon"><svg><use href="#i-headset"></use></svg></span><span class="side-text">Sadik Travels Support</span><span class="side-arrow">›</span></a>
+      </nav>
+      <div class="sidebar-footer"><span>Bangladesh</span><span>English</span></div>
+    </aside>
+    <div class="app-main" id="appMain">
+    <header class="site-header" id="siteHeader">
+      <nav class="navbar" aria-label="Main navigation">
+        <div class="nav-inner">
+          <button class="icon-btn nav-menu-toggle" id="menuToggle" aria-label="Open menu" aria-expanded="false"><svg><use href="#i-menu"></use></svg></button>
+          <a class="brand" href="/" data-public-route="/" aria-label="Sadik Travels home"><img data-brand-logo src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels online travel agency" /></a>
+          <form class="global-search" id="globalSearch"><input id="globalSearchInput" placeholder="Search a city" autocomplete="off" /><button type="submit" aria-label="Search"><svg><use href="#i-search"></use></svg></button><div class="global-search-suggestions" id="globalSearchSuggestions"></div></form>
+          <div class="nav-actions">
+            <div class="notification-wrap"><button class="nav-notifications" id="notificationBtn" aria-label="Notifications" aria-expanded="false"><svg><use href="#i-bell"></use></svg><span id="notificationCount" hidden>0</span></button><div class="notification-panel" id="notificationPanel" hidden><div class="notification-panel-head"><strong>Notifications</strong><button type="button" id="markNotificationsRead" class="text-btn">Mark all read</button></div><div id="notificationList"><div class="notification-empty">Login to see notifications.</div></div></div></div>
+            <a class="nav-icon-btn" href="/wishlist" data-public-route="/wishlist" id="wishlistBtn" aria-label="Wishlist"><svg><use href="#i-heart"></use></svg><span class="nav-count" id="wishlistCount" hidden>0</span></a>
+          <a class="nav-icon-btn" href="/cart" data-public-route="/cart" id="cartBtn" aria-label="Cart"><svg><use href="#i-cart"></use></svg><span class="nav-count" id="cartCount" hidden>0</span></a>
+          <button class="nav-support" id="supportBtn"><svg><use href="#i-headset"></use></svg><span>Customer Support</span></button>
+            <button class="nav-app" id="appBtn"><svg><use href="#i-phone"></use></svg><span>App</span></button>
+            <button class="nav-currency" id="currencyBtn">BDT <span>⌄</span></button>
+            <button class="nav-login" id="loginBtn"><svg><use href="#i-user"></use></svg><span>Login</span></button>
           </div>
+          <button class="mobile-login" id="mobileLoginBtn" aria-label="Login"><svg><use href="#i-user"></use></svg></button>
         </div>
-
-        <div class="travel-container" id="searchPanel">
-          <div class="travel-tabs-shell" id="travelTabsShell">
-            <div class="travel-tabs" role="tablist" aria-label="Travel products">
-              <button class="travel-tab active" role="tab" aria-selected="true" data-target="flights"><svg><use href="#i-plane"></use></svg><span>Flights</span></button>
-              <button class="travel-tab" role="tab" aria-selected="false" data-target="hotels"><svg><use href="#i-hotel"></use></svg><span>Hotels</span></button>
-              <button class="travel-tab" role="tab" aria-selected="false" data-target="homes"><svg><use href="#i-home"></use></svg><span>Homes</span></button>
-              <button class="travel-tab" role="tab" aria-selected="false" data-target="visa"><svg><use href="#i-passport"></use></svg><span>Visa</span></button>
-              <button class="travel-tab" role="tab" aria-selected="false" data-target="tours"><svg><use href="#i-map"></use></svg><span>Tours</span></button>
-              <button class="travel-tab" role="tab" aria-selected="false" data-target="esim"><svg><use href="#i-sim"></use></svg><span>eSIM</span></button>
+      </nav>
+    </header>
+      <div class="page-content" id="pageContent">
+    <main id="top">
+      <header class="hero" aria-label="Find flights and hotels">
+        <div class="hero-container container">
+          <div class="hero-intro">
+            <h1 class="tagline">উড়াল দিন</h1>
+            <div class="hero-features">
+              <div><svg><use href="#i-headset"></use></svg>24/7 Sadik Travels Support Team</div>
+              <div><svg><use href="#i-shield"></use></svg>Secure &amp; Easy Payment</div>
+              <div><svg><use href="#i-award"></use></svg>Award-winning</div>
             </div>
-            <span class="travel-tabs-edge travel-tabs-edge-left" aria-hidden="true"></span>
-            <span class="travel-tabs-edge travel-tabs-edge-right" aria-hidden="true"></span>
           </div>
 
-          <div class="tab-content">
-            <section class="tab-pane active" id="flights" role="tabpanel">
-              <form class="search-card" id="flightForm">
-                <div class="modifier-row">
-                  <div class="trip-type field-group compact-group">
-                    <label class="radio-label"><input type="radio" name="tripType" value="oneway" checked /><span>One Way</span></label>
-                    <label class="radio-label"><input type="radio" name="tripType" value="roundtrip" /><span>Round Trip</span></label>
-                    <label class="radio-label"><input type="radio" name="tripType" value="multicity" /><span>Multi City</span></label>
+          <div class="travel-container" id="searchPanel">
+            <div class="travel-tabs-shell" id="travelTabsShell">
+              <div class="travel-tabs" role="tablist" aria-label="Travel products">
+                <button class="travel-tab active" role="tab" aria-selected="true" data-target="flights"><svg><use href="#i-plane"></use></svg><span>Flights</span></button>
+                <button class="travel-tab" role="tab" aria-selected="false" data-target="hotels"><svg><use href="#i-hotel"></use></svg><span>Hotels</span></button>
+                <button class="travel-tab" role="tab" aria-selected="false" data-target="homes"><svg><use href="#i-home"></use></svg><span>Homes</span></button>
+                <button class="travel-tab" role="tab" aria-selected="false" data-target="visa"><svg><use href="#i-passport"></use></svg><span>Visa</span></button>
+                <button class="travel-tab" role="tab" aria-selected="false" data-target="tours"><svg><use href="#i-map"></use></svg><span>Tours</span></button>
+                <button class="travel-tab" role="tab" aria-selected="false" data-target="esim"><svg><use href="#i-sim"></use></svg><span>eSIM</span></button>
+              </div>
+              <span class="travel-tabs-edge travel-tabs-edge-left" aria-hidden="true"></span>
+              <span class="travel-tabs-edge travel-tabs-edge-right" aria-hidden="true"></span>
+            </div>
+
+            <div class="tab-content">
+              <section class="tab-pane active" id="flights" role="tabpanel">
+                <form class="search-card" id="flightForm">
+                  <div class="modifier-row">
+                    <div class="trip-type field-group compact-group">
+                      <label class="radio-label"><input type="radio" name="tripType" value="oneway" checked /><span>One Way</span></label>
+                      <label class="radio-label"><input type="radio" name="tripType" value="roundtrip" /><span>Round Trip</span></label>
+                      <label class="radio-label"><input type="radio" name="tripType" value="multicity" /><span>Multi City</span></label>
+                    </div>
+                    <div class="compact-select-wrap">
+                      <button type="button" class="compact-select" data-dropdown="cabinMenu"><span id="cabinValue">Economy</span><svg><use href="#i-chevron"></use></svg></button>
+                      <div class="mini-menu" id="cabinMenu"><button type="button" data-value="Economy">Economy</button><button type="button" data-value="Business">Business</button></div>
+                    </div>
+                    <div class="compact-select-wrap passenger-wrap">
+                      <button type="button" class="compact-select passenger-toggle" data-dropdown="passengerMenu"><svg><use href="#i-user"></use></svg><span id="passengerValue">1</span><span>Passenger</span><svg><use href="#i-chevron"></use></svg></button>
+                      <div class="passenger-menu" id="passengerMenu">
+                        <div class="passenger-row"><div><strong>Adult</strong><small>12 years and above</small></div><div class="stepper"><button type="button" data-step="adult" data-dir="-1">−</button><output id="adultCount">1</output><button type="button" data-step="adult" data-dir="1">+</button></div></div>
+                        <div class="passenger-row"><div><strong>Children</strong><small>2–11 years at time of travel</small></div><div class="stepper"><button type="button" data-step="child" data-dir="-1">−</button><output id="childCount">0</output><button type="button" data-step="child" data-dir="1">+</button></div></div>
+                        <div class="passenger-row"><div><strong>Infant</strong><small>Under 2 years</small></div><div class="stepper"><button type="button" data-step="infant" data-dir="-1">−</button><output id="infantCount">0</output><button type="button" data-step="infant" data-dir="1">+</button></div></div>
+                        <button type="button" class="done-btn" data-close-dropdown="passengerMenu">Done</button>
+                      </div>
+                    </div>
+                    <label class="check-label"><input type="checkbox" id="directFlight" /><span>Direct flight</span></label>
+                    <label class="check-label"><input type="checkbox" id="preferredAirline" /><span>Preferred airlines</span></label>
                   </div>
-                  <div class="compact-select-wrap">
-                    <button type="button" class="compact-select" data-dropdown="cabinMenu"><span id="cabinValue">Economy</span><svg><use href="#i-chevron"></use></svg></button>
-                    <div class="mini-menu" id="cabinMenu"><button type="button" data-value="Economy">Economy</button><button type="button" data-value="Business">Business</button></div>
-                  </div>
-                  <div class="compact-select-wrap passenger-wrap">
-                    <button type="button" class="compact-select passenger-toggle" data-dropdown="passengerMenu"><svg><use href="#i-user"></use></svg><span id="passengerValue">1</span><span>Passenger</span><svg><use href="#i-chevron"></use></svg></button>
-                    <div class="passenger-menu" id="passengerMenu">
-                      <div class="passenger-row"><div><strong>Adult</strong><small>12 years and above</small></div><div class="stepper"><button type="button" data-step="adult" data-dir="-1">−</button><output id="adultCount">1</output><button type="button" data-step="adult" data-dir="1">+</button></div></div>
-                      <div class="passenger-row"><div><strong>Children</strong><small>2–11 years at time of travel</small></div><div class="stepper"><button type="button" data-step="child" data-dir="-1">−</button><output id="childCount">0</output><button type="button" data-step="child" data-dir="1">+</button></div></div>
-                      <div class="passenger-row"><div><strong>Infant</strong><small>Under 2 years</small></div><div class="stepper"><button type="button" data-step="infant" data-dir="-1">−</button><output id="infantCount">0</output><button type="button" data-step="infant" data-dir="1">+</button></div></div>
-                      <button type="button" class="done-btn" data-close-dropdown="passengerMenu">Done</button>
+                  <div class="flight-search-grid">
+                    <div class="form-field autocomplete-field" data-autocomplete="airport">
+                      <label for="fromAirport"><svg><use href="#i-plane"></use></svg>Journey From</label>
+                      <div class="input-shell"><input id="fromAirport" autocomplete="off" placeholder="Search Airport/City" value="Dhaka (DAC)" /><svg><use href="#i-search"></use></svg></div>
+                      <div class="suggestions" id="fromAirportSuggestions"></div>
+                    </div>
+                    <button type="button" class="swap-btn" id="swapAirports" aria-label="Swap journey from and to"><svg><use href="#i-arrow-right"></use></svg></button>
+                    <div class="form-field autocomplete-field" data-autocomplete="airport">
+                      <label for="toAirport"><svg><use href="#i-location"></use></svg>Journey To</label>
+                      <div class="input-shell"><input id="toAirport" autocomplete="off" placeholder="Search Airport/City" value="Dubai (DXB)" /><svg><use href="#i-search"></use></svg></div>
+                      <div class="suggestions" id="toAirportSuggestions"></div>
+                    </div>
+                    <div class="form-field date-field">
+                      <label for="departureDate"><svg><use href="#i-calendar"></use></svg>Departing</label>
+                      <div class="input-shell"><input id="departureDate" type="date" value="" /><svg><use href="#i-calendar"></use></svg></div>
+                      <small>Saturday, 15 Aug 2026</small>
+                    </div>
+                    <div class="form-field date-field return-field">
+                      <label for="returnDate"><svg><use href="#i-calendar"></use></svg>Returning</label>
+                      <div class="input-shell"><input id="returnDate" type="date" value="" /><svg><use href="#i-calendar"></use></svg></div>
+                      <small>Saturday, 22 Aug 2026</small>
                     </div>
                   </div>
-                  <label class="check-label"><input type="checkbox" id="directFlight" /><span>Direct flight</span></label>
-                  <label class="check-label"><input type="checkbox" id="preferredAirline" /><span>Preferred airlines</span></label>
-                </div>
-                <div class="flight-search-grid">
-                  <div class="form-field autocomplete-field" data-autocomplete="airport">
-                    <label for="fromAirport"><svg><use href="#i-plane"></use></svg>Journey From</label>
-                    <div class="input-shell"><input id="fromAirport" autocomplete="off" placeholder="Search Airport/City" value="Dhaka (DAC)" /><svg><use href="#i-search"></use></svg></div>
-                    <div class="suggestions" id="fromAirportSuggestions"></div>
+                  <div class="multi-city-row" id="multiCityRow" hidden>
+                    <div class="multi-city-route"><span>2</span><strong>Dhaka (DAC)</strong><i>→</i><strong>Singapore (SIN)</strong><small>Departing · 24 Aug 2026</small></div>
+                    <button type="button" class="text-btn" id="addFlightBtn">+ Add Flight</button>
                   </div>
-                  <button type="button" class="swap-btn" id="swapAirports" aria-label="Swap journey from and to"><svg><use href="#i-arrow-right"></use></svg></button>
-                  <div class="form-field autocomplete-field" data-autocomplete="airport">
-                    <label for="toAirport"><svg><use href="#i-location"></use></svg>Journey To</label>
-                    <div class="input-shell"><input id="toAirport" autocomplete="off" placeholder="Search Airport/City" value="Dubai (DXB)" /><svg><use href="#i-search"></use></svg></div>
-                    <div class="suggestions" id="toAirportSuggestions"></div>
+                  <div class="search-actions"><button type="submit" class="btn btn-primary"><svg><use href="#i-search"></use></svg>Search Now</button></div>
+                </form>
+              </section>
+
+              <section class="tab-pane" id="hotels" role="tabpanel" hidden>
+                <form class="search-card" id="hotelForm">
+                  <div class="modifier-row">
+                    <div class="trip-type field-group compact-group"><label class="radio-label"><input type="radio" name="hotelScope" checked /><span>Domestic</span></label><label class="radio-label"><input type="radio" name="hotelScope" /><span>International</span></label></div>
+                    <div class="compact-select-wrap"><button type="button" class="compact-select" data-dropdown="roomMenu"><span id="roomValue">Room - 1</span><svg><use href="#i-chevron"></use></svg></button><div class="mini-menu" id="roomMenu"><button type="button" data-value="Room - 1">Room - 1</button><button type="button" data-value="Room - 2">Room - 2</button><button type="button" data-value="Room - 3">Room - 3</button></div></div>
+                    <div class="compact-select-wrap guest-wrap"><button type="button" class="compact-select" data-dropdown="guestMenu"><svg><use href="#i-user"></use></svg><span id="guestValue">Guests - 2</span><svg><use href="#i-chevron"></use></svg></button><div class="passenger-menu" id="guestMenu"><div class="passenger-row"><div><strong>Adults</strong><small>12 years and above</small></div><div class="stepper"><button type="button" data-step="hotelAdult" data-dir="-1">−</button><output id="hotelAdultCount">2</output><button type="button" data-step="hotelAdult" data-dir="1">+</button></div></div><div class="passenger-row"><div><strong>Children</strong><small>2–11 years</small></div><div class="stepper"><button type="button" data-step="hotelChild" data-dir="-1">−</button><output id="hotelChildCount">0</output><button type="button" data-step="hotelChild" data-dir="1">+</button></div></div><button type="button" class="done-btn" data-close-dropdown="guestMenu">Done</button></div></div>
                   </div>
-                  <div class="form-field date-field">
-                    <label for="departureDate"><svg><use href="#i-calendar"></use></svg>Departing</label>
-                    <div class="input-shell"><input id="departureDate" type="date" value="" /><svg><use href="#i-calendar"></use></svg></div>
-                    <small>Saturday, 15 Aug 2026</small>
+                  <div class="hotel-search-grid">
+                    <div class="form-field autocomplete-field" data-autocomplete="city"><label for="hotelDestination"><svg><use href="#i-location"></use></svg>Location</label><div class="input-shell"><input id="hotelDestination" autocomplete="off" placeholder="Search City or Country" value="Cox's Bazar" /><svg><use href="#i-search"></use></svg></div><div class="suggestions" id="hotelDestinationSuggestions"></div></div>
+                    <div class="form-field date-field"><label for="checkinDate"><svg><use href="#i-calendar"></use></svg>Check-In</label><div class="input-shell"><input id="checkinDate" type="date" value="" /><svg><use href="#i-calendar"></use></svg></div><small>Saturday, 15 Aug 2026</small></div>
+                    <div class="form-field date-field"><label for="checkoutDate"><svg><use href="#i-calendar"></use></svg>Check-Out</label><div class="input-shell"><input id="checkoutDate" type="date" value="" /><svg><use href="#i-calendar"></use></svg></div><small>1 night</small></div>
                   </div>
-                  <div class="form-field date-field return-field">
-                    <label for="returnDate"><svg><use href="#i-calendar"></use></svg>Returning</label>
-                    <div class="input-shell"><input id="returnDate" type="date" value="" /><svg><use href="#i-calendar"></use></svg></div>
-                    <small>Saturday, 22 Aug 2026</small>
+                  <div class="search-actions"><button type="submit" class="btn btn-primary"><svg><use href="#i-search"></use></svg>Search Now</button></div>
+                </form>
+              </section>
+
+              <section class="tab-pane" id="homes" role="tabpanel" hidden>
+                <form class="search-card" id="homesForm">
+                  <div class="modifier-row"><div class="trip-type field-group compact-group"><label class="radio-label"><input type="radio" name="homesType" value="rent" checked /><span>Rent</span></label><label class="radio-label"><input type="radio" name="homesType" value="buy" /><span>Buy</span></label></div><span class="form-hint">Smart property solutions from Sadik Homes</span></div>
+                  <div class="hotel-search-grid homes-grid"><div class="form-field autocomplete-field" data-autocomplete="city"><label for="homeDestination"><svg><use href="#i-location"></use></svg>Location</label><div class="input-shell"><input id="homeDestination" autocomplete="off" placeholder="Search City or Area" value="Dhaka" /><svg><use href="#i-search"></use></svg></div><div class="suggestions" id="homeDestinationSuggestions"></div></div><div class="form-field date-field"><label for="homeCheckin"><svg><use href="#i-calendar"></use></svg>Check-In</label><div class="input-shell"><input id="homeCheckin" type="date" value="" /><svg><use href="#i-calendar"></use></div></div><div class="form-field date-field"><label for="homeCheckout"><svg><use href="#i-calendar"></use></svg>Check-Out</label><div class="input-shell"><input id="homeCheckout" type="date" value="" /><svg><use href="#i-calendar"></use></div></div></div>
+                  <div class="search-actions"><button type="submit" class="btn btn-primary"><svg><use href="#i-search"></use></svg>Search Now</button></div>
+                </form>
+              </section>
+
+              <section class="tab-pane" id="visa" role="tabpanel" hidden>
+                <form class="search-card" id="visaForm">
+                  <div class="visa-search-grid"><div class="form-field autocomplete-field" data-autocomplete="country"><label for="visaCountry"><svg><use href="#i-location"></use></svg>Country</label><div class="input-shell"><input id="visaCountry" autocomplete="off" placeholder="Search Country" value="United Arab Emirates" /><svg><use href="#i-search"></use></svg></div><div class="suggestions" id="visaCountrySuggestions"></div></div><div class="form-field autocomplete-field" data-autocomplete="category"><label for="visaCategory"><svg><use href="#i-passport"></use></svg>Category</label><div class="input-shell"><input id="visaCategory" autocomplete="off" placeholder="Select Category" value="Tourist Visa" /><svg><use href="#i-search"></use></svg></div><div class="suggestions" id="visaCategorySuggestions"></div></div></div>
+                  <div class="visa-note"><svg><use href="#i-shield"></use></svg><span>Visa information and application support from Sadik Travels experts.</span></div>
+                  <div class="search-actions"><button type="submit" class="btn btn-primary"><svg><use href="#i-search"></use></svg>Search Now</button></div>
+                </form>
+              </section>
+
+              <section class="tab-pane" id="tours" role="tabpanel" hidden>
+                <form class="search-card" id="toursForm">
+                  <div class="modifier-row tour-modifier-row"><div class="tour-kicker"><svg><use href="#i-map"></use></svg><strong>Go Get Tour</strong><span>Discover curated Bangladesh and international packages</span></div><div class="compact-select-wrap"><label class="tour-inline-label">Sort by <select id="tourSort"><option value="newest">Recommended</option><option value="price_asc">Lowest price</option><option value="price_desc">Highest price</option></select></label></div></div>
+                  <div class="tour-search-grid">
+                    <div class="form-field autocomplete-field" data-autocomplete="city"><label for="tourDestination"><svg><use href="#i-location"></use></svg>Destination</label><div class="input-shell"><input id="tourDestination" autocomplete="off" placeholder="Search country or destination" value="Bangladesh" /><svg><use href="#i-search"></use></svg></div><div class="suggestions" id="tourDestinationSuggestions"></div></div>
+                    <div class="form-field"><label for="tourType"><svg><use href="#i-map"></use></svg>Tour type</label><div class="input-shell"><select id="tourType"><option value="">All tour types</option><option value="Family Tour" selected>Family Tour</option><option value="Adventure Tour">Adventure Tour</option><option value="Nature Tour">Nature Tour</option><option value="Honeymoon Tour">Honeymoon Tour</option><option value="Group Tour">Group Tour</option></select></div></div>
+                    <div class="form-field"><label for="tourBudget"><svg><use href="#i-location"></use></svg>Maximum budget</label><div class="input-shell"><select id="tourBudget"><option value="">Any budget</option><option value="10000">Up to ৳10,000</option><option value="15000">Up to ৳15,000</option><option value="25000">Up to ৳25,000</option><option value="50000">Up to ৳50,000</option></select></div></div>
                   </div>
-                </div>
-                <div class="multi-city-row" id="multiCityRow" hidden>
-                  <div class="multi-city-route"><span>2</span><strong>Dhaka (DAC)</strong><i>→</i><strong>Singapore (SIN)</strong><small>Departing · 24 Aug 2026</small></div>
-                  <button type="button" class="text-btn" id="addFlightBtn">+ Add Flight</button>
-                </div>
-                <div class="search-actions"><button type="submit" class="btn btn-primary"><svg><use href="#i-search"></use></svg>Search Now</button></div>
-              </form>
-            </section>
+                  <div class="search-actions"><button type="submit" class="btn btn-primary"><svg><use href="#i-search"></use></svg>Search Tours</button></div>
+                </form>
+              </section>
 
-            <section class="tab-pane" id="hotels" role="tabpanel" hidden>
-              <form class="search-card" id="hotelForm">
-                <div class="modifier-row">
-                  <div class="trip-type field-group compact-group"><label class="radio-label"><input type="radio" name="hotelScope" checked /><span>Domestic</span></label><label class="radio-label"><input type="radio" name="hotelScope" /><span>International</span></label></div>
-                  <div class="compact-select-wrap"><button type="button" class="compact-select" data-dropdown="roomMenu"><span id="roomValue">Room - 1</span><svg><use href="#i-chevron"></use></svg></button><div class="mini-menu" id="roomMenu"><button type="button" data-value="Room - 1">Room - 1</button><button type="button" data-value="Room - 2">Room - 2</button><button type="button" data-value="Room - 3">Room - 3</button></div></div>
-                  <div class="compact-select-wrap guest-wrap"><button type="button" class="compact-select" data-dropdown="guestMenu"><svg><use href="#i-user"></use></svg><span id="guestValue">Guests - 2</span><svg><use href="#i-chevron"></use></svg></button><div class="passenger-menu" id="guestMenu"><div class="passenger-row"><div><strong>Adults</strong><small>12 years and above</small></div><div class="stepper"><button type="button" data-step="hotelAdult" data-dir="-1">−</button><output id="hotelAdultCount">2</output><button type="button" data-step="hotelAdult" data-dir="1">+</button></div></div><div class="passenger-row"><div><strong>Children</strong><small>2–11 years</small></div><div class="stepper"><button type="button" data-step="hotelChild" data-dir="-1">−</button><output id="hotelChildCount">0</output><button type="button" data-step="hotelChild" data-dir="1">+</button></div></div><button type="button" class="done-btn" data-close-dropdown="guestMenu">Done</button></div></div>
-                </div>
-                <div class="hotel-search-grid">
-                  <div class="form-field autocomplete-field" data-autocomplete="city"><label for="hotelDestination"><svg><use href="#i-location"></use></svg>Location</label><div class="input-shell"><input id="hotelDestination" autocomplete="off" placeholder="Search City or Country" value="Cox's Bazar" /><svg><use href="#i-search"></use></svg></div><div class="suggestions" id="hotelDestinationSuggestions"></div></div>
-                  <div class="form-field date-field"><label for="checkinDate"><svg><use href="#i-calendar"></use></svg>Check-In</label><div class="input-shell"><input id="checkinDate" type="date" value="" /><svg><use href="#i-calendar"></use></svg></div><small>Saturday, 15 Aug 2026</small></div>
-                  <div class="form-field date-field"><label for="checkoutDate"><svg><use href="#i-calendar"></use></svg>Check-Out</label><div class="input-shell"><input id="checkoutDate" type="date" value="" /><svg><use href="#i-calendar"></use></svg></div><small>1 night</small></div>
-                </div>
-                <div class="search-actions"><button type="submit" class="btn btn-primary"><svg><use href="#i-search"></use></svg>Search Now</button></div>
-              </form>
-            </section>
-
-            <section class="tab-pane" id="homes" role="tabpanel" hidden>
-              <form class="search-card" id="homesForm">
-                <div class="modifier-row"><div class="trip-type field-group compact-group"><label class="radio-label"><input type="radio" name="homesType" value="rent" checked /><span>Rent</span></label><label class="radio-label"><input type="radio" name="homesType" value="buy" /><span>Buy</span></label></div><span class="form-hint">Smart property solutions from Sadik Homes</span></div>
-                <div class="hotel-search-grid homes-grid"><div class="form-field autocomplete-field" data-autocomplete="city"><label for="homeDestination"><svg><use href="#i-location"></use></svg>Location</label><div class="input-shell"><input id="homeDestination" autocomplete="off" placeholder="Search City or Area" value="Dhaka" /><svg><use href="#i-search"></use></svg></div><div class="suggestions" id="homeDestinationSuggestions"></div></div><div class="form-field date-field"><label for="homeCheckin"><svg><use href="#i-calendar"></use></svg>Check-In</label><div class="input-shell"><input id="homeCheckin" type="date" value="" /><svg><use href="#i-calendar"></use></div></div><div class="form-field date-field"><label for="homeCheckout"><svg><use href="#i-calendar"></use></svg>Check-Out</label><div class="input-shell"><input id="homeCheckout" type="date" value="" /><svg><use href="#i-calendar"></use></div></div></div>
-                <div class="search-actions"><button type="submit" class="btn btn-primary"><svg><use href="#i-search"></use></svg>Search Now</button></div>
-              </form>
-            </section>
-
-            <section class="tab-pane" id="visa" role="tabpanel" hidden>
-              <form class="search-card" id="visaForm">
-                <div class="visa-search-grid"><div class="form-field autocomplete-field" data-autocomplete="country"><label for="visaCountry"><svg><use href="#i-location"></use></svg>Country</label><div class="input-shell"><input id="visaCountry" autocomplete="off" placeholder="Search Country" value="United Arab Emirates" /><svg><use href="#i-search"></use></svg></div><div class="suggestions" id="visaCountrySuggestions"></div></div><div class="form-field autocomplete-field" data-autocomplete="category"><label for="visaCategory"><svg><use href="#i-passport"></use></svg>Category</label><div class="input-shell"><input id="visaCategory" autocomplete="off" placeholder="Select Category" value="Tourist Visa" /><svg><use href="#i-search"></use></svg></div><div class="suggestions" id="visaCategorySuggestions"></div></div></div>
-                <div class="visa-note"><svg><use href="#i-shield"></use></svg><span>Visa information and application support from Sadik Travels experts.</span></div>
-                <div class="search-actions"><button type="submit" class="btn btn-primary"><svg><use href="#i-search"></use></svg>Search Now</button></div>
-              </form>
-            </section>
-
-            <section class="tab-pane" id="tours" role="tabpanel" hidden>
-              <form class="search-card" id="toursForm">
-                <div class="modifier-row tour-modifier-row"><div class="tour-kicker"><svg><use href="#i-map"></use></svg><strong>Go Get Tour</strong><span>Discover curated Bangladesh and international packages</span></div><div class="compact-select-wrap"><label class="tour-inline-label">Sort by <select id="tourSort"><option value="newest">Recommended</option><option value="price_asc">Lowest price</option><option value="price_desc">Highest price</option></select></label></div></div>
-                <div class="tour-search-grid">
-                  <div class="form-field autocomplete-field" data-autocomplete="city"><label for="tourDestination"><svg><use href="#i-location"></use></svg>Destination</label><div class="input-shell"><input id="tourDestination" autocomplete="off" placeholder="Search country or destination" value="Bangladesh" /><svg><use href="#i-search"></use></svg></div><div class="suggestions" id="tourDestinationSuggestions"></div></div>
-                  <div class="form-field"><label for="tourType"><svg><use href="#i-map"></use></svg>Tour type</label><div class="input-shell"><select id="tourType"><option value="">All tour types</option><option value="Family Tour" selected>Family Tour</option><option value="Adventure Tour">Adventure Tour</option><option value="Nature Tour">Nature Tour</option><option value="Honeymoon Tour">Honeymoon Tour</option><option value="Group Tour">Group Tour</option></select></div></div>
-                  <div class="form-field"><label for="tourBudget"><svg><use href="#i-location"></use></svg>Maximum budget</label><div class="input-shell"><select id="tourBudget"><option value="">Any budget</option><option value="10000">Up to ৳10,000</option><option value="15000">Up to ৳15,000</option><option value="25000">Up to ৳25,000</option><option value="50000">Up to ৳50,000</option></select></div></div>
-                </div>
-                <div class="search-actions"><button type="submit" class="btn btn-primary"><svg><use href="#i-search"></use></svg>Search Tours</button></div>
-              </form>
-            </section>
-
-            <section class="tab-pane" id="esim" role="tabpanel" hidden>
-              <form class="search-card" id="esimForm">
-                <div class="modifier-row"><div class="trip-type field-group compact-group"><label class="radio-label"><input type="radio" name="esimScope" value="local" checked /><span>Local</span></label><label class="radio-label"><input type="radio" name="esimScope" value="global" /><span>Global / Regional</span></label></div></div>
-                <div class="esim-search-grid"><div class="form-field autocomplete-field" data-autocomplete="country"><label for="esimDestination"><svg><use href="#i-location"></use></svg><span id="esimLocationLabel">Destination Country</span></label><div class="input-shell"><input id="esimDestination" autocomplete="off" placeholder="Search country..." value="Singapore" /><svg><use href="#i-search"></use></svg></div><div class="suggestions" id="esimDestinationSuggestions"></div></div></div>
-                <div class="search-actions"><button type="submit" class="btn btn-primary"><svg><use href="#i-search"></use></svg>Search Now</button></div>
-              </form>
-            </section>
+              <section class="tab-pane" id="esim" role="tabpanel" hidden>
+                <form class="search-card" id="esimForm">
+                  <div class="modifier-row"><div class="trip-type field-group compact-group"><label class="radio-label"><input type="radio" name="esimScope" value="local" checked /><span>Local</span></label><label class="radio-label"><input type="radio" name="esimScope" value="global" /><span>Global / Regional</span></label></div></div>
+                  <div class="esim-search-grid"><div class="form-field autocomplete-field" data-autocomplete="country"><label for="esimDestination"><svg><use href="#i-location"></use></svg><span id="esimLocationLabel">Destination Country</span></label><div class="input-shell"><input id="esimDestination" autocomplete="off" placeholder="Search country..." value="Singapore" /><svg><use href="#i-search"></use></svg></div><div class="suggestions" id="esimDestinationSuggestions"></div></div></div>
+                  <div class="search-actions"><button type="submit" class="btn btn-primary"><svg><use href="#i-search"></use></svg>Search Now</button></div>
+                </form>
+              </section>
+            </div>
           </div>
         </div>
-      </div>
-    </header>
+      </header>
 
-    <section class="banner-section" id="offers" aria-label="Promotional offers">
-      <div class="container panel-block flush-panel">
-        <div class="slider banner-slider" data-slider="banners">
-          <div class="slider-viewport"><div class="slider-track" id="bannerTrack"><div class="public-content-empty"><strong>No published offers yet</strong><span>Promotional banners will appear here after an admin publishes them.</span></div></div></div>
-          <button class="slider-arrow slider-prev" data-slider-prev="banners" aria-label="Previous banner"><svg><use href="#i-arrow-left"></use></svg></button>
-          <button class="slider-arrow slider-next" data-slider-next="banners" aria-label="Next banner"><svg><use href="#i-arrow-right"></use></svg></button>
-          <div class="slider-dots" id="bannerDots"></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="tour-results-section" id="tourResultsSection" hidden aria-labelledby="tourResultsTitle">
-      <div class="container tour-results-page">
-        <div class="tour-breadcrumb"><a href="#top">Home</a><span>/</span><strong>Search: tour</strong></div>
-        <div class="tour-results-heading"><div><span class="tour-eyebrow">Go Get Tour</span><h2 id="tourResultsTitle">Find a tour package</h2><p>Curated journeys with easy booking, clear pricing and Sadik Travels support.</p></div><button class="btn btn-outline" id="closeTourResults">Back to search</button></div>
-        <div class="tour-results-layout">
-          <aside class="tour-filter-panel">
-            <div class="tour-filter-header"><strong>Filter tours</strong><button id="clearTourFilters" type="button" class="text-btn">Clear all</button></div>
-            <label class="tour-filter-field"><span>Destination</span><input id="tourFilterDestination" placeholder="Bangladesh" value="Bangladesh" /></label>
-            <label class="tour-filter-field"><span>Tour type</span><select id="tourFilterType"><option value="">All tour types</option><option>Family Tour</option><option>Adventure Tour</option><option>Nature Tour</option><option>Honeymoon Tour</option><option>Group Tour</option></select></label>
-            <label class="tour-filter-field"><span>Max budget</span><select id="tourFilterBudget"><option value="">Any budget</option><option value="10000">৳10,000</option><option value="15000">৳15,000</option><option value="25000">৳25,000</option><option value="50000">৳50,000</option></select></label>
-            <button class="btn btn-primary full-btn" id="applyTourFilters" type="button">Apply filters</button>
-          </aside>
-          <div class="tour-results-main"><div class="tour-results-toolbar"><span id="tourResultsCount">0 tours found</span><label>Sort <select id="tourResultsSort"><option value="newest">Recommended</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option></select></label></div><div class="tour-results-grid" id="tourResultsGrid"></div><div class="tour-empty" id="tourEmpty" hidden><div class="tour-empty-icon"><svg><use href="#i-map"></use></svg></div><strong>No tours found</strong><p>Try another destination or clear your filters.</p></div></div>
-        </div>
-      </div>
-    </section>
-
-    <div id="homeSections" aria-label="Sadik Travels services"><!-- Marketplace sections rendered by app.js --></div>
-
-    <section class="stat-section" aria-label="Sadik Travels statistics">
-      <div class="container panel-block">
-        <div class="stat-div"><div class="stat-header"><span>Your</span> <span>Journey,</span> <span>Our</span> <span>Expertise.</span></div><div class="stat-footer"><span>Discover</span> <span>the</span> <span>Difference</span> <span>Today.</span></div><div class="stat-body"><div><strong>Live</strong><span>Supplier inventory</span></div><div><strong>Secure</strong><span>OTP accounts</span></div><div><strong>24/7</strong><span>Support delivery</span></div></div></div>
-      </div>
-    </section>
-
-    <section class="content-section app-section" id="sadik-app" aria-labelledby="appTitle">
-      <div class="container panel-block section-bg">
-        <div class="section-heading centered"><div><h2 id="appTitle">Track Flights with Your all-in-one Travel App</h2></div></div>
-        <div class="app-grid">
-          <div class="stores"><div class="store-row"><div class="store-card"><div class="store-rating"><div class="store-glyph">●</div><div>4.7 Rating<div class="stars">★★★★★</div></div></div><img class="qr" src="/assets/images__qr-apple.svg" alt="Apple Store QR Code" /><button type="button" class="store-badge" data-app-download="App Store"><img src="/assets/images__amy-ios.png" alt="App Store download link not configured" /></button><span>App Store</span></div><div class="store-card"><div class="store-rating"><div class="store-glyph play">▶</div><div>4.7 Rating<div class="stars">★★★★★</div></div></div><img class="qr" src="/assets/images__qr-google.svg" alt="Google Play Store QR Code" /><button type="button" class="store-badge" data-app-download="Google Play"><img src="/assets/images__amy-android.png" alt="Google Play download link not configured" /></button><span>Google Play</span></div></div><p>Scan the QR code to download the app</p></div>
-          <div class="app-illustration" aria-label="Flight tracking app illustration"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit orbit-three"></div><div class="illustration-plane"><svg><use href="#i-plane"></use></svg></div><div class="app-phone"><div class="phone-notch"></div><div class="phone-screen"><div class="screen-line wide"></div><div class="screen-line"></div><div class="flight-mini-card"><span>DAC</span><i>✈</i><span>DXB</span></div><div class="screen-line short"></div><div class="screen-chip"></div></div></div></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="content-section agents-section" id="agents" aria-labelledby="agentsTitle">
-      <div class="container panel-block section-bg">
-        <div class="section-heading">
-          <div><span class="hs-eyebrow"><svg><use href="#i-user"></use></svg>People</span><h2 id="agentsTitle">Travel Agents</h2><p>Meet our verified Sadik Travels travel specialists.</p></div>
-          <a class="btn btn-outline" href="/travel-agents" data-public-route="/travel-agents">View all agents</a>
-        </div>
-        <div class="agents-carousel">
-          <div class="agents-carousel-viewport"><div class="agents-carousel-track" id="agentsTrack" aria-label="Travel agents carousel"></div></div>
-          <button class="agents-carousel-btn agents-carousel-prev" id="agentsPrev" type="button" aria-label="Previous agents"><svg><use href="#i-arrow-left"></use></svg></button>
-          <button class="agents-carousel-btn agents-carousel-next" id="agentsNext" type="button" aria-label="Next agents"><svg><use href="#i-arrow-right"></use></svg></button>
-        </div>
-        <div class="agents-carousel-foot">
-          <a class="btn btn-outline" href="/travel-agents" data-public-route="/travel-agents">View all travel agents →</a>
-        </div>
-      </div>
-    </section>
-
-    <section class="content-section" id="track-booking" aria-labelledby="trackCtaTitle">
-      <div class="container panel-block">
-        <div class="track-cta">
-          <div class="track-cta-copy">
-            <h2 id="trackCtaTitle">Track your booking</h2>
-            <p>Enter your booking reference and the contact used at checkout to follow your itinerary status in real time.</p>
+      <section class="banner-section" id="offers" aria-label="Promotional offers">
+        <div class="container panel-block flush-panel">
+          <div class="slider banner-slider" data-slider="banners">
+            <div class="slider-viewport"><div class="slider-track" id="bannerTrack"><div class="public-content-empty"><strong>No published offers yet</strong><span>Promotional banners will appear here after an admin publishes them.</span></div></div></div>
+            <button class="slider-arrow slider-prev" data-slider-prev="banners" aria-label="Previous banner"><svg><use href="#i-arrow-left"></use></svg></button>
+            <button class="slider-arrow slider-next" data-slider-next="banners" aria-label="Next banner"><svg><use href="#i-arrow-right"></use></svg></button>
+            <div class="slider-dots" id="bannerDots"></div>
           </div>
-          <button type="button" class="btn" id="trackCtaBtn"><svg><use href="#i-search"></use></svg>Track booking</button>
         </div>
-      </div>
-    </section>
-  </main>
+      </section>
 
-  <div id="publicRouteRoot" class="public-route-root" hidden></div>
+      <section class="tour-results-section" id="tourResultsSection" hidden aria-labelledby="tourResultsTitle">
+        <div class="container tour-results-page">
+          <div class="tour-breadcrumb"><a href="#top">Home</a><span>/</span><strong>Search: tour</strong></div>
+          <div class="tour-results-heading"><div><span class="tour-eyebrow">Go Get Tour</span><h2 id="tourResultsTitle">Find a tour package</h2><p>Curated journeys with easy booking, clear pricing and Sadik Travels support.</p></div><button class="btn btn-outline" id="closeTourResults">Back to search</button></div>
+          <div class="tour-results-layout">
+            <aside class="tour-filter-panel">
+              <div class="tour-filter-header"><strong>Filter tours</strong><button id="clearTourFilters" type="button" class="text-btn">Clear all</button></div>
+              <label class="tour-filter-field"><span>Destination</span><input id="tourFilterDestination" placeholder="Bangladesh" value="Bangladesh" /></label>
+              <label class="tour-filter-field"><span>Tour type</span><select id="tourFilterType"><option value="">All tour types</option><option>Family Tour</option><option>Adventure Tour</option><option>Nature Tour</option><option>Honeymoon Tour</option><option>Group Tour</option></select></label>
+              <label class="tour-filter-field"><span>Max budget</span><select id="tourFilterBudget"><option value="">Any budget</option><option value="10000">৳10,000</option><option value="15000">৳15,000</option><option value="25000">৳25,000</option><option value="50000">৳50,000</option></select></label>
+              <button class="btn btn-primary full-btn" id="applyTourFilters" type="button">Apply filters</button>
+            </aside>
+            <div class="tour-results-main"><div class="tour-results-toolbar"><span id="tourResultsCount">0 tours found</span><label>Sort <select id="tourResultsSort"><option value="newest">Recommended</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option></select></label></div><div class="tour-results-grid" id="tourResultsGrid"></div><div class="tour-empty" id="tourEmpty" hidden><div class="tour-empty-icon"><svg><use href="#i-map"></use></svg></div><strong>No tours found</strong><p>Try another destination or clear your filters.</p></div></div>
+          </div>
+        </div>
+      </section>
 
-  <footer class="site-footer" id="footer">
-    <div class="container panel-block footer-inner">
-      <div class="footer-top">
-        <div class="footer-about"><img data-brand-logo src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels" /><p>Sadik Travels connects customers with live travel providers, curated tour packages and customer support through one secure platform.</p><div class="footer-social"><a href="#contact" aria-label="Facebook contact">f</a><a href="#contact" aria-label="Instagram contact">◎</a><a href="#contact" aria-label="Youtube contact">▶</a><a href="#contact" aria-label="LinkedIn contact">in</a></div></div>
-        <div class="footer-links"><h3>Company</h3><a href="#contact">About Sadik Travels</a><a href="#contact">Contact Us</a><a href="#contact">Careers</a><a href="#contact">Terms &amp; Conditions</a><a href="#contact">Privacy Policy</a></div>
-        <div class="footer-links"><h3>Services</h3><a href="/flights" data-public-route="/flights">Flight Booking</a><a href="/hotels" data-public-route="/hotels">Hotel Booking</a><a href="/visa" data-public-route="/visa">Visa Processing</a><a href="/esim" data-public-route="/esim">eSIM</a><a href="/offers" data-public-route="/offers">Travel Offers</a></div>
-        <div class="footer-links footer-contact" id="contact"><h3>Contact Sadik Travels</h3><address><p>Reach our support team through the contacts configured by an authorized admin.</p><p><a data-support-phone href="#contact">Support phone</a></p><p><a data-support-email href="#contact">Support email</a></p></address></div>
+      <div id="homeSections" aria-label="Sadik Travels services"><!-- Marketplace sections rendered by app.js --></div>
+
+      <section class="stat-section" aria-label="Sadik Travels statistics">
+        <div class="container panel-block">
+          <div class="stat-div"><div class="stat-header"><span>Your</span> <span>Journey,</span> <span>Our</span> <span>Expertise.</span></div><div class="stat-footer"><span>Discover</span> <span>the</span> <span>Difference</span> <span>Today.</span></div><div class="stat-body"><div><strong>Live</strong><span>Supplier inventory</span></div><div><strong>Secure</strong><span>OTP accounts</span></div><div><strong>24/7</strong><span>Support delivery</span></div></div></div>
+        </div>
+      </section>
+
+      <section class="content-section app-section" id="sadik-app" aria-labelledby="appTitle">
+        <div class="container panel-block section-bg">
+          <div class="section-heading centered"><div><h2 id="appTitle">Track Flights with Your all-in-one Travel App</h2></div></div>
+          <div class="app-grid">
+            <div class="stores"><div class="store-row"><div class="store-card"><div class="store-rating"><div class="store-glyph">●</div><div>4.7 Rating<div class="stars">★★★★★</div></div></div><img class="qr" src="/assets/images__qr-apple.svg" alt="Apple Store QR Code" /><button type="button" class="store-badge" data-app-download="App Store"><img src="/assets/images__amy-ios.png" alt="App Store download link not configured" /></button><span>App Store</span></div><div class="store-card"><div class="store-rating"><div class="store-glyph play">▶</div><div>4.7 Rating<div class="stars">★★★★★</div></div></div><img class="qr" src="/assets/images__qr-google.svg" alt="Google Play Store QR Code" /><button type="button" class="store-badge" data-app-download="Google Play"><img src="/assets/images__amy-android.png" alt="Google Play download link not configured" /></button><span>Google Play</span></div></div><p>Scan the QR code to download the app</p></div>
+            <div class="app-illustration" aria-label="Flight tracking app illustration"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit orbit-three"></div><div class="illustration-plane"><svg><use href="#i-plane"></use></svg></div><div class="app-phone"><div class="phone-notch"></div><div class="phone-screen"><div class="screen-line wide"></div><div class="screen-line"></div><div class="flight-mini-card"><span>DAC</span><i>✈</i><span>DXB</span></div><div class="screen-line short"></div><div class="screen-chip"></div></div></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-section agents-section" id="agents" aria-labelledby="agentsTitle">
+        <div class="container panel-block section-bg">
+          <div class="section-heading">
+            <div><span class="hs-eyebrow"><svg><use href="#i-user"></use></svg>People</span><h2 id="agentsTitle">Travel Agents</h2><p>Meet our verified Sadik Travels travel specialists.</p></div>
+            <a class="btn btn-outline" href="/travel-agents" data-public-route="/travel-agents">View all agents</a>
+          </div>
+          <div class="agents-carousel">
+            <div class="agents-carousel-viewport"><div class="agents-carousel-track" id="agentsTrack" aria-label="Travel agents carousel"></div></div>
+            <button class="agents-carousel-btn agents-carousel-prev" id="agentsPrev" type="button" aria-label="Previous agents"><svg><use href="#i-arrow-left"></use></svg></button>
+            <button class="agents-carousel-btn agents-carousel-next" id="agentsNext" type="button" aria-label="Next agents"><svg><use href="#i-arrow-right"></use></svg></button>
+          </div>
+          <div class="agents-carousel-foot">
+            <a class="btn btn-outline" href="/travel-agents" data-public-route="/travel-agents">View all travel agents →</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-section" id="track-booking" aria-labelledby="trackCtaTitle">
+        <div class="container panel-block">
+          <div class="track-cta">
+            <div class="track-cta-copy">
+              <h2 id="trackCtaTitle">Track your booking</h2>
+              <p>Enter your booking reference and the contact used at checkout to follow your itinerary status in real time.</p>
+            </div>
+            <button type="button" class="btn" id="trackCtaBtn"><svg><use href="#i-search"></use></svg>Track booking</button>
+          </div>
+        </div>
+      </section>
+    </main>
+    <div id="publicRouteRoot" class="public-route-root" hidden></div>
       </div>
-      <div class="footer-offices"><div><h3>Service status</h3><p>Live travel providers, MongoDB persistence and notification delivery are configured through the backend environment.</p></div><div><h3>Customer support</h3><p>Support channels are managed from the Sadik Travels admin workspace.</p></div><div><h3>Tour catalogue</h3><p>All Go Get Tour packages are created and edited by authorized admins.</p></div><div><h3>Privacy</h3><p>Customer data is handled through authenticated, server-side API routes.</p></div></div>
-      <div class="footer-bottom"><span>Copyright © 2026. Sadik Travels. All rights reserved.</span><span><strong>Sadik Travels</strong> — travel made simple</span></div>
+    <footer class="site-footer" id="footer">
+      <div class="container panel-block footer-inner">
+        <div class="footer-top">
+          <div class="footer-about"><img data-brand-logo src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels" /><p>Sadik Travels connects customers with live travel providers, curated tour packages and customer support through one secure platform.</p><div class="footer-social"><a href="#contact" aria-label="Facebook contact">f</a><a href="#contact" aria-label="Instagram contact">◎</a><a href="#contact" aria-label="Youtube contact">▶</a><a href="#contact" aria-label="LinkedIn contact">in</a></div></div>
+          <div class="footer-links"><h3>Company</h3><a href="#contact">About Sadik Travels</a><a href="#contact">Contact Us</a><a href="#contact">Careers</a><a href="#contact">Terms &amp; Conditions</a><a href="#contact">Privacy Policy</a></div>
+          <div class="footer-links"><h3>Services</h3><a href="/flights" data-public-route="/flights">Flight Booking</a><a href="/hotels" data-public-route="/hotels">Hotel Booking</a><a href="/visa" data-public-route="/visa">Visa Processing</a><a href="/esim" data-public-route="/esim">eSIM</a><a href="/offers" data-public-route="/offers">Travel Offers</a></div>
+          <div class="footer-links footer-contact" id="contact"><h3>Contact Sadik Travels</h3><address><p>Reach our support team through the contacts configured by an authorized admin.</p><p><a data-support-phone href="#contact">Support phone</a></p><p><a data-support-email href="#contact">Support email</a></p></address></div>
+        </div>
+        <div class="footer-offices"><div><h3>Service status</h3><p>Live travel providers, MongoDB persistence and notification delivery are configured through the backend environment.</p></div><div><h3>Customer support</h3><p>Support channels are managed from the Sadik Travels admin workspace.</p></div><div><h3>Tour catalogue</h3><p>All Go Get Tour packages are created and edited by authorized admins.</p></div><div><h3>Privacy</h3><p>Customer data is handled through authenticated, server-side API routes.</p></div></div>
+        <div class="footer-bottom"><span>Copyright © 2026. Sadik Travels. All rights reserved.</span><span><strong>Sadik Travels</strong> — travel made simple</span></div>
+      </div>
+    </footer>
     </div>
-  </footer>
+  </div>
 
   <button class="chat-bubble" id="chatBubble" aria-label="Open Sadik Travels Support"><img src="/assets/sadik-travels-favicon-chat.png" alt="Sadik Travels Chat" /><span class="chat-badge">1</span></button>
 
@@ -331,6 +359,7 @@
   <template id="trackTemplate"><div class="modal-heading"><div class="modal-icon blue"><svg><use href="#i-search"></use></svg></div><h2 id="modalTitle">Track your booking</h2></div><p class="modal-subtitle">Enter your booking reference and contact number to view your itinerary.</p><form id="trackForm"><label class="modal-field"><span>Booking reference</span><input id="trackReference" required placeholder="Paste the UUID booking reference" autocomplete="off" /></label><label class="modal-field"><span>Mobile number or email</span><input id="trackIdentity" required placeholder="The contact used for booking" autocomplete="email" /></label><button class="btn btn-primary full-btn" type="submit">Track Booking</button></form></template>
 
   <script src="/api.js?v=3"></script>
-  <script src="/app.js?v=12"></script>
+  <script src="/pages.js?v=1"></script>
+  <script src="/app.js?v=14"></script>
 </body>
 </html>

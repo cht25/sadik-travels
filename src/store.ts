@@ -117,6 +117,20 @@ const DEFAULT_NAVIGATION: Array<Omit<CreateNavItem,'id'>> = [
   { groupName:'Website', label:'Homepage Content', route:'/admin/content?type=homepage', icon:'spark', permission:'content_manage', sortOrder:90, visible:true, enabled:true },
   { groupName:'Website', label:'Media Library', route:'/admin/media', icon:'image', permission:'content_manage', sortOrder:91, visible:true, enabled:true },
   { groupName:'Website', label:'Service Visibility', route:'/admin/services', icon:'eye', permission:'services_manage', sortOrder:92, visible:true, enabled:true },
+  { groupName:'Catalogue', label:'All Products', route:'/admin/catalog', icon:'grid', permission:'content_manage', sortOrder:44, visible:true, enabled:true },
+  { groupName:'Catalogue', label:'Umrah Packages', route:'/admin/catalog?type=umrah_package', icon:'map', permission:'content_manage', sortOrder:45, visible:true, enabled:true },
+  { groupName:'Catalogue', label:'Holiday Packages', route:'/admin/catalog?type=holiday_package', icon:'plane', permission:'content_manage', sortOrder:46, visible:true, enabled:true },
+  { groupName:'Catalogue', label:'eSIM Plans', route:'/admin/catalog?type=esim', icon:'sim', permission:'content_manage', sortOrder:47, visible:true, enabled:true },
+  { groupName:'Catalogue', label:'Visa Services', route:'/admin/catalog?type=visa_service', icon:'passport', permission:'content_manage', sortOrder:48, visible:true, enabled:true },
+  { groupName:'Catalogue', label:'Medical Tourism', route:'/admin/catalog?type=medical_tourism', icon:'hotel', permission:'content_manage', sortOrder:49, visible:true, enabled:true },
+  { groupName:'Catalogue', label:'Homes', route:'/admin/catalog?type=home', icon:'home', permission:'content_manage', sortOrder:50, visible:true, enabled:true },
+  { groupName:'Catalogue', label:'Card Offers', route:'/admin/catalog?type=card_offer', icon:'card', permission:'content_manage', sortOrder:51, visible:true, enabled:true },
+  { groupName:'Catalogue', label:'Airline Offers', route:'/admin/catalog?type=airline_offer', icon:'plane', permission:'content_manage', sortOrder:52, visible:true, enabled:true },
+  { groupName:'Catalogue', label:'Destinations', route:'/admin/catalog?type=destination', icon:'pin', permission:'content_manage', sortOrder:53, visible:true, enabled:true },
+  { groupName:'E-commerce', label:'Orders & Bookings', route:'/admin/orders', icon:'briefcase', permission:'bookings_view', sortOrder:55, visible:true, enabled:true },
+  { groupName:'E-commerce', label:'Coupons', route:'/admin/coupons', icon:'tag', permission:'content_manage', sortOrder:56, visible:true, enabled:true },
+  { groupName:'E-commerce', label:'Reviews', route:'/admin/reviews', icon:'star', permission:'content_manage', sortOrder:57, visible:true, enabled:true },
+  { groupName:'E-commerce', label:'Visa Applications', route:'/admin/visa-applications', icon:'passport', permission:'bookings_view', sortOrder:58, visible:true, enabled:true },
   { groupName:'Settings', label:'Settings', route:'/admin/settings', icon:'settings', permission:'settings_manage', sortOrder:100, visible:true, enabled:true },
   { groupName:'Settings', label:'System Status', route:'/admin/system-status', icon:'activity', permission:'dashboard_view', sortOrder:101, visible:true, enabled:true },
   { groupName:'Security', label:'Profile & Security', route:'/admin/profile', icon:'shield', permission:'dashboard_view', sortOrder:110, visible:true, enabled:true },
@@ -199,7 +213,7 @@ export class MongoStore implements Store {
   private async remove(kind: string, id: string) { return (await this.modelFor(kind).deleteOne({ id })).deletedCount === 1; }
   private async paged<T>(items: T[], currentPage?: number, currentSize?: number) { const activePage = page(currentPage); const size = pageSize(currentSize); return { items: items.slice((activePage - 1) * size, activePage * size), total: items.length, page: activePage, pageSize: size, pageCount: Math.max(1, Math.ceil(items.length / size)) }; }
 
-  async listNavigation(visibleOnly = false) { let items = await this.all<AdminNavItem>('navigation'); if (!items.length) { const time = now(); items = await Promise.all(DEFAULT_NAVIGATION.map(input => this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }))); } return items.filter(item => !visibleOnly || (item.visible && item.enabled)).sort((a,b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label)); }
+  async listNavigation(visibleOnly = false) { let items = await this.all<AdminNavItem>('navigation'); if (!items.length) { const time = now(); items = await Promise.all(DEFAULT_NAVIGATION.map(input => this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }))); } else { const known = new Set(items.map(item => `${item.groupName}|${item.label}|${item.route}`)); const missing = DEFAULT_NAVIGATION.filter(input => !known.has(`${input.groupName}|${input.label}|${input.route}`)); if (missing.length) { const time = now(); const added = await Promise.all(missing.map(input => this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }))); items = [...items, ...added]; } } return items.filter(item => !visibleOnly || (item.visible && item.enabled)).sort((a,b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label)); }
   async createNavigation(input: CreateNavItem) { const time = now(); return this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }); }
   async updateNavigation(id: string, patch: UpdateNavItem) { return this.patch<AdminNavItem>('navigation', id, { ...patch, updatedAt: now() }); }
   async deleteNavigation(id: string) { return this.remove('navigation', id); }
