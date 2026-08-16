@@ -6,7 +6,7 @@
   <title>Sadik Travels | Online Travel Agency</title>
   <meta name="description" content="Book flights, hotels, homes, visa services and eSIMs with Sadik Travels." />
   <link rel="icon" type="image/png" href="/assets/sadik-travels-favicon-chat.png" />
-  <link rel="stylesheet" href="/styles.css?v=11" />
+  <link rel="stylesheet" href="/styles.css?v=13" />
 </head>
 <body data-api-base="/api/v1" data-live-api="true">
   <svg class="svg-sprite" aria-hidden="true" width="0" height="0" focusable="false">
@@ -31,6 +31,13 @@
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4.4 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-location" viewBox="0 0 24 24"><path d="M19 10.2c0 4.7-7 10-7 10s-7-5.3-7-10a7 7 0 1 1 14 0Z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="10" r="2.3" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
     <symbol id="i-phone" viewBox="0 0 24 24"><path d="M6.5 3.5 9 3l2 4.5-1.8 1.5a13 13 0 0 0 5.8 5.8l1.5-1.8 4.5 2-.5 2.5A2 2 0 0 1 18.6 19C10.9 18.3 5.7 13.1 5 5.4a2 2 0 0 1 1.5-1.9Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.2 14.5 8.6 20.4 9.4 16.1 13.5 17.2 19.4 12 16.7 6.8 19.4 7.9 13.5 3.6 9.4 9.5 8.6 12 3.2Z" fill="currentColor"/></symbol>
+    <symbol id="i-images" viewBox="0 0 24 24"><rect x="3" y="4" width="14" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7 17V9a3 3 0 0 1 3-3h8" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="8" cy="9" r="1.4" fill="currentColor"/><path d="m6 15 3-2.5L11 14l2.5-3L17 14" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+    <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 8V3h10v5M7 19H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2M7 15h10v6H7v-6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="16" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="12" r="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="13" cy="18" r="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-bed" viewBox="0 0 24 24"><path d="M3 18v-7a2 2 0 0 1 2-2h9a4 4 0 0 1 4 4M3 18v3M21 18v3M3 14h18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="11" r="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3 12.5 11.5 4H20v8.5L11.5 20 3 12.5Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="16" cy="8" r="1.4" fill="currentColor"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
   </svg>
 
   <div id="toastRegion" class="toast-region" aria-live="polite"></div>
@@ -65,23 +72,23 @@
       <button class="sidebar-login" id="sidebarLogin">Login</button>
     </div>
     <div class="sidebar-section-label">Travel</div>
-    <a href="/flights" class="side-link" data-public-route="/flights"><span class="side-icon"><svg><use href="#i-plane"></use></svg></span>Flights<span class="side-arrow">›</span></a>
-    <a href="/hotels" class="side-link" data-public-route="/hotels"><span class="side-icon"><svg><use href="#i-hotel"></use></svg></span>Hotels<span class="side-arrow">›</span></a>
-    <a href="/homes" class="side-link" data-public-route="/homes"><span class="side-icon"><svg><use href="#i-home"></use></svg></span>Homes<span class="side-arrow">›</span></a>
-    <a href="/visa" class="side-link" data-public-route="/visa"><span class="side-icon"><svg><use href="#i-passport"></use></svg></span>Visa services<span class="side-arrow">›</span></a>
-    <a href="/tours" class="side-link" data-public-route="/tours"><span class="side-icon"><svg><use href="#i-map"></use></svg></span>Go Get Tour<span class="side-arrow">›</span></a>
-    <a href="/esim" class="side-link" data-public-route="/esim"><span class="side-icon"><svg><use href="#i-sim"></use></svg></span>eSIM<span class="side-arrow">›</span></a>
-    <a href="/special-umrah-fare" class="side-link side-action" data-public-route="/special-umrah-fare"><span class="side-icon"><svg><use href="#i-award"></use></svg></span>Special Umrah Fare<span class="side-arrow">›</span></a>
-    <a href="/umrah-packages" class="side-link side-action" data-public-route="/umrah-packages"><span class="side-icon"><svg><use href="#i-map"></use></svg></span>Umrah Packages<span class="side-arrow">›</span></a>
-    <a href="/holiday-packages" class="side-link side-action" data-public-route="/holiday-packages"><span class="side-icon"><svg><use href="#i-plane"></use></svg></span>Holiday Packages<span class="side-arrow">›</span></a>
-    <a href="/medical-tourism" class="side-link side-action" data-public-route="/medical-tourism"><span class="side-icon"><svg><use href="#i-hotel"></use></svg></span>Medical Tourism<span class="side-arrow">›</span></a>
-    <a href="/card-offers" class="side-link side-action" data-public-route="/card-offers"><span class="side-icon"><svg><use href="#i-check"></use></svg></span>Card Offers<span class="side-arrow">›</span></a>
-    <a href="/airline-offers" class="side-link side-action" data-public-route="/airline-offers"><span class="side-icon"><svg><use href="#i-plane"></use></svg></span>Airlines Offers<span class="side-arrow">›</span></a>
-    <a href="/explore" class="side-link side-action" data-public-route="/explore"><span class="side-icon"><svg><use href="#i-location"></use></svg></span>Explore<span class="side-arrow">›</span></a>
+    <a href="/#flights" class="side-link" data-scroll="flights"><span class="side-icon"><svg><use href="#i-plane"></use></svg></span>Flights<span class="side-arrow">›</span></a>
+    <a href="/#hotels" class="side-link" data-scroll="hotels"><span class="side-icon"><svg><use href="#i-hotel"></use></svg></span>Hotels<span class="side-arrow">›</span></a>
+    <a href="/#homes" class="side-link" data-scroll="homes"><span class="side-icon"><svg><use href="#i-home"></use></svg></span>Homes<span class="side-arrow">›</span></a>
+    <a href="/#visa-services" class="side-link" data-scroll="visa-services"><span class="side-icon"><svg><use href="#i-passport"></use></svg></span>Visa services<span class="side-arrow">›</span></a>
+    <a href="/#tours" class="side-link" data-scroll="tours"><span class="side-icon"><svg><use href="#i-map"></use></svg></span>Go Get Tour<span class="side-arrow">›</span></a>
+    <a href="/#esim" class="side-link" data-scroll="esim"><span class="side-icon"><svg><use href="#i-sim"></use></svg></span>eSIM<span class="side-arrow">›</span></a>
+    <a href="/#special-umrah-fare" class="side-link side-action" data-scroll="special-umrah-fare"><span class="side-icon"><svg><use href="#i-award"></use></svg></span>Special Umrah Fare<span class="side-arrow">›</span></a>
+    <a href="/#umrah-packages" class="side-link side-action" data-scroll="umrah-packages"><span class="side-icon"><svg><use href="#i-map"></use></svg></span>Umrah Packages<span class="side-arrow">›</span></a>
+    <a href="/#holiday-packages" class="side-link side-action" data-scroll="holiday-packages"><span class="side-icon"><svg><use href="#i-plane"></use></svg></span>Holiday Packages<span class="side-arrow">›</span></a>
+    <a href="/#medical-tourism" class="side-link side-action" data-scroll="medical-tourism"><span class="side-icon"><svg><use href="#i-hotel"></use></svg></span>Medical Tourism<span class="side-arrow">›</span></a>
+    <a href="/#card-offers" class="side-link side-action" data-scroll="card-offers"><span class="side-icon"><svg><use href="#i-check"></use></svg></span>Card Offers<span class="side-arrow">›</span></a>
+    <a href="/#airline-offers" class="side-link side-action" data-scroll="airline-offers"><span class="side-icon"><svg><use href="#i-plane"></use></svg></span>Airlines Offers<span class="side-arrow">›</span></a>
+    <a href="/#explore" class="side-link side-action" data-scroll="explore"><span class="side-icon"><svg><use href="#i-location"></use></svg></span>Explore<span class="side-arrow">›</span></a>
     <a href="/travel-agents" class="side-link side-action" data-public-route="/travel-agents"><span class="side-icon"><svg><use href="#i-user"></use></svg></span>Travel Agents<span class="side-arrow">›</span></a>
-    <a href="/sadik-app" class="side-link side-action" data-public-route="/sadik-app"><span class="side-icon"><svg><use href="#i-phone"></use></svg></span>Sadik App<span class="side-arrow">›</span></a>
+    <a href="/#sadik-app" class="side-link side-action" data-scroll="sadik-app"><span class="side-icon"><svg><use href="#i-phone"></use></svg></span>Sadik App<span class="side-arrow">›</span></a>
     <div class="sidebar-section-label">Manage</div>
-    <button class="side-link side-button" id="trackBookingBtn"><span class="side-icon"><svg><use href="#i-search"></use></svg></span>Track booking<span class="side-arrow">›</span></button>
+    <button class="side-link side-button" data-scroll="track-booking" id="trackBookingBtn"><span class="side-icon"><svg><use href="#i-search"></use></svg></span>Track booking<span class="side-arrow">›</span></button>
     <button class="side-link side-button" id="supportSideBtn"><span class="side-icon"><svg><use href="#i-headset"></use></svg></span>Sadik Travels Support<span class="side-arrow">›</span></button>
     <div class="sidebar-footer"><span>Bangladesh</span><span>English</span></div>
   </aside>
@@ -252,35 +259,7 @@
       </div>
     </section>
 
-    <section class="content-section" aria-labelledby="coxTitle">
-      <div class="container panel-block section-bg">
-        <div class="section-heading"><div><h2 id="coxTitle">Best Hotels in Cox's Bazar</h2><p>Discover the vibrant culture Of Bangladesh And the breathtaking beauty Of Cox's Bazar. Editorial inspiration only — submit a live hotel search to check availability and rates.</p></div><div class="section-controls"><button class="slider-mini-prev" data-card-prev="hotels" aria-label="Previous hotels"><svg><use href="#i-arrow-left"></use></svg></button><button class="slider-mini-next" data-card-next="hotels" aria-label="Next hotels"><svg><use href="#i-arrow-right"></use></svg></button></div></div>
-        <div class="card-slider" data-card-slider="hotels"><div class="card-track" id="hotelTrack"><div class="public-content-empty"><strong>No published hotels yet</strong><span>Hotel content will appear here after an admin publishes it.</span></div></div></div>
-      </div>
-    </section>
-
-    <section class="content-section" aria-labelledby="airportTitle">
-      <div class="container panel-block section-bg">
-        <div class="section-heading"><div><h2 id="airportTitle">Airport Transit Hotels</h2><p>Relax and recharge with comfort and convenience just steps from your terminal. These are curated examples; use live hotel search for current availability.</p></div><div class="section-controls"><button class="slider-mini-prev" data-card-prev="transit" aria-label="Previous transit hotels"><svg><use href="#i-arrow-left"></use></svg></button><button class="slider-mini-next" data-card-next="transit" aria-label="Next transit hotels"><svg><use href="#i-arrow-right"></use></svg></button></div></div>
-        <div class="card-slider" data-card-slider="transit"><div class="card-track" id="transitTrack"><div class="public-content-empty"><strong>No transit hotels yet</strong><span>Airport transit inventory will appear when configured.</span></div></div></div>
-      </div>
-    </section>
-
-    <section class="content-section destinations-section" id="destinations" aria-labelledby="destinationTitle">
-      <div class="container panel-block section-bg">
-        <div class="section-heading"><div><h2 id="destinationTitle">Top Destinations</h2><p>From iconic landmarks to hidden gems, discover the places that make every journey memorable.</p></div><div class="section-controls"><button class="slider-mini-prev" data-card-prev="destinations" aria-label="Previous destinations"><svg><use href="#i-arrow-left"></use></svg></button><button class="slider-mini-next" data-card-next="destinations" aria-label="Next destinations"><svg><use href="#i-arrow-right"></use></svg></button></div></div>
-        <div class="card-slider destination-slider" data-card-slider="destinations"><div class="card-track" id="destinationTrack"><div class="public-content-empty"><strong>No published destinations yet</strong><span>Destinations will appear after content is published in admin.</span></div></div></div>
-      </div>
-    </section>
-
-    <section class="content-section airline-section" aria-labelledby="airlineTitle">
-      <div class="container panel-block section-bg">
-        <div class="section-heading centered"><div><h2 id="airlineTitle">Partner Airlines</h2></div></div>
-        <div class="airline-marquee" id="airlineMarquee">
-          <div class="airline-track" id="airlineTrack"><div class="public-content-empty"><strong>No partner airlines yet</strong><span>Airline content will appear after it is published in admin.</span></div></div>
-        </div>
-      </div>
-    </section>
+    <div id="homeSections" aria-label="Sadik Travels services"><!-- Marketplace sections rendered by app.js --></div>
 
     <section class="stat-section" aria-label="Sadik Travels statistics">
       <div class="container panel-block">
@@ -288,7 +267,7 @@
       </div>
     </section>
 
-    <section class="content-section app-section" id="app" aria-labelledby="appTitle">
+    <section class="content-section app-section" id="sadik-app" aria-labelledby="appTitle">
       <div class="container panel-block section-bg">
         <div class="section-heading centered"><div><h2 id="appTitle">Track Flights with Your all-in-one Travel App</h2></div></div>
         <div class="app-grid">
@@ -298,24 +277,32 @@
       </div>
     </section>
 
-    <section class="content-section tour-preview-section" id="tourPreview" aria-labelledby="tourPreviewTitle">
-      <div class="container panel-block section-bg">
-        <div class="section-heading"><div><h2 id="tourPreviewTitle">Go Get Tour</h2><p>Discover published tour packages from Sadik Travels.</p></div><a class="btn btn-outline" href="/tours" data-public-route="/tours">View all tours</a></div>
-        <div class="tour-preview-grid" id="tourPreviewGrid"><div class="public-content-empty"><strong>No published tours yet</strong><span>Tour packages will appear after they are published in Admin.</span></div></div>
-      </div>
-    </section>
-
-    <section class="content-section service-content-section" id="serviceContent" aria-labelledby="serviceContentTitle">
-      <div class="container panel-block section-bg">
-        <div class="section-heading"><div><h2 id="serviceContentTitle">Featured travel services</h2><p>Explore current offers, packages and specialist services published by Sadik Travels.</p></div></div>
-        <div class="service-content-grid" id="serviceContentGrid"><div class="public-content-empty"><strong>No featured services yet</strong><span>Published offers and service content will appear here.</span></div></div>
-      </div>
-    </section>
-
     <section class="content-section agents-section" id="agents" aria-labelledby="agentsTitle">
       <div class="container panel-block section-bg">
-        <div class="section-heading"><div><h2 id="agentsTitle">Travel Agents</h2><p>Meet the Sadik Travels team and connect with the right travel specialist.</p></div></div>
-        <div class="agent-grid" id="agentGrid"><div class="public-content-empty"><strong>No published travel agents yet</strong><span>Team profiles will appear here after an admin publishes them.</span></div></div>
+        <div class="section-heading">
+          <div><span class="hs-eyebrow"><svg><use href="#i-user"></use></svg>People</span><h2 id="agentsTitle">Travel Agents</h2><p>Meet our verified Sadik Travels travel specialists.</p></div>
+          <a class="btn btn-outline" href="/travel-agents" data-public-route="/travel-agents">View all agents</a>
+        </div>
+        <div class="agents-carousel">
+          <div class="agents-carousel-viewport"><div class="agents-carousel-track" id="agentsTrack" aria-label="Travel agents carousel"></div></div>
+          <button class="agents-carousel-btn agents-carousel-prev" id="agentsPrev" type="button" aria-label="Previous agents"><svg><use href="#i-arrow-left"></use></svg></button>
+          <button class="agents-carousel-btn agents-carousel-next" id="agentsNext" type="button" aria-label="Next agents"><svg><use href="#i-arrow-right"></use></svg></button>
+        </div>
+        <div class="agents-carousel-foot">
+          <a class="btn btn-outline" href="/travel-agents" data-public-route="/travel-agents">View all travel agents →</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="content-section" id="track-booking" aria-labelledby="trackCtaTitle">
+      <div class="container panel-block">
+        <div class="track-cta">
+          <div class="track-cta-copy">
+            <h2 id="trackCtaTitle">Track your booking</h2>
+            <p>Enter your booking reference and the contact used at checkout to follow your itinerary status in real time.</p>
+          </div>
+          <button type="button" class="btn" id="trackCtaBtn"><svg><use href="#i-search"></use></svg>Track booking</button>
+        </div>
       </div>
     </section>
   </main>
@@ -344,6 +331,6 @@
   <template id="trackTemplate"><div class="modal-heading"><div class="modal-icon blue"><svg><use href="#i-search"></use></svg></div><h2 id="modalTitle">Track your booking</h2></div><p class="modal-subtitle">Enter your booking reference and contact number to view your itinerary.</p><form id="trackForm"><label class="modal-field"><span>Booking reference</span><input id="trackReference" required placeholder="Paste the UUID booking reference" autocomplete="off" /></label><label class="modal-field"><span>Mobile number or email</span><input id="trackIdentity" required placeholder="The contact used for booking" autocomplete="email" /></label><button class="btn btn-primary full-btn" type="submit">Track Booking</button></form></template>
 
   <script src="/api.js?v=3"></script>
-  <script src="/app.js?v=10"></script>
+  <script src="/app.js?v=12"></script>
 </body>
 </html>
