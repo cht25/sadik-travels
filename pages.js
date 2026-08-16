@@ -1283,6 +1283,43 @@
     });
   }
 
+
+  /* --------------------------------------------------- global site search */
+  /** Adds live catalogue results to the header search box. City suggestions
+   *  from app.js keep working; product matches are appended above them. */
+  function bindGlobalSearch() {
+    const input = document.getElementById('globalSearchInput');
+    const menu = document.getElementById('globalSearchSuggestions');
+    const form = document.getElementById('globalSearch');
+    if (!input || !menu) return;
+    let timer;
+    const run = async () => {
+      const term = input.value.trim();
+      if (term.length < 2) return;
+      let results = [];
+      try { results = (await api.get(`/search?q=${encodeURIComponent(term)}`)).results || []; } catch { return; }
+      if (!results.length || input.value.trim() !== term) return;
+      const markup = `<div class="sf-search-group"><span>Sadik Travels products</span></div>${results.map((item) => `
+        <button type="button" data-sf-search-hit="/${TYPE_ROUTE[item.type] || 'explore'}/${esc(item.slug || item.id)}">
+          <strong>${esc(item.title)}</strong>
+          <small>${esc(titleCase(item.type))}${item.subtitle ? ` · ${esc(item.subtitle)}` : ''}${item.price ? ` · ${money(item.price)}` : ''}</small>
+        </button>`).join('')}`;
+      menu.insertAdjacentHTML('afterbegin', markup);
+      menu.classList.add('open');
+    };
+    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 220); });
+    menu.addEventListener('click', (event) => {
+      const hit = event.target.closest('[data-sf-search-hit]');
+      if (!hit) return;
+      event.preventDefault();
+      event.stopPropagation();
+      menu.classList.remove('open');
+      input.value = '';
+      window.SadikPages.navigate(hit.dataset.sfSearchHit);
+    });
+    form?.addEventListener('submit', () => menu.classList.remove('open'));
+  }
+
   /** Routes that render differently once the customer is authenticated. */
   const AUTH_ROUTES = new Set(['cart', 'wishlist', 'checkout', 'orders', 'invoice', 'account']);
 
@@ -1636,5 +1673,7 @@
   };
 
   bindGlobalEvents();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindGlobalSearch);
+  else bindGlobalSearch();
   state.booted = true;
 })();

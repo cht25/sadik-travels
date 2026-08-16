@@ -452,3 +452,5 @@
 .sf-review-form .sf-form-grid{width:100%}
 .sf-review-form textarea{width:100%;border:1px solid #cbd5e1;border-radius:9px;padding:11px 12px;font:inherit;font-size:.85rem;outline:none}
 .sf-review-form textarea:focus{border-color:var(--sf-brand);box-shadow:0 0 0 3px rgba(0,48,160,.10)}
+.sf-search-group{display:block;padding:8px 11px 4px;color:var(--sf-muted);font-size:.64rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;background:var(--sf-canvas)}
+.global-search-suggestions button small{display:block;color:var(--sf-muted);font-size:.68rem;margin-top:2px}
