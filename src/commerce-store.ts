@@ -33,6 +33,7 @@ export type CatalogProduct = {
   durationDays?: number; durationNights?: number;
   // eSIM
   dataAmount?: string; validityDays?: number; network?: string; activation?: string; coverage: string[];
+  provider?: string; activationMethod?: string; qrCodeUrl?: string; smDpPlus?: string; activationCode?: string; instructions?: string;
   // Visa
   visaType?: string; processingTime?: string; validity?: string; entryType?: string; requiredDocuments: string[];
   // Packages
@@ -54,6 +55,7 @@ export type CatalogProduct = {
 export type CatalogFilters = {
   type?: CatalogType | 'all'; status?: CatalogStatus | 'all'; q?: string; country?: string; destination?: string;
   minPrice?: number; maxPrice?: number; featured?: boolean; tags?: string[];
+  dataAmount?: string; validityDays?: number; network?: string; region?: string;
   sort?: 'recommended' | 'price_asc' | 'price_desc' | 'rating' | 'newest' | 'popular';
   page?: number; pageSize?: number;
 };
@@ -76,6 +78,18 @@ export type Coupon = {
 
 export type OrderStatus = 'pending' | 'confirmed' | 'processing' | 'completed' | 'cancelled' | 'refunded' | 'failed';
 export type OrderPaymentStatus = 'pending' | 'processing' | 'paid' | 'failed' | 'refunded' | 'cancelled';
+/** Automated purchase fulfilment. A delivered state is only ever set from a
+ *  verified provider payload or an explicit admin action — never fabricated. */
+export type FulfillmentStatus = 'none' | 'pending' | 'processing' | 'delivered' | 'failed';
+export type OrderFulfillment = {
+  status: FulfillmentStatus;
+  provider?: string;
+  payload?: Record<string, unknown>;
+  deliveredAt?: string;
+  note?: string;
+  updatedBy?: string;
+  updatedAt?: string;
+};
 export type OrderItem = CartItem & { lineSubtotal: number; lineTax: number; lineTotal: number };
 export type OrderTimelineEntry = { at: string; status: string; note?: string; actorId?: string };
 export type OrderCustomer = { fullName: string; email: string; phone: string; address?: string; dateOfBirth?: string; nationality?: string };
@@ -88,6 +102,7 @@ export type Order = {
   subtotal: number; discount: number; couponCode?: string; couponDiscount: number; tax: number; serviceFee: number; total: number; currency: string;
   paymentMethod?: string; paymentStatus: OrderPaymentStatus; paymentId?: string; transactionRef?: string;
   status: OrderStatus; timeline: OrderTimelineEntry[]; invoiceId?: string;
+  fulfillment?: OrderFulfillment;
   contactEmail?: string; contactPhone?: string;
   createdAt: string; updatedAt: string;
 };
@@ -135,6 +150,7 @@ const catalogSchema = new mongoose.Schema({
   serviceCharge: { type: Number, default: 0 }, taxPct: { type: Number, default: 0 },
   durationDays: Number, durationNights: Number,
   dataAmount: String, validityDays: Number, network: String, activation: String, coverage: { type: [String], default: [] },
+  provider: String, activationMethod: String, qrCodeUrl: String, smDpPlus: String, activationCode: String, instructions: String,
   visaType: String, processingTime: String, validity: String, entryType: String, requiredDocuments: { type: [String], default: [] },
   itinerary: { type: [{ _id: false, day: Number, title: String, detail: String }], default: [] },
   inclusions: { type: [String], default: [] }, exclusions: { type: [String], default: [] },
@@ -209,6 +225,7 @@ const orderSchema = new mongoose.Schema({
   paymentMethod: String, paymentStatus: { type: String, default: 'pending', index: true }, paymentId: String, transactionRef: String,
   status: { type: String, default: 'pending', index: true },
   timeline: { type: [mongoose.Schema.Types.Mixed], default: [] }, invoiceId: String,
+  fulfillment: { type: mongoose.Schema.Types.Mixed, default: { status: 'none' } },
   contactEmail: { type: String, index: true }, contactPhone: { type: String, index: true }, ...stamp
 }, baseOptions);
 orderSchema.index({ createdAt: -1 });
@@ -313,6 +330,10 @@ export function createCommerceStore() {
     if (filters.destination) query.destination = new RegExp(escapeRegex(filters.destination), 'i');
     if (filters.featured !== undefined) query.featured = filters.featured;
     if (filters.tags?.length) query.tags = { $in: filters.tags };
+    if (filters.dataAmount) query.dataAmount = new RegExp(`^${escapeRegex(filters.dataAmount)}$`, 'i');
+    if (filters.validityDays !== undefined) query.validityDays = filters.validityDays;
+    if (filters.network) query.network = new RegExp(escapeRegex(filters.network), 'i');
+    if (filters.region) query.region = new RegExp(escapeRegex(filters.region), 'i');
     if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
       query.price = {
         ...(filters.minPrice !== undefined ? { $gte: filters.minPrice } : {}),
@@ -345,13 +366,26 @@ export function createCommerceStore() {
   const catalogFacets = async (type: CatalogType) => {
     const rows = await CatalogModel.aggregate([
       { $match: { type, status: 'published' } },
-      { $group: { _id: null, minPrice: { $min: '$price' }, maxPrice: { $max: '$price' }, countries: { $addToSet: '$country' }, destinations: { $addToSet: '$destination' }, tags: { $push: '$tags' } } }
+      { $group: { _id: null, minPrice: { $min: '$price' }, maxPrice: { $max: '$price' }, countries: { $addToSet: '$country' }, destinations: { $addToSet: '$destination' }, tags: { $push: '$tags' }, regions: { $addToSet: '$region' }, networks: { $addToSet: '$network' }, dataAmounts: { $addToSet: '$dataAmount' }, validities: { $addToSet: '$validityDays' } } }
     ]);
     const row = rows[0] || {};
+    const countries = (row.countries || []).filter(Boolean) as string[];
+    const countryCounts = countries.length
+      ? await CatalogModel.aggregate([
+          { $match: { type, status: 'published', country: { $in: countries } } },
+          { $group: { _id: '$country', count: { $sum: 1 } } },
+          { $sort: { count: -1 } }
+        ])
+      : [];
+    const countMap = new Map(countryCounts.map(item => [String(item._id), item.count]));
     return {
       minPrice: row.minPrice ?? 0, maxPrice: row.maxPrice ?? 0,
-      countries: (row.countries || []).filter(Boolean).sort(),
+      countries: countries.map(name => ({ name, count: countMap.get(name) || 0 })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
       destinations: (row.destinations || []).filter(Boolean).sort(),
+      regions: (row.regions || []).filter(Boolean).sort(),
+      networks: (row.networks || []).filter(Boolean).sort(),
+      dataAmounts: (row.dataAmounts || []).filter(Boolean).sort(),
+      validities: (row.validities || []).filter(Boolean).sort((a: number, b: number) => a - b),
       tags: [...new Set(((row.tags || []) as string[][]).flat().filter(Boolean))].sort()
     };
   };
@@ -525,6 +559,7 @@ export function createCommerceStore() {
     const order = await OrderModel.create({
       ...input, id: randomUUID(), orderNumber: reference(input.kind === 'booking' ? 'SB' : 'SO'),
       timeline: input.timeline?.length ? input.timeline : [{ at: now(), status: 'created', note: 'Booking created' }],
+      fulfillment: { status: 'none' },
       createdAt: now(), updatedAt: now()
     });
     return clean<Order>(order)!;
@@ -579,6 +614,71 @@ export function createCommerceStore() {
     const update: Record<string, unknown> = { $set: { ...patch, updatedAt: now() } };
     if (event) update.$push = { timeline: event };
     return clean<Order>(await OrderModel.findOneAndUpdate({ id }, update, { new: true }).lean());
+  };
+
+  /**
+   * Automatic purchase fulfilment. Called only after payment is verified.
+   * If an eSIM/travel provider API is configured, fulfilment is requested from
+   * it; the order is marked delivered ONLY with a real provider payload.
+   * Without a provider the order stays FULFILLMENT_PENDING so an admin can
+   * complete it manually — fulfilment is never fabricated.
+   */
+  const attemptFulfillment = async (orderId: string, providerConfig?: { url?: string; apiKey?: string }) => {
+    const order = clean<Order>(await OrderModel.findOne({ id: orderId }).lean());
+    if (!order || order.paymentStatus !== 'paid') return order;
+    if (order.fulfillment?.status === 'delivered') return order;
+    const existing = order.fulfillment || { status: 'none' as FulfillmentStatus };
+    const url = providerConfig?.url?.trim();
+    const apiKey = providerConfig?.apiKey?.trim();
+    const updateBase = { fulfillment: { ...existing, status: 'processing' as FulfillmentStatus, updatedAt: now() } };
+    await OrderModel.updateOne({ id: orderId }, { $set: { ...updateBase, updatedAt: now() } });
+
+    if (url && apiKey) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 15_000);
+        const response = await fetch(new URL('/v1/esim/fulfill', url).toString(), {
+          method: 'POST', signal: controller.signal,
+          headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey },
+          body: JSON.stringify({ orderId: order.id, orderNumber: order.orderNumber, userId: order.userId, items: order.items, customer: order.customer, travelers: order.travelers })
+        }).catch(() => undefined);
+        clearTimeout(timer);
+        if (response?.ok) {
+          const payload = await response.json().catch(() => ({}));
+          if (payload && typeof payload === 'object' && (payload.qrCodeUrl || payload.smDpPlus || payload.activationCode || payload.providerReference)) {
+            const delivered: OrderFulfillment = {
+              status: 'delivered', provider: payload.provider || 'esim_provider',
+              payload: { ...payload, deliveredAt: now() }, deliveredAt: now(), note: 'Delivered by the eSIM provider', updatedBy: 'system', updatedAt: now()
+            };
+            await OrderModel.updateOne({ id: orderId }, { $set: { fulfillment: delivered, updatedAt: now() } });
+            return clean<Order>(await OrderModel.findOne({ id: orderId }).lean());
+          }
+        }
+        await OrderModel.updateOne({ id: orderId }, {
+          $set: { fulfillment: { status: 'pending', note: 'Provider responded but did not return activation details', updatedAt: now() }, updatedAt: now() }
+        });
+        return clean<Order>(await OrderModel.findOne({ id: orderId }).lean());
+      } catch { /* fall through to pending */ }
+    }
+    await OrderModel.updateOne({ id: orderId }, {
+      $set: { fulfillment: { status: 'pending', note: 'Awaiting fulfilment by the Sadik Travels team', updatedAt: now() }, updatedAt: now() }
+    });
+    return clean<Order>(await OrderModel.findOne({ id: orderId }).lean());
+  };
+
+  /** Admin-driven manual fulfilment (verified provider payload or desk dispatch). */
+  const markOrderFulfilled = async (orderId: string, payload: Record<string, unknown>, by: string) => {
+    const order = clean<Order>(await OrderModel.findOne({ id: orderId }).lean());
+    if (!order) return undefined;
+    const fulfilled: OrderFulfillment = {
+      status: 'delivered', provider: payload.provider ? String(payload.provider) : order.fulfillment?.provider,
+      payload, deliveredAt: now(), note: payload.note ? String(payload.note) : 'Fulfilled by the Sadik Travels team', updatedBy: by, updatedAt: now()
+    };
+    const updated = await OrderModel.findOneAndUpdate({ id: orderId }, {
+      $set: { fulfillment: fulfilled, updatedAt: now() },
+      $push: { timeline: { at: now(), status: 'fulfilled', note: 'Order fulfilled', actorId: by } }
+    }, { new: true }).lean();
+    return clean<Order>(updated);
   };
 
   const orderStats = async () => {
@@ -712,6 +812,7 @@ export function createCommerceStore() {
     getCart, saveCart, clearCart,
     listCoupons, findCoupon, createCoupon, updateCoupon, deleteCoupon, evaluateCoupon, redeemCoupon,
     priceCart, createOrder, listOrders, listAllOrders, findOrder, findOrderForTracking, updateOrder, orderStats,
+    attemptFulfillment, markOrderFulfilled,
     createInvoice, findInvoice, listInvoices, markInvoicePaid,
     listTravelers, createTraveler, updateTraveler, deleteTraveler,
     listReviews, createReview, updateReview, deleteReview, refreshProductRating,

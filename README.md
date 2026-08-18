@@ -177,3 +177,40 @@ The MongoDB end-to-end suite is intentionally skipped unless a disposable databa
 ```bash
 TEST_MONGODB_URI='mongodb+srv://…/sadik_travels_test' npm test
 ```
+
+## Marketplace, payments and fulfilment (2026 additions)
+
+- **eSIM marketplace** — a dedicated `/esim` page with a country selector, data /
+  validity / region filters, sort and premium plan cards. eSIM plans are ordinary
+  catalogue products (`type: esim`) enriched with provider, activation method,
+  QR code URL, SM-DP+, activation code and installation instructions. Plans are
+  uploaded country-wise from Admin → Catalogue.
+- **Flight booking flow** — flight search results (live provider) now flow into a
+  passenger/contact form at `/flights/booking`; the server re-quotes the fare
+  through the travel provider, creates the booking and starts gateway payment.
+- **Payment ledger** — payments now record gateway transaction id, initiated /
+  completed / failed timestamps, failure reason, refund status and an idempotency
+  key. Customers see their transaction history under Account → Payments; admins
+  can search and export CSV from Admin → Payments.
+- **Idempotent webhooks** — gateway IPNs are deduplicated by
+  `paymentId:status:reference` in `webhook_events`, so retries and mirrored IPNs
+  never double-confirm a booking or double-mark an invoice paid.
+- **Automatic fulfilment** — after a verified payment, eSIM orders request
+  activation data from the configured eSIM provider (`esim_provider_url` /
+  `esim_provider_api_key`, also editable in Admin → Settings → Travel provider).
+  Without a provider the order stays **FULFILLMENT_PENDING** and an admin
+  completes it from Admin → Orders → Fulfilment (QR code, SM-DP+, activation
+  code, instructions). Fulfilment is never fabricated.
+- **Website analytics** — meaningful events (`page_view`, `search`,
+  `hotel_view`, `flight_search`, `tour_view`, `esim_view`, `product_view`,
+  `add_to_cart`, `checkout_started`, `payment_started`, `payment_success`,
+  `payment_failed`, `booking_created`, `booking_confirmed`) are stored in
+  `analytics_events` and reported in Admin → Analytics with time ranges, traffic
+  trend, popular pages, device breakdown and conversion rates.
+- **Payment return page** — `/payment/return` verifies the stored transaction
+  server-side and shows success / failed / cancelled states with booking links.
+- **SEO** — live `/sitemap.xml` (built from published hotels, tours and
+  products), `/robots.txt`, per-page titles/descriptions/canonicals and
+  JSON-LD structured data (Hotel, Product, TouristTrip).
+- **Unified booking history** — My Bookings and Account → My Bookings merge
+  catalogue orders, hotel stays and legacy provider requests into one list.

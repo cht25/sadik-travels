@@ -248,6 +248,7 @@
     params.set('type', definition.type);
     params.set('pageSize', '12');
     ['q', 'country', 'minPrice', 'maxPrice', 'sort', 'page'].forEach((key) => { if (query.get(key)) params.set(key, query.get(key)); });
+    track('search', { type: definition.type, hasFilters: query.toString() !== '' });
 
     root.innerHTML = `<div class="sf-page">
       ${breadcrumbs([{ label: 'Home', href: '/' }, { label: definition.title }])}
@@ -298,7 +299,7 @@
     return `<form class="sf-filter-card" data-sf-filter-form>
       <div class="sf-filter-head"><strong>${icon('i-sliders')} Filters</strong><button class="sf-link" type="button" data-sf-clear-filters>Reset</button></div>
       ${has('q') ? `<label class="sf-field"><span>Search</span><input type="search" name="q" value="${esc(query.get('q') || '')}" placeholder="Search ${esc(definition.title.toLowerCase())}" /></label>` : ''}
-      ${has('country') && facets.countries.length ? `<label class="sf-field"><span>Country</span><select name="country"><option value="">All countries</option>${facets.countries.map((country) => `<option value="${esc(country)}" ${query.get('country') === country ? 'selected' : ''}>${esc(country)}</option>`).join('')}</select></label>` : ''}
+      ${has('country') && facets.countries.length ? `<label class="sf-field"><span>Country</span><select name="country"><option value="">All countries</option>${facets.countries.map((country) => `<option value="${esc(country.name ?? country)}" ${query.get('country') === (country.name ?? country) ? 'selected' : ''}>${esc(country.name ?? country)}${country.count ? ` (${country.count})` : ''}</option>`).join('')}</select></label>` : ''}
       ${has('price') && facets.maxPrice > 0 ? `
         <div class="sf-field">
           <span>Price range (৳)</span>
@@ -310,6 +311,106 @@
       <button class="btn btn-primary full-btn" type="submit">Apply filters</button>
     </form>`;
   }
+
+  /* ------------------------------------------------------ eSIM marketplace */
+  async function renderEsimMarketplace(root, query) {
+    const params = new URLSearchParams();
+    params.set('type', 'esim');
+    params.set('pageSize', '12');
+    ['q', 'country', 'dataAmount', 'validityDays', 'region', 'network', 'minPrice', 'maxPrice', 'sort', 'page'].forEach((key) => { if (query.get(key)) params.set(key, query.get(key)); });
+
+    root.innerHTML = `<div class="sf-page">
+      ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'eSIM' }])}
+      ${pageHead({ eyebrow: 'Connectivity', title: 'eSIM Marketplace', description: 'Instant digital SIM plans for 190+ countries and regions. Pick a country, choose your data, and stay connected the moment you land.' })}
+      <div class="sf-esim-layout">
+        <aside class="sf-filters" id="sfFilters">${loadingState('Loading filters…')}</aside>
+        <div class="sf-esim-main" id="sfEsimMain">
+          <div class="sf-esim-countries" id="sfEsimCountries">${skeletonGrid(3).replace('sf-grid', 'sf-grid sf-grid-2')}</div>
+          <div class="sf-results" id="sfResults">${skeletonGrid(6)}</div>
+        </div>
+      </div>
+    </div>`;
+    track('esim_view', { country: query.get('country') || 'all' });
+
+    const countriesBox = $('#sfEsimCountries', root);
+    const resultsBox = $('#sfResults', root);
+    const filtersBox = $('#sfFilters', root);
+
+    let facets = { minPrice: 0, maxPrice: 0, countries: [], regions: [], networks: [], dataAmounts: [], validities: [] };
+    try { facets = (await api.get(`/catalog/facets/esim`)).facets || facets; } catch { /* filters degrade gracefully */ }
+
+    const esimCountryChips = (list, active) => `
+      <div class="sf-esim-countries-head"><strong>${icon('i-globe')} Popular countries</strong><a class="sf-link" href="/esim" data-public-route="/esim">All countries</a></div>
+      <div class="sf-chip-row">${list.map((country) => `<a class="sf-chip ${active === (country.name ?? country) ? 'is-active' : ''}" href="/esim?country=${encodeURIComponent(country.name ?? country)}" data-public-route="/esim?country=${encodeURIComponent(country.name ?? country)}">${esc(country.name ?? country)}${country.count ? `<small>${country.count}</small>` : ''}</a>`).join('') || '<span class="sf-hint">Countries appear once an admin publishes eSIM plans.</span>'}</div>`;
+    countriesBox.innerHTML = `<div class="sf-panel sf-esim-countries-panel">${esimCountryChips((facets.countries || []).slice(0, 16), query.get('country') || '')}</div>`;
+
+    filtersBox.innerHTML = `<form class="sf-filter-card" data-sf-filter-form>
+      <div class="sf-filter-head"><strong>${icon('i-sliders')} Filters</strong><button class="sf-link" type="button" data-sf-clear-filters>Reset</button></div>
+      <label class="sf-field"><span>Search</span><input type="search" name="q" value="${esc(query.get('q') || '')}" placeholder="Country, carrier or network" /></label>
+      ${(facets.countries || []).length ? `<label class="sf-field"><span>Country</span><select name="country"><option value="">All countries</option>${facets.countries.map((country) => `<option value="${esc(country.name)}" ${query.get('country') === country.name ? 'selected' : ''}>${esc(country.name)} (${country.count})</option>`).join('')}</select></label>` : ''}
+      ${(facets.dataAmounts || []).length ? `<label class="sf-field"><span>Data</span><select name="dataAmount"><option value="">Any data</option>${facets.dataAmounts.map((amount) => `<option value="${esc(amount)}" ${query.get('dataAmount') === amount ? 'selected' : ''}>${esc(amount)}</option>`).join('')}</select></label>` : ''}
+      ${(facets.validities || []).length ? `<label class="sf-field"><span>Validity</span><select name="validityDays"><option value="">Any validity</option>${facets.validities.map((days) => `<option value="${days}" ${query.get('validityDays') === String(days) ? 'selected' : ''}>${days} days</option>`).join('')}</select></label>` : ''}
+      ${(facets.regions || []).length ? `<label class="sf-field"><span>Coverage region</span><select name="region"><option value="">All regions</option>${facets.regions.map((region) => `<option value="${esc(region)}" ${query.get('region') === region ? 'selected' : ''}>${esc(region)}</option>`).join('')}</select></label>` : ''}
+      ${facets.maxPrice > 0 ? `<div class="sf-field"><span>Price range (৳)</span><div class="sf-range-inputs"><input type="number" name="minPrice" min="0" placeholder="${Math.floor(facets.minPrice)}" value="${esc(query.get('minPrice') || '')}" /><input type="number" name="maxPrice" min="0" placeholder="${Math.ceil(facets.maxPrice)}" value="${esc(query.get('maxPrice') || '')}" /></div></div>` : ''}
+      <button class="btn btn-primary full-btn" type="submit">Apply filters</button>
+    </form>`;
+
+    try {
+      const result = await api.get(`/catalog?${params.toString()}`);
+      if (!result.products.length) {
+        resultsBox.innerHTML = emptyState(
+          'No eSIM plans found',
+          query.toString() ? 'No plans match these filters. Try another country or data amount.' : 'Our team is publishing eSIM plans. Please check back shortly.',
+          query.toString() ? `<button class="btn btn-outline" type="button" data-sf-clear-filters>Clear filters</button>` : `<a class="btn btn-primary" href="/" data-public-route="/">Back home</a>`
+        );
+        return;
+      }
+      resultsBox.innerHTML = `
+        <div class="sf-results-head">
+          <span class="sf-results-count"><strong>${result.total}</strong> plan${result.total === 1 ? '' : 's'}</span>
+          <label class="sf-sort"><span>Sort</span>
+            <select data-sf-sort>
+              ${[['recommended', 'Recommended'], ['price_asc', 'Price: low to high'], ['price_desc', 'Price: high to low'], ['rating', 'Rating'], ['newest', 'Newest']]
+                .map(([value, label]) => `<option value="${value}" ${query.get('sort') === value ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+        <div class="sf-grid sf-grid-esim">${result.products.map(esimPlanCard).join('')}</div>
+        ${pagination(result)}`;
+    } catch (error) {
+      resultsBox.innerHTML = errorState(error.message);
+    }
+  }
+
+  const esimPlanCard = (plan) => {
+    const href = `/esim/${encodeURIComponent(plan.slug || plan.id)}`;
+    const discount = plan.originalPrice && plan.originalPrice > plan.price ? Math.round(((plan.originalPrice - plan.price) / plan.originalPrice) * 100) : 0;
+    const image = plan.heroImage?.url || plan.images?.[0]?.url;
+    const saved = state.wishlist.has(plan.id);
+    return `
+      <article class="sf-card sf-esim-card" data-product-id="${esc(plan.id)}">
+        <a class="sf-card-media" href="${esc(href)}" data-public-route="${esc(href)}">
+          ${image ? `<img src="${esc(image)}" alt="${esc(plan.title)}" loading="lazy" />` : `<span class="sf-card-media-fallback sf-esim-fallback">${icon('i-sim')}</span>`}
+          ${discount ? `<span class="sf-badge sf-badge-save">${discount}% off</span>` : ''}
+        </a>
+        <button class="sf-wish ${saved ? 'is-saved' : ''}" type="button" data-sf-wish="${esc(plan.id)}" aria-label="${saved ? 'Remove from wishlist' : 'Save to wishlist'}">${icon(saved ? 'i-heart-fill' : 'i-heart')}</button>
+        <div class="sf-card-body">
+          <div class="sf-esim-country">${icon('i-location')}${esc(plan.country || plan.region || 'Global')}</div>
+          <div class="sf-esim-data">
+            <strong>${esc(plan.dataAmount || 'Data plan')}</strong>
+            <span>${plan.validityDays ? `${plan.validityDays} days` : esc(plan.validity || 'Validity')}</span>
+          </div>
+          ${plan.network ? `<p class="sf-esim-network">${icon('i-sim')}${esc(plan.network)}${plan.provider ? ` · ${esc(plan.provider)}` : ''}</p>` : ''}
+          ${plan.coverage?.length ? `<p class="sf-esim-coverage">${esc(plan.coverage.slice(0, 3).join(' · '))}</p>` : ''}
+          <div class="sf-card-foot">
+            <div class="sf-price">${plan.originalPrice && plan.originalPrice > plan.price ? `<s>${money(plan.originalPrice, plan.currency)}</s>` : ''}<strong>${money(plan.price, plan.currency)}</strong></div>
+            <div class="sf-card-actions">
+              <a class="btn btn-primary btn-sm" href="${esc(href)}" data-public-route="${esc(href)}">Buy plan</a>
+            </div>
+          </div>
+        </div>
+      </article>`;
+  };
 
   /* ------------------------------------------------------- product detail */
   async function renderProductDetail(root, definition, idOrSlug) {
@@ -323,6 +424,8 @@
     const saved = state.wishlist.has(product.id);
     const canBook = product.bookable && product.price > 0;
     const isVisa = product.type === 'visa_service';
+    track(product.type === 'esim' ? 'esim_view' : 'product_view', { productId: product.id, slug: product.slug, type: product.type });
+    if (typeof window.setSeo === 'function') window.setSeo({ title: product.title, description: product.summary || product.subtitle || `${product.title} — book with Sadik Travels.`, canonical: `/${definition.route}/${product.slug || product.id}`, image: gallery[0]?.url, jsonLd: { '@context': 'https://schema.org', '@type': 'Product', name: product.title, description: product.summary || product.subtitle || undefined, ...(product.price ? { offers: { '@type': 'Offer', price: product.price, priceCurrency: product.currency || 'BDT', availability: product.availability > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } } : {}) } });
 
     root.innerHTML = `<div class="sf-page">
       ${breadcrumbs([{ label: 'Home', href: '/' }, { label: definition.title, href: `/${definition.route}` }, { label: product.title }])}
@@ -501,6 +604,7 @@
   async function runFlightSearch(root, query) {
     const box = $('#sfFlightResults', root);
     if (!box) return;
+    track('flight_search', { from: query.get('from'), to: query.get('to'), trip: query.get('trip') || 'oneway' });
     box.innerHTML = `<section class="sf-panel">${loadingState('Searching live airline availability…')}</section>`;
     try {
       const payload = {
@@ -547,6 +651,165 @@
         <button class="btn btn-outline" type="button" data-sf-retry>Try again</button>
       </div>
     </div>`;
+
+  /* --------------------------------------------------- flight booking flow */
+  const FLIGHT_SELECTION_KEY = 'sadikFlightSelection';
+  const flightSelection = () => { try { const raw = sessionStorage.getItem(FLIGHT_SELECTION_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; } };
+
+  async function renderFlightBooking(root, query) {
+    if (!isLoggedIn()) return renderLoginRequired(root, 'Flight booking', 'Login to continue with your flight booking.');
+    const selection = flightSelection();
+    root.innerHTML = `<div class="sf-page">${loadingState('Preparing your flight booking…')}</div>`;
+    if (!selection || !selection.id) {
+      root.innerHTML = `<div class="sf-page">
+        ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Flights', href: '/flights' }, { label: 'Booking' }])}
+        ${pageHead({ eyebrow: 'Air travel', title: 'Flight booking', description: 'Select a flight first, then continue with passenger details.' })}
+        ${emptyState('No flight selected', 'Choose a flight from the search results to continue.', '<a class="btn btn-primary" href="/flights" data-public-route="/flights">Search flights</a>')}
+      </div>`;
+      return;
+    }
+    const adults = Number(query.get('adults')) || 1;
+    const children = Number(query.get('children')) || 0;
+    const infants = Number(query.get('infants')) || 0;
+    const total = Math.min(12, adults + children + infants);
+    const prefill = { fullName: state.user.fullName || '', email: state.user.email || '', phone: state.user.phone || '' };
+    root.innerHTML = `<div class="sf-page">
+      ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Flights', href: '/flights' }, { label: 'Booking' }])}
+      ${pageHead({ eyebrow: 'Air travel', title: 'Complete your flight booking', description: 'Confirm passenger details. The final fare is re-quoted and verified by our server before payment.' })}
+      <form class="sf-checkout" id="sfFlightBookingForm">
+        <div class="sf-checkout-main">
+          <section class="sf-panel">
+            <div class="sf-panel-head"><h2>Contact details</h2><span class="sf-tag">Auto-filled from your account</span></div>
+            <div class="sf-form-grid">
+              <label class="sf-field"><span>Full name *</span><input name="contactName" required value="${esc(prefill.fullName)}" /></label>
+              <label class="sf-field"><span>Email *</span><input type="email" name="contactEmail" required value="${esc(prefill.email)}" /></label>
+              <label class="sf-field"><span>Phone *</span><input name="contactPhone" required value="${esc(prefill.phone)}" /></label>
+            </div>
+          </section>
+          <section class="sf-panel">
+            <div class="sf-panel-head"><h2>Passengers</h2><span class="sf-tag">${adults} adult${adults === 1 ? '' : 's'} · ${children} child${children === 1 ? '' : 'ren'} · ${infants} infant${infants === 1 ? '' : 's'}</span></div>
+            <div id="sfFlightTravelers" class="sf-travelers"></div>
+            <p class="sf-hint">Passport details speed up airline processing and are used only for this booking.</p>
+          </section>
+        </div>
+        <aside class="sf-summary sf-summary-sticky">
+          <h2>Your flight</h2>
+          <div class="sf-flight-mini">
+            <div class="sf-flight-mini-airline">${selection.airlineLogo ? `<img src="${esc(selection.airlineLogo)}" alt="" />` : icon('i-plane')}<div><strong>${esc(selection.airline || 'Selected flight')}</strong><small>${esc(selection.flightNumber || '')}</small></div></div>
+            <div class="sf-flight-mini-route"><strong>${esc(selection.origin || query.get('from') || '')}</strong><span>→</span><strong>${esc(selection.destination || query.get('to') || '')}</strong></div>
+            <div class="sf-flight-mini-meta">${esc(selection.departureTime || query.get('departure') || '')}${selection.duration ? ` · ${esc(selection.duration)}` : ''}${selection.stops ? ` · ${selection.stops} stop${selection.stops > 1 ? 's' : ''}` : ''}</div>
+          </div>
+          <div class="sf-summary-rows">
+            <div><span>Displayed fare</span><span>${money(selection.price || 0, selection.currency)}</span></div>
+            <div><span>Taxes &amp; fees</span><span>Re-quoted at booking</span></div>
+          </div>
+          <label class="sf-terms"><input type="checkbox" name="acceptTerms" required /><span>I accept the airline fare rules and Sadik Travels booking terms.</span></label>
+          <button class="btn btn-primary full-btn" type="submit" id="sfFlightBook">${icon('i-shield')} Book &amp; continue to payment</button>
+          <p class="sf-secure">${icon('i-shield')} The final fare is calculated on our servers from the airline quote.</p>
+        </aside>
+      </form>`;
+    for (let index = 0; index < total; index += 1) addFlightTravelerRow(index, adults, children, infants, prefill);
+    $('#sfFlightBookingForm', root).addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.target;
+      const button = $('#sfFlightBook');
+      const data = new FormData(form);
+      const travelers = $$('.sf-traveler-row', form).map((row, index) => ({
+        fullName: $('[name="tFullName"]', row).value.trim(), dateOfBirth: $('[name="tDob"]', row).value || undefined,
+        gender: $('[name="tGender"]', row).value || undefined, nationality: $('[name="tNationality"]', row).value.trim() || undefined,
+        passportNumber: $('[name="tPassport"]', row).value.trim() || undefined, passportExpiry: $('[name="tPassportExpiry"]', row).value || undefined
+      })).filter((traveler) => traveler.fullName.length > 1);
+      if (!travelers.length) { toast('Add at least one passenger', 'error'); return; }
+      button.disabled = true; button.innerHTML = 'Booking your flight…';
+      try {
+        const booking = await api.post('/bookings', {
+          vertical: 'flight',
+          payload: {
+            flight: selection, from: query.get('from'), to: query.get('to'),
+            departure: query.get('departure'), returnDate: query.get('return') || undefined,
+            tripType: query.get('trip') || 'oneway', cabin: query.get('cabin') || 'economy',
+            adults, children, infants, passengers: travelers,
+            contact: { fullName: String(data.get('contactName') || '').trim(), email: String(data.get('contactEmail') || '').trim(), phone: String(data.get('contactPhone') || '').trim() }
+          }
+        });
+        track('booking_created', { vertical: 'flight', bookingId: booking.booking?.id });
+        toast('Flight booking created', 'success');
+        try {
+          const intent = await api.post('/payments/intents', { bookingId: booking.booking.id });
+          track('payment_started', { bookingId: booking.booking.id });
+          if (intent.checkoutUrl) { window.location.href = intent.checkoutUrl; return; }
+        } catch (error) {
+          toast(error.message || 'Payment could not be started', 'error');
+        }
+        root.innerHTML = `<div class="sf-page">
+          ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Flights', href: '/flights' }, { label: 'Booking' }])}
+          ${pageHead({ eyebrow: 'Air travel', title: 'Booking received', description: 'Our flight desk is reviewing your booking request.' })}
+          <section class="sf-panel">
+            <div class="sf-booking-reference"><small>Booking reference</small><strong>${esc(booking.booking.id)}</strong></div>
+            <p>Use this reference with your contact details on the <a href="/track-booking" data-public-route="/track-booking">track booking</a> page to follow your status.</p>
+            <div class="sf-state-actions"><a class="btn btn-primary" href="/track-booking" data-public-route="/track-booking">Track booking</a><a class="btn btn-outline" href="/flights" data-public-route="/flights">Search again</a></div>
+          </section>
+        </div>`;
+        sessionStorage.removeItem(FLIGHT_SELECTION_KEY);
+      } catch (error) {
+        toast(error.message || 'We could not book this flight right now.', 'error');
+        button.disabled = false; button.innerHTML = `${icon('i-shield')} Book &amp; continue to payment`;
+        root.querySelector('.sf-checkout')?.insertAdjacentHTML('afterbegin', errorState(error.message));
+      }
+    });
+  }
+
+  function addFlightTravelerRow(index, adults, children, infants, prefill) {
+    const holder = $('#sfFlightTravelers');
+    if (!holder) return;
+    const type = index < adults ? 'Adult' : index < adults + children ? 'Child' : 'Infant';
+    const row = document.createElement('div');
+    row.className = 'sf-traveler-row';
+    row.innerHTML = `
+      <div class="sf-traveler-head"><strong>Passenger ${index + 1} · ${type}</strong><button class="sf-link sf-link-danger" type="button" data-sf-remove-traveler>Remove</button></div>
+      <div class="sf-form-grid">
+        <label class="sf-field"><span>Full name (as on passport) *</span><input name="tFullName" required value="${esc(index === 0 ? prefill.fullName : '')}" /></label>
+        <label class="sf-field"><span>Date of birth</span><input type="date" name="tDob" /></label>
+        <label class="sf-field"><span>Gender</span><select name="tGender"><option value="">—</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></label>
+        <label class="sf-field"><span>Nationality</span><input name="tNationality" /></label>
+        <label class="sf-field"><span>Passport number</span><input name="tPassport" /></label>
+        <label class="sf-field"><span>Passport expiry</span><input type="date" name="tPassportExpiry" /></label>
+      </div>`;
+    holder.appendChild(row);
+  }
+
+  /* ------------------------------------------------ payment return page */
+  async function renderPaymentReturn(root, query) {
+    const status = query.get('payment') || 'pending';
+    const paymentId = query.get('paymentId') || query.get('tran_id') || query.get('order_id') || '';
+    root.innerHTML = `<div class="sf-page">${loadingState('Verifying your payment…')}</div>`;
+    let result = null;
+    if (paymentId) { try { result = await api.get(`/payments/return-status?paymentId=${encodeURIComponent(paymentId)}`); } catch { /* keep query-only state */ } }
+    const payment = result?.payment;
+    const order = result?.order;
+    const verifiedStatus = payment?.status === 'paid' ? 'success' : payment?.status === 'failed' ? 'failed' : status;
+    const copy = {
+      success: { icon: 'i-check', title: 'Payment successful', message: 'Your payment was verified by our server. Your booking is confirmed and your receipt is ready.' },
+      failed: { icon: 'i-close', title: 'Payment failed', message: payment?.failureReason || 'Your payment was not completed. You can try again from your booking page.' },
+      cancelled: { icon: 'i-close', title: 'Payment cancelled', message: 'You cancelled the payment. Your booking is still saved — you can pay whenever you are ready.' },
+      pending: { icon: 'i-clock', title: 'Payment pending', message: 'We are still waiting for the gateway to confirm your payment. This page refreshes automatically.' }
+    }[verifiedStatus] || copy.pending;
+    const link = order ? { href: `/orders/${esc(order.orderNumber)}`, label: 'View booking' } : result?.hotelBooking ? { href: `/booking/${esc(result.hotelBooking.id)}`, label: 'View booking' } : { href: '/orders', label: 'My bookings' };
+    root.innerHTML = `<div class="sf-page">
+      ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Payment return' }])}
+      <section class="sf-panel sf-payment-return sf-payment-${esc(verifiedStatus)}">
+        <div class="sf-state-icon">${icon(copy.icon)}</div>
+        <h1>${esc(copy.title)}</h1>
+        <p>${esc(copy.message)}</p>
+        ${payment ? `<div class="sf-payment-ref"><div><small>Reference</small><strong>${esc(payment.transactionRef || payment.id)}</strong></div><div><small>Amount</small><strong>${money(payment.amount, payment.currency)}</strong></div><div><small>Status</small><strong class="sf-ok">${esc(payment.status)}</strong></div></div>` : ''}
+        <div class="sf-state-actions"><a class="btn btn-primary" href="${link.href}" data-public-route="${link.href}">${link.label}</a><a class="btn btn-outline" href="/" data-public-route="/">Back home</a></div>
+      </section>
+    </div>`;
+    if (verifiedStatus === 'pending') setTimeout(() => void renderPaymentReturn(root, query), 4000);
+  }
+
+  /** Analytics shorthand (no-op when the tracker is unavailable). */
+  const track = (event, metadata) => { try { window.SadikAnalytics?.track(event, metadata); } catch { /* best effort */ } };
 
   /* ---------------------------------------------------------------- app */
   async function renderAppPage(root) {
@@ -689,6 +952,7 @@
     const box = $('#sfCheckoutBody', root);
     const directId = query.get('product');
     const directQty = Number(query.get('qty') || 1);
+    track('checkout_started', { direct: Boolean(directId) });
 
     try {
       const [prefill, cartData, directProduct] = await Promise.all([
@@ -822,9 +1086,11 @@
       const result = await api.post('/checkout', payload);
       toast(`Booking ${result.order.orderNumber} created`, 'success');
       await refreshBadges();
+      track('booking_created', { orderId: result.order.id, orderNumber: result.order.orderNumber, type: result.order.primaryType });
       if (payload.paymentMethod === 'online') {
         try {
           const payResult = await api.post(`/orders/${result.order.id}/pay`, {});
+          track('payment_started', { orderId: result.order.id });
           if (payResult.checkoutUrl) { window.location.href = payResult.checkoutUrl; return; }
           toast(payResult.message || 'Payment session created', 'success');
         } catch (error) {
@@ -844,11 +1110,11 @@
     if (!isLoggedIn()) return renderLoginRequired(root, 'My bookings', 'Login to see your bookings and orders.');
     root.innerHTML = `<div class="sf-page">${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'My bookings' }])}${pageHead({ eyebrow: 'Account', title: 'My Bookings & Orders', description: 'Every Sadik Travels booking, order, payment and invoice in one place.' })}${loadingState('Loading your bookings…')}</div>`;
     try {
-      const result = await api.get('/orders?pageSize=30');
-      const body = result.orders.length
-        ? `<div class="sf-order-list">${result.orders.map(orderRow).join('')}</div>`
+      const rows = await loadUnifiedBookings();
+      const body = rows.length
+        ? `<div class="sf-order-list">${rows.map(unifiedRow).join('')}</div>`
         : emptyState('No bookings yet', 'Your bookings appear here as soon as you make one.', '<a class="btn btn-primary" href="/holiday-packages" data-public-route="/holiday-packages">Find something to book</a>');
-      root.innerHTML = `<div class="sf-page">${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'My bookings' }])}${pageHead({ eyebrow: 'Account', title: 'My Bookings & Orders', description: `${result.total} record${result.total === 1 ? '' : 's'}.` })}${body}</div>`;
+      root.innerHTML = `<div class="sf-page">${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'My bookings' }])}${pageHead({ eyebrow: 'Account', title: 'My Bookings & Orders', description: `${rows.length} record${rows.length === 1 ? '' : 's'} across bookings, stays and requests.` })}${body}</div>`;
     } catch (error) {
       root.innerHTML = `<div class="sf-page">${errorState(error.message)}</div>`;
     }
@@ -856,16 +1122,78 @@
 
   const statusPill = (status) => `<span class="sf-pill sf-pill-${esc(status)}">${esc(titleCase(status))}</span>`;
 
-  const orderRow = (order) => `
-    <a class="sf-order-row" href="/orders/${esc(order.orderNumber)}" data-public-route="/orders/${esc(order.orderNumber)}">
-      <div class="sf-order-media">${order.items?.[0]?.imageUrl ? `<img src="${esc(order.items[0].imageUrl)}" alt="" />` : icon('i-images')}</div>
+  /** Unified booking history: catalogue orders + hotel stays + legacy vertical
+   *  requests (flight/visa/tour…) sorted by creation date. */
+  async function loadUnifiedBookings() {
+    const [orders, hotel, legacy] = await Promise.all([
+      api.get('/orders?pageSize=50').catch(() => ({ orders: [] })),
+      api.get('/hotels/bookings').catch(() => ({ bookings: [] })),
+      api.get('/bookings').catch(() => ({ bookings: [] }))
+    ]);
+    const rows = [];
+    (orders.orders || []).forEach((order) => rows.push({
+      key: `order:${order.id}`, title: order.items?.[0]?.title || titleCase(order.primaryType),
+      meta: `${order.orderNumber} · ${dateLabel(order.createdAt)}${order.travelDate ? ` · Travel ${dateLabel(order.travelDate)}` : ''}`,
+      image: order.items?.[0]?.imageUrl, amount: order.total, currency: order.currency,
+      status: order.status, payment: order.paymentStatus, href: `/orders/${esc(order.orderNumber)}`, extra: order.items?.length > 1 ? `+${order.items.length - 1} more` : ''
+    }));
+    (hotel.bookings || []).forEach((booking) => rows.push({
+      key: `hotel:${booking.id}`, title: booking.hotelSnapshot?.name || 'Hotel stay',
+      meta: `${booking.bookingNumber} · ${dateLabel(booking.checkIn)} → ${dateLabel(booking.checkOut)}`,
+      image: booking.hotelSnapshot?.image, amount: booking.priceBreakdown?.total, currency: 'BDT',
+      status: booking.status, payment: booking.paymentStatus, href: `/booking/${esc(booking.id)}`, extra: `${booking.nights} night${booking.nights === 1 ? '' : 's'}`
+    }));
+    (legacy.bookings || []).forEach((booking) => rows.push({
+      key: `legacy:${booking.id}`, title: `Flight request · ${booking.vertical}`,
+      meta: `${booking.id.slice(0, 12).toUpperCase()} · ${dateLabel(booking.createdAt)}`,
+      image: '', amount: null, currency: 'BDT', status: booking.status, payment: null,
+      href: `/track-booking?ref=${encodeURIComponent(booking.id)}`, extra: 'Provider request'
+    }));
+    rows.sort((a, b) => String(b.meta).localeCompare(String(a.meta)));
+    return rows;
+  }
+
+  const unifiedRow = (row) => `
+    <a class="sf-order-row" href="${row.href}" data-public-route="${row.href}">
+      <div class="sf-order-media">${row.image ? `<img src="${esc(row.image)}" alt="" />` : icon('i-briefcase')}</div>
       <div class="sf-order-main">
-        <strong>${esc(order.items?.[0]?.title || titleCase(order.primaryType))}${order.items?.length > 1 ? ` +${order.items.length - 1} more` : ''}</strong>
-        <small>${esc(order.orderNumber)} · ${dateLabel(order.createdAt)}${order.travelDate ? ` · Travel ${dateLabel(order.travelDate)}` : ''}</small>
-        <div class="sf-order-pills">${statusPill(order.status)}${statusPill(order.paymentStatus)}</div>
+        <strong>${esc(row.title)}${row.extra ? ` <small class="sf-hint">${esc(row.extra)}</small>` : ''}</strong>
+        <small>${row.meta}</small>
+        <div class="sf-order-pills">${statusPill(row.status)}${row.payment ? statusPill(row.payment) : ''}</div>
       </div>
-      <div class="sf-order-side"><strong>${money(order.total, order.currency)}</strong><span>View details ›</span></div>
+      <div class="sf-order-side">${row.amount != null ? `<strong>${money(row.amount, row.currency)}</strong>` : '<strong>—</strong>'}<span>View ›</span></div>
     </a>`;
+
+  /** Delivery / activation panel for digital purchases (eSIM, packages, …).
+   *  A delivered state is only shown from a verified provider payload or an
+   *  explicit admin fulfilment — never fabricated. */
+  const fulfillmentPanel = (order) => {
+    const fulfillment = order.fulfillment || {};
+    const payload = fulfillment.payload || {};
+    if (fulfillment.status === 'delivered' && (payload.qrCodeUrl || payload.smDpPlus || payload.activationCode)) {
+      return `<section class="sf-panel sf-fulfillment sf-fulfillment-delivered">
+        <div class="sf-panel-head"><h2>${icon('i-sim')} eSIM activation</h2><span class="sf-tag sf-ok">Delivered</span></div>
+        <div class="sf-activation-grid">
+          ${payload.qrCodeUrl ? `<div class="sf-activation-qr"><img src="${esc(payload.qrCodeUrl)}" alt="eSIM activation QR code" /><small>Scan with your phone camera to install</small></div>` : ''}
+          <div class="sf-activation-details">
+            ${payload.provider ? `<div><span>Provider</span><strong>${esc(payload.provider)}</strong></div>` : ''}
+            ${payload.reference ? `<div><span>Reference</span><strong>${esc(payload.reference)}</strong></div>` : ''}
+            ${payload.smDpPlus ? `<div><span>SM-DP+ address</span><strong class="sf-mono">${esc(payload.smDpPlus)}</strong></div>` : ''}
+            ${payload.activationCode ? `<div><span>Activation code</span><strong class="sf-mono">${esc(payload.activationCode)}</strong></div>` : ''}
+            ${payload.instructions ? `<div class="sf-activation-instructions"><span>Instructions</span><p>${esc(payload.instructions)}</p></div>` : ''}
+          </div>
+        </div>
+      </section>`;
+    }
+    if (fulfillment.status === 'delivered') {
+      return `<section class="sf-panel sf-fulfillment sf-fulfillment-delivered"><div class="sf-panel-head"><h2>Order fulfilment</h2><span class="sf-tag sf-ok">Delivered</span></div><p>${esc(fulfillment.note || 'This order has been fulfilled.')}</p>${payload.reference ? `<p class="sf-hint">Reference: ${esc(payload.reference)}</p>` : ''}</section>`;
+    }
+    return `<section class="sf-panel sf-fulfillment sf-fulfillment-pending">
+      <div class="sf-panel-head"><h2>Fulfilment</h2><span class="sf-tag">${esc(titleCase(fulfillment.status || 'pending'))}</span></div>
+      <p>${esc(fulfillment.note || 'Our team is preparing your order. You will be notified as soon as it is ready.')}</p>
+      <p class="sf-hint">${order.paymentStatus === 'paid' ? 'Payment received — fulfilment is in progress.' : 'This order will be fulfilled after payment is verified.'}</p>
+    </section>`;
+  };
 
   async function renderOrderDetail(root, reference) {
     if (!isLoggedIn()) return renderLoginRequired(root, 'Booking', 'Login to view this booking.');
@@ -892,6 +1220,7 @@
               <h2>Booking timeline</h2>
               <ol class="sf-timeline">${(order.timeline || []).map((entry) => `<li><span class="sf-timeline-dot"></span><div><strong>${esc(titleCase(entry.status))}</strong>${entry.note ? `<p>${esc(entry.note)}</p>` : ''}<small>${dateTimeLabel(entry.at)}</small></div></li>`).join('')}</ol>
             </section>
+            ${order.fulfillment ? fulfillmentPanel(order) : ''}
             ${order.travelers?.length ? `<section class="sf-panel"><h2>Travellers</h2><div class="sf-fact-grid">${order.travelers.map((traveler) => `<div class="sf-fact"><small>${esc(traveler.nationality || 'Traveller')}</small><strong>${esc(traveler.fullName)}</strong></div>`).join('')}</div></section>` : ''}
           </div>
           <aside class="sf-detail-side">
@@ -1006,7 +1335,9 @@
   }
 
   /* -------------------------------------------------------------- support */
-  async function renderSupport(root) {
+  async function renderSupport(root, query) {
+    const ticketId = query?.get?.('ticket') || '';
+    if (ticketId && isLoggedIn()) return renderTicketThread(root, ticketId);
     root.innerHTML = `<div class="sf-page">
       ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Support' }])}
       ${pageHead({ eyebrow: 'Help centre', title: 'Sadik Travels Support', description: 'Open a ticket and our travel desk responds during business hours, usually much faster.' })}
@@ -1044,13 +1375,44 @@
     } catch { $('#sfFaq', root).innerHTML = emptyState('FAQs unavailable', 'Please try again shortly.'); }
   }
 
+  async function renderTicketThread(root, ticketId) {
+    root.innerHTML = `<div class="sf-page">${loadingState('Loading ticket…')}</div>`;
+    try {
+      const { ticket, messages } = await api.get(`/account/tickets/${encodeURIComponent(ticketId)}`);
+      root.innerHTML = `<div class="sf-page">
+        ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Support', href: '/support' }, { label: ticket.subject }])}
+        ${pageHead({ eyebrow: 'Support ticket', title: ticket.subject, description: `Reference ${ticket.id.slice(0, 8).toUpperCase()} · ${statusPill(ticket.status)} ${statusPill(ticket.priority)}`, actions: `<a class="btn btn-outline" href="/support" data-public-route="/support">New ticket</a>` })}
+        <div class="sf-support-thread">
+          <section class="sf-panel">
+            <h2>Conversation</h2>
+            ${messages.length ? `<div class="sf-thread">${messages.map((message) => `<article class="sf-thread-message ${message.authorType === 'customer' ? 'is-mine' : ''}"><div class="sf-thread-head"><strong>${esc(message.authorType === 'customer' ? 'You' : message.authorType === 'admin' ? 'Sadik Travels support' : 'Sadik Travels system')}</strong><small>${dateTimeLabel(message.createdAt)}</small></div><p>${esc(message.message)}</p></article>`).join('')}</div>` : emptyState('No messages yet', 'The support team will reply here.')}
+            ${!['closed', 'resolved'].includes(ticket.status) ? `<form class="sf-reply-form" id="sfTicketReplyForm"><label class="sf-field"><span>Reply</span><textarea name="message" rows="3" required placeholder="Add anything that helps us help you…"></textarea></label><button class="btn btn-primary" type="submit">Send reply</button><div id="sfTicketReplyResult"></div></form>` : '<p class="sf-hint">This ticket is closed. Open a new ticket for anything else.</p>'}
+          </section>
+        </div>
+      </div>`;
+      $('#sfTicketReplyForm', root)?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = event.submitter; button.disabled = true;
+        try {
+          await api.post(`/account/tickets/${encodeURIComponent(ticketId)}/messages`, { message: String(new FormData(event.target).get('message') || '').trim() });
+          toast('Reply sent', 'success');
+          await renderTicketThread(root, ticketId);
+        } catch (error) { toast(error.message || 'Reply could not be sent', 'error'); button.disabled = false; }
+      });
+    } catch (error) {
+      root.innerHTML = `<div class="sf-page">${errorState(error.status === 404 ? 'Ticket not found.' : error.message)}</div>`;
+    }
+  }
+
   /* -------------------------------------------------------------- account */
   const ACCOUNT_TABS = [
     { key: 'profile', label: 'My Profile', icon: 'i-user' },
     { key: 'bookings', label: 'My Bookings', icon: 'i-briefcase' },
+    { key: 'payments', label: 'Payments', icon: 'i-card' },
     { key: 'wishlist', label: 'Wishlist', icon: 'i-heart' },
     { key: 'travelers', label: 'Saved Travellers', icon: 'i-user' },
     { key: 'invoices', label: 'Invoices', icon: 'i-file' },
+    { key: 'tickets', label: 'Support Tickets', icon: 'i-headset' },
     { key: 'reviews', label: 'My Reviews', icon: 'i-star' },
     { key: 'notifications', label: 'Notifications', icon: 'i-bell' },
     { key: 'security', label: 'Security', icon: 'i-shield' }
@@ -1073,7 +1435,9 @@
     const body = $('#sfAccountBody', root);
     try {
       if (tab === 'profile') body.innerHTML = accountProfile();
-      else if (tab === 'bookings') { const result = await api.get('/orders?pageSize=20'); body.innerHTML = result.orders.length ? `<div class="sf-order-list">${result.orders.map(orderRow).join('')}</div>` : emptyState('No bookings yet', 'Bookings you make appear here.'); }
+      else if (tab === 'bookings') { const rows = await loadUnifiedBookings(); body.innerHTML = rows.length ? `<div class="sf-order-list">${rows.map(unifiedRow).join('')}</div>` : emptyState('No bookings yet', 'Bookings you make appear here.'); }
+      else if (tab === 'payments') { const result = await api.get('/account/payments?pageSize=30'); body.innerHTML = result.payments.length ? `<div class="sf-table-wrap"><table class="sf-table"><thead><tr><th>Date</th><th>Reference</th><th>Gateway</th><th>Amount</th><th>Status</th><th>Refund</th></tr></thead><tbody>${result.payments.map((payment) => `<tr><td>${dateTimeLabel(payment.initiatedAt || payment.createdAt)}</td><td>${esc(payment.transactionRef || payment.id.slice(0, 8).toUpperCase())}</td><td>${esc(titleCase(payment.provider))}</td><td>${money(payment.amount, payment.currency)}</td><td>${statusPill(payment.status)}</td><td>${payment.refundStatus && payment.refundStatus !== 'none' ? statusPill(payment.refundStatus) : '<span class="sf-hint">—</span>'}</td></tr>`).join('')}</tbody></table></div>` : emptyState('No transactions yet', 'Your payment history appears here after your first payment.'); }
+      else if (tab === 'tickets') { const { tickets } = await api.get('/account/tickets'); body.innerHTML = tickets.length ? `<div class="sf-order-list">${tickets.map((ticket) => `<a class="sf-order-row" href="/support?ticket=${esc(ticket.id)}" data-public-route="/support?ticket=${esc(ticket.id)}"><div class="sf-order-media">${icon('i-headset')}</div><div class="sf-order-main"><strong>${esc(ticket.subject)}</strong><small>${esc(ticket.id.slice(0, 8).toUpperCase())} · ${dateLabel(ticket.createdAt)}</small><div class="sf-order-pills">${statusPill(ticket.status)}${statusPill(ticket.priority)}</div></div><div class="sf-order-side"><span>Open ›</span></div></a>`).join('')}</div>` : emptyState('No support tickets', 'Tickets you create appear here with our replies.', '<a class="btn btn-primary" href="/support" data-public-route="/support">Open support</a>'); }
       else if (tab === 'wishlist') { const { items } = await api.get('/wishlist'); body.innerHTML = items.length ? `<div class="sf-grid sf-grid-2">${items.map((item) => `<article class="sf-mini-card"><strong>${esc(item.title)}</strong><small>${esc(titleCase(item.productType))}</small><button class="sf-link sf-link-danger" type="button" data-sf-wish-remove="${esc(item.id)}">Remove</button></article>`).join('')}</div>` : emptyState('Wishlist empty', 'Save products to find them here.'); }
       else if (tab === 'travelers') await renderTravelersTab(body);
       else if (tab === 'invoices') { const { invoices } = await api.get('/invoices'); body.innerHTML = invoices.length ? `<div class="sf-table-wrap"><table class="sf-table"><thead><tr><th>Invoice</th><th>Booking</th><th>Date</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>${invoices.map((invoice) => `<tr><td>${esc(invoice.invoiceNumber)}</td><td>${esc(invoice.orderNumber)}</td><td>${dateLabel(invoice.issuedAt)}</td><td>${money(invoice.total, invoice.currency)}</td><td>${statusPill(invoice.status)}</td><td><a class="sf-link" href="/invoice/${esc(invoice.invoiceNumber)}" data-public-route="/invoice/${esc(invoice.invoiceNumber)}">View</a></td></tr>`).join('')}</tbody></table></div>` : emptyState('No invoices yet', 'Invoices are generated automatically after checkout.'); }
@@ -1224,6 +1588,7 @@
       state.cart = { count: data.cart.items.reduce((sum, item) => sum + item.quantity, 0), items: data.cart.items };
       paintBadges();
       toast('Added to your cart', 'success');
+      track('add_to_cart', { productId, quantity });
       return true;
     } catch (error) {
       toast(error.message || 'Could not add this item', 'error');
@@ -1280,6 +1645,14 @@
       if (emptyBox) emptyBox.outerHTML = markup;
       else if (grid && !grid.children.length) grid.outerHTML = markup;
       else if (!grid) section.querySelector('.panel-block')?.insertAdjacentHTML('beforeend', markup);
+      // eSIM: add a clickable country strip under the plan cards.
+      if (type === 'esim') {
+        const countries = [...new Set(products.map((product) => product.country).filter(Boolean))];
+        if (countries.length) {
+          const strip = `<div class="hs-esim-countries"><span>Shop by country:</span>${countries.slice(0, 8).map((country) => `<a class="sf-chip" href="/esim?country=${encodeURIComponent(country)}" data-public-route="/esim?country=${encodeURIComponent(country)}">${esc(country)}</a>`).join('')}<a class="sf-link" href="/esim" data-public-route="/esim">View all plans →</a></div>`;
+          section.querySelector('.panel-block')?.insertAdjacentHTML('beforeend', strip);
+        }
+      }
     });
   }
 
@@ -1325,7 +1698,7 @@
 
   /* ---------------------------------------------------------- route table */
   const routes = {
-    flights: (root, route) => renderFlights(root, route.query),
+    flights: (root, route) => (route.parts[1] === 'booking' ? renderFlightBooking(root, route.query) : renderFlights(root, route.query)),
     app: (root) => renderAppPage(root),
     'sadik-app': (root) => renderAppPage(root),
     cart: (root) => renderCart(root),
@@ -1334,16 +1707,19 @@
     orders: (root, route) => (route.parts[1] ? renderOrderDetail(root, route.parts[1]) : renderOrders(root)),
     invoice: (root, route) => renderInvoice(root, route.parts[1] || ''),
     'track-booking': (root, route) => renderTrackBooking(root, route.query),
-    support: (root) => renderSupport(root),
-    account: (root, route) => renderAccount(root, route.query)
+    support: (root, route) => renderSupport(root, route.query),
+    account: (root, route) => renderAccount(root, route.query),
+    payment: (root, route) => renderPaymentReturn(root, route.query)
   };
 
   Object.entries(COLLECTIONS).forEach(([routeKey, definition]) => {
+    if (routeKey === 'esim') return; // eSIM has a dedicated marketplace renderer below.
     routes[routeKey] = (root, route) => {
       if (routeKey === 'visa' && route.parts[2] === 'apply') return renderVisaApply(root, route.parts[1]);
       return route.parts[1] ? renderProductDetail(root, definition, route.parts[1]) : renderCollection(root, definition, route.query);
     };
   });
+  routes.esim = (root, route) => (route.parts[1] ? renderProductDetail(root, COLLECTIONS.esim, route.parts[1]) : renderEsimMarketplace(root, route.query));
   // Legacy alias kept working so old links never 404.
   routes['airline-offers'] = routes['airlines-offers'];
 
@@ -1502,8 +1878,10 @@
       const flightSelect = closest('[data-sf-flight-select]');
       if (flightSelect) {
         event.preventDefault();
-        toast('Our flight desk will confirm this fare with you', 'success');
-        window.SadikPages.navigate('/support');
+        let option = {};
+        try { option = JSON.parse(flightSelect.dataset.sfFlightSelect || '{}'); } catch { /* keep empty */ }
+        sessionStorage.setItem('sadikFlightSelection', JSON.stringify({ ...option, searchUrl: location.search }));
+        window.SadikPages.navigate(`/flights/booking${location.search}`);
       }
     });
 

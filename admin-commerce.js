@@ -191,7 +191,13 @@
           ${field('Data amount', 'dataAmount', product?.dataAmount || '', { hint: 'eSIM, e.g. 5 GB' })}
           ${field('Validity (days)', 'validityDays', product?.validityDays ?? '', { type: 'number' })}
           ${field('Network', 'network', product?.network || '')}
+          ${field('Provider', 'provider', product?.provider || '', { hint: 'eSIM provider / supplier' })}
+          ${field('Activation method', 'activationMethod', product?.activationMethod || '', { hint: 'QR code, SM-DP+, manual…' })}
           ${field('Activation', 'activation', product?.activation || '')}
+          ${field('QR code URL', 'qrCodeUrl', product?.qrCodeUrl || '', { hint: 'Public QR image for this plan' })}
+          ${field('SM-DP+ address', 'smDpPlus', product?.smDpPlus || '')}
+          ${field('Activation code', 'activationCode', product?.activationCode || '')}
+          ${field('Installation instructions', 'instructions', product?.instructions || '', { textarea: true, rows: 2, wide: true })}
           ${field('Visa type', 'visaType', product?.visaType || '')}
           ${field('Processing time', 'processingTime', product?.processingTime || '')}
           ${field('Entry type', 'entryType', product?.entryType || '')}
@@ -272,6 +278,9 @@
       durationDays: number('durationDays'), durationNights: number('durationNights'),
       dataAmount: text('dataAmount') || undefined, validityDays: number('validityDays'),
       network: text('network') || undefined, activation: text('activation') || undefined,
+      provider: text('provider') || undefined, activationMethod: text('activationMethod') || undefined,
+      qrCodeUrl: text('qrCodeUrl') || undefined, smDpPlus: text('smDpPlus') || undefined,
+      activationCode: text('activationCode') || undefined, instructions: text('instructions') || undefined,
       visaType: text('visaType') || undefined, processingTime: text('processingTime') || undefined, entryType: text('entryType') || undefined,
       hospital: text('hospital') || undefined, treatmentCategory: text('treatmentCategory') || undefined,
       doctor: text('doctor') || undefined, estimatedCost: text('estimatedCost') || undefined,
@@ -383,6 +392,24 @@
             <h3 style="margin-top:18px">Timeline</h3>
             <ol class="ac-timeline">${(order.timeline || []).map((entry) => `<li><strong>${esc(titleCase(entry.status))}</strong>${entry.note ? `<p>${esc(entry.note)}</p>` : ''}<small>${dayTime(entry.at)}</small></li>`).join('')}</ol>
           </div>
+          <div class="admin-card">
+            <h3>Fulfilment</h3>
+            ${order.fulfillment && order.fulfillment.status === 'delivered'
+              ? `<p class="admin-muted">${esc(order.fulfillment.note || 'Order fulfilled.')}</p>${order.fulfillment.payload ? `<dl class="ac-dl">${Object.entries(order.fulfillment.payload).filter(([, value]) => Boolean(value) && value !== undefined && value !== null && value !== '').map(([key, value]) => `<div><dt>${esc(titleCase(key))}</dt><dd class="ac-break">${esc(String(value))}</dd></div>`).join('')}</dl>` : ''}`
+              : `<p class="admin-muted">Status: <strong>${esc(titleCase(order.fulfillment?.status || 'none'))}</strong>${order.fulfillment?.note ? ` — ${esc(order.fulfillment.note)}` : ''}</p>
+                 <form id="acFulfillForm" class="admin-form-grid">
+                   ${field('Provider', 'provider', '', { hint: 'e.g. esim_provider, manual dispatch' })}
+                   ${field('QR code URL', 'qrCodeUrl', '', { hint: 'eSIM activation QR image URL' })}
+                   ${field('SM-DP+ address', 'smDpPlus', '')}
+                   ${field('Activation code', 'activationCode', '')}
+                   ${field('Reference', 'reference', '', { hint: 'Provider/despatch reference' })}
+                   ${field('Instructions', 'instructions', '', { textarea: true, rows: 2, wide: true })}
+                   ${field('Note', 'note', '', { textarea: true, rows: 2, wide: true })}
+                   <div class="admin-modal-actions" style="grid-column:1/-1">
+                     <button class="admin-primary" type="submit" ${can('order.update') ? '' : 'disabled title="Permission required: order.update"'}>Mark as fulfilled</button>
+                   </div>
+                 </form>`}
+          </div>
         </div>`;
 
     q('#acOrderForm')?.addEventListener('submit', async (event) => {
@@ -397,6 +424,21 @@
         notify('Order updated successfully', 'success');
         refresh();
       } catch (error) { notify(error.message || 'Update failed', 'error'); }
+      finally { window.setLoading?.(button, false); }
+    });
+    q('#acFulfillForm')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = event.submitter;
+      const data = new FormData(event.currentTarget);
+      const payload = {};
+      ['provider', 'qrCodeUrl', 'smDpPlus', 'activationCode', 'reference', 'instructions', 'note'].forEach((key) => { const value = String(data.get(key) || '').trim(); if (value) payload[key] = value; });
+      if (!Object.keys(payload).length) { notify('Add at least one fulfilment detail', 'error'); return; }
+      window.setLoading?.(button, true, 'Fulfilling…');
+      try {
+        await request(`/admin/orders/${order.id}/fulfill`, { method: 'POST', body: JSON.stringify(payload) });
+        notify('Order marked as fulfilled — customer notified', 'success');
+        refresh();
+      } catch (error) { notify(error.message || 'Fulfilment could not be saved', 'error'); }
       finally { window.setLoading?.(button, false); }
     });
   }

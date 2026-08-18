@@ -45,6 +45,9 @@ const catalogInputSchema = z.object({
   durationDays: z.number().int().min(0).max(365).optional(), durationNights: z.number().int().min(0).max(365).optional(),
   dataAmount: z.string().max(60).optional(), validityDays: z.number().int().min(0).max(3650).optional(), network: z.string().max(120).optional(),
   activation: z.string().max(300).optional(), coverage: z.array(z.string().max(80)).max(80).default([]),
+  provider: z.string().max(160).optional(), activationMethod: z.string().max(120).optional(),
+  qrCodeUrl: z.string().max(1000).optional(), smDpPlus: z.string().max(300).optional(),
+  activationCode: z.string().max(300).optional(), instructions: z.string().max(4000).optional(),
   visaType: z.string().max(120).optional(), processingTime: z.string().max(120).optional(), validity: z.string().max(120).optional(),
   entryType: z.string().max(80).optional(), requiredDocuments: z.array(z.string().max(200)).max(40).default([]),
   itinerary: z.array(z.object({ day: z.number().int().min(1).max(365), title: z.string().max(200), detail: z.string().max(2000).optional() })).max(60).default([]),
@@ -143,6 +146,8 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
       type: (query.type as CatalogType) || 'all', status: 'published', q: query.q, country: query.country, destination: query.destination,
       minPrice: query.minPrice ? Number(query.minPrice) : undefined, maxPrice: query.maxPrice ? Number(query.maxPrice) : undefined,
       featured: query.featured === 'true' ? true : undefined, tags: query.tags ? query.tags.split(',').filter(Boolean) : undefined,
+      dataAmount: query.dataAmount || undefined, validityDays: query.validityDays ? Number(query.validityDays) : undefined,
+      network: query.network || undefined, region: query.region || undefined,
       sort: (query.sort as any) || 'recommended', page: Number(query.page) || 1, pageSize: Number(query.pageSize) || 12
     });
     res.setHeader('Cache-Control', 'no-store');
@@ -515,6 +520,25 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
     if (input.paymentStatus === 'paid') { await commerce.markInvoicePaid(order!.id); await notify(order!.userId, 'Payment received', `We have received payment for booking ${order!.orderNumber}.`); }
     if (input.status === 'confirmed') await notify(order!.userId, 'Booking confirmed', `Your booking ${order!.orderNumber} is confirmed.`);
     await store.audit('order.updated', { ...clientMeta(req), userId: req.user!.id, metadata: { orderId: order!.id, ...patch } });
+    res.json({ order: updated });
+  });
+
+  /* Admin-driven manual fulfilment (eSIM activation details, provider payloads,
+     physical dispatch). Requires an order.update permission and writes an audit
+     entry with the fulfilment payload reference. */
+  app.post('/api/v1/admin/orders/:id/fulfill', requireFinePermission(store, 'order.update'), async (req, res) => {
+    const input = toInput(z.object({
+      provider: z.string().max(160).optional(),
+      qrCodeUrl: z.string().max(1000).optional(), smDpPlus: z.string().max(300).optional(),
+      activationCode: z.string().max(300).optional(), instructions: z.string().max(4000).optional(),
+      reference: z.string().max(200).optional(), note: z.string().max(1000).optional()
+    }).strict(), req.body);
+    const order = await commerce.findOrder(String(req.params.id));
+    assert(order, 404, 'ORDER_NOT_FOUND', 'Order not found');
+    const payload: Record<string, unknown> = { provider: input.provider, qrCodeUrl: input.qrCodeUrl, smDpPlus: input.smDpPlus, activationCode: input.activationCode, instructions: input.instructions, reference: input.reference, note: input.note };
+    const updated = await commerce.markOrderFulfilled(order!.id, payload, req.user!.id);
+    await notify(order!.userId, 'Your order is fulfilled', `Booking ${order!.orderNumber} has been fulfilled. Check your account for delivery details.`);
+    await store.audit('order.fulfilled', { ...clientMeta(req), userId: req.user!.id, metadata: { orderId: order!.id, payloadKeys: Object.keys(payload).filter(key => Boolean(payload[key])) } });
     res.json({ order: updated });
   });
 

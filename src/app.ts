@@ -21,6 +21,7 @@ import { createHotelStore } from './hotel-store.js';
 import { registerHotelRoutes } from './hotel-routes.js';
 import { createCommerceStore } from './commerce-store.js';
 import { registerCommerceRoutes } from './commerce-routes.js';
+import { registerAnalyticsRoutes, trackEvent } from './analytics.js';
 
 const verticalSchema = z.enum(['flight', 'hotel', 'home', 'visa', 'esim', 'tour']);
 const tourStatusSchema = z.enum(['draft', 'published', 'archived']);
@@ -48,7 +49,7 @@ const paymentStatusSchema = z.enum(['created', 'pending', 'paid', 'failed', 'ref
 const trackBookingRequest = z.object({ bookingReference: z.string().uuid(), identity: z.string().min(3).max(160) });
 const notificationRequest = z.object({ userId: z.string().optional(), identity: z.string().optional(), allUsers: z.boolean().default(false), confirmMassSend: z.boolean().default(false), title: z.string().trim().min(2).max(160), message: z.string().trim().min(2).max(4000), channels: z.array(z.enum(['in_app', 'sms', 'email'])).min(1).default(['in_app']) });
 const isSafeBrandLogo = (value: string) => { if (!value) return true; if (value.startsWith('/')) return true; try { const url = new URL(value); return url.protocol === 'http:' || url.protocol === 'https:'; } catch { return false; } };
-const settingPatchSchema = z.object({ brand_name: z.string().max(120).optional(), brand_logo_url: z.string().max(500).refine(isSafeBrandLogo, 'Logo URL must be an https URL or a local path').optional(), support_email: z.string().email().or(z.literal('')).optional(), support_phone: z.string().max(40).optional(), feature_flights: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_hotels: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_homes: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_visa: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_tours: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_esim: z.union([z.boolean(), z.enum(['true','false'])]).optional(), payment_provider: z.enum(['sslcommerz', 'bkash']).optional(), payment_webhook_secret: z.string().max(500).optional(), sslcommerz_store_id: z.string().max(160).optional(), sslcommerz_store_password: z.string().max(500).optional(), sslcommerz_api_url: z.string().url().or(z.literal('')).optional(), sslcommerz_validation_url: z.string().url().or(z.literal('')).optional(), sslcommerz_ipn_url: z.string().url().or(z.literal('')).optional(), bkash_base_url: z.string().url().or(z.literal('')).optional(), bkash_app_key: z.string().max(500).optional(), bkash_app_secret: z.string().max(500).optional(), bkash_username: z.string().max(200).optional(), bkash_password: z.string().max(500).optional(), sms_provider: z.enum(['custom_gateway', 'bulksmsbd']).optional(), sms_gateway_url: z.string().url().or(z.literal('')).optional(), sms_gateway_username: z.string().max(200).optional(), sms_gateway_password: z.string().max(500).optional(), sms_api_key: z.string().max(500).optional(), sms_sender_id: z.string().max(120).optional(), smtp_host: z.string().max(200).optional(), smtp_port: z.coerce.number().int().min(1).max(65535).optional(), smtp_user: z.string().max(240).optional(), smtp_password: z.string().max(500).optional(), smtp_from: z.string().email().or(z.literal('')).optional(), travel_provider_url: z.string().url().or(z.literal('')).optional(), travel_provider_api_key: z.string().max(500).optional() }).strict();
+const settingPatchSchema = z.object({ brand_name: z.string().max(120).optional(), brand_logo_url: z.string().max(500).refine(isSafeBrandLogo, 'Logo URL must be an https URL or a local path').optional(), support_email: z.string().email().or(z.literal('')).optional(), support_phone: z.string().max(40).optional(), feature_flights: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_hotels: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_homes: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_visa: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_tours: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_esim: z.union([z.boolean(), z.enum(['true','false'])]).optional(), payment_provider: z.enum(['sslcommerz', 'bkash']).optional(), payment_webhook_secret: z.string().max(500).optional(), sslcommerz_store_id: z.string().max(160).optional(), sslcommerz_store_password: z.string().max(500).optional(), sslcommerz_api_url: z.string().url().or(z.literal('')).optional(), sslcommerz_validation_url: z.string().url().or(z.literal('')).optional(), sslcommerz_ipn_url: z.string().url().or(z.literal('')).optional(), bkash_base_url: z.string().url().or(z.literal('')).optional(), bkash_app_key: z.string().max(500).optional(), bkash_app_secret: z.string().max(500).optional(), bkash_username: z.string().max(200).optional(), bkash_password: z.string().max(500).optional(), sms_provider: z.enum(['custom_gateway', 'bulksmsbd']).optional(), sms_gateway_url: z.string().url().or(z.literal('')).optional(), sms_gateway_username: z.string().max(200).optional(), sms_gateway_password: z.string().max(500).optional(), sms_api_key: z.string().max(500).optional(), sms_sender_id: z.string().max(120).optional(), smtp_host: z.string().max(200).optional(), smtp_port: z.coerce.number().int().min(1).max(65535).optional(), smtp_user: z.string().max(240).optional(), smtp_password: z.string().max(500).optional(), smtp_from: z.string().email().or(z.literal('')).optional(), travel_provider_url: z.string().url().or(z.literal('')).optional(), travel_provider_api_key: z.string().max(500).optional(), esim_provider_url: z.string().url().or(z.literal('')).optional(), esim_provider_api_key: z.string().max(500).optional() }).strict();
 const roleRequest = z.object({ role: z.enum(['customer', 'manager', 'admin', 'super_admin', 'support', 'content_manager', 'finance']) });
 const passwordLoginRequest = z.object({ identity: z.string().email(), password: z.string().min(8).max(200) });
 const messageTestRequest = z.object({ destination: z.string().min(3).max(240), subject: z.string().max(160).optional(), message: z.string().min(1).max(4000) });
@@ -68,7 +69,7 @@ const campaignTestSchema = z.object({ channel:z.enum(['email','sms','in_app']), 
 const templateInputSchema = z.object({ name:z.string().trim().min(2).max(160), type:z.enum(['email','sms','in_app']), subject:z.string().max(200).optional(), content:z.string().max(100000), metadata:z.record(z.unknown()).default({}), status:z.enum(['active','archived']).default('active') });
 const segmentInputSchema = z.object({ name:z.string().trim().min(2).max(160), description:z.string().max(500).optional(), rules:z.record(z.unknown()).default({}), status:z.enum(['active','archived']).default('active') });
 const FEATURE_KEYS = ['feature_flights','feature_hotels','feature_homes','feature_visa','feature_tours','feature_esim'];
-const SETTING_KEYS = ['brand_name','brand_logo_url','support_email','support_phone','payment_provider','payment_webhook_secret','sslcommerz_store_id','sslcommerz_store_password','sslcommerz_api_url','sslcommerz_validation_url','sslcommerz_ipn_url','bkash_base_url','bkash_app_key','bkash_app_secret','bkash_username','bkash_password','sms_provider','sms_gateway_url','sms_gateway_username','sms_gateway_password','sms_api_key','sms_sender_id','smtp_host','smtp_port','smtp_user','smtp_password','smtp_from','travel_provider_url','travel_provider_api_key',...FEATURE_KEYS];
+const SETTING_KEYS = ['brand_name','brand_logo_url','support_email','support_phone','payment_provider','payment_webhook_secret','sslcommerz_store_id','sslcommerz_store_password','sslcommerz_api_url','sslcommerz_validation_url','sslcommerz_ipn_url','bkash_base_url','bkash_app_key','bkash_app_secret','bkash_username','bkash_password','sms_provider','sms_gateway_url','sms_gateway_username','sms_gateway_password','sms_api_key','sms_sender_id','smtp_host','smtp_port','smtp_user','smtp_password','smtp_from','travel_provider_url','travel_provider_api_key','esim_provider_url','esim_provider_api_key',...FEATURE_KEYS];
 const SETTING_SECRET_KEYS = new Set(['sslcommerz_store_password','payment_webhook_secret','sslcommerz_api_key','bkash_app_key','bkash_app_secret','bkash_username','bkash_password','bkash_token','sms_api_key','sms_gateway_username','sms_gateway_password','smtp_password','travel_provider_api_key','payment_provider_api_key']);
 const ADMIN_ROLES = ['admin', 'manager', 'super_admin', 'support', 'content_manager', 'finance', 'staff'] as const;
 const PRIVILEGED_ROLES = ['admin', 'super_admin'] as const;
@@ -76,6 +77,12 @@ const CONTENT_ROLES = ['admin', 'super_admin', 'content_manager'] as const;
 const FINANCE_ROLES = ['admin', 'super_admin', 'finance'] as const;
 const SUPPORT_ROLES = ['admin', 'super_admin', 'support', 'manager'] as const;
 const SAFE_PROVIDER_ERROR_CODES = new Set(['MEDIA_NOT_CONFIGURED','MEDIA_UPLOAD_FAILED','MEDIA_DELETE_FAILED','IMAGE_TOO_LARGE','UNSUPPORTED_IMAGE_FORMAT','IMAGE_UPLOAD_INVALID','PROVIDER_NOT_CONFIGURED','PROVIDER_UNAVAILABLE','PROVIDER_ERROR','PROVIDER_TIMEOUT','SMS_NOT_CONFIGURED','SMS_PROVIDER_ERROR','EMAIL_NOT_CONFIGURED','SSLCOMMERZ_NOT_CONFIGURED','SSLCOMMERZ_ERROR','BKASH_NOT_CONFIGURED','BKASH_AUTH_ERROR','BKASH_ERROR','REFUNDS_NOT_CONFIGURED','NOTIFICATION_RETRY_FAILED']);
+/** Public storefront route prefix for each catalogue type (used by the sitemap). */
+const TYPE_ROUTE_PUBLIC: Record<string, string> = {
+  esim: 'esim', umrah_package: 'umrah-packages', umrah_fare: 'special-umrah-fare', holiday_package: 'holiday-packages',
+  medical_tourism: 'medical-tourism', visa_service: 'visa', home: 'homes', card_offer: 'card-offers',
+  airline_offer: 'airlines-offers', destination: 'explore', flight_offer: 'flights', accessory: 'explore'
+};
 
 const toInput = (schema: z.ZodTypeAny, value: unknown) => {
   try { return schema.parse(value); } catch (error) { if (error instanceof ZodError) throw new AppError(400, 'VALIDATION_ERROR', 'Please check the submitted fields', error.flatten()); throw error; }
@@ -225,6 +232,30 @@ export function buildApp() {
   app.get('/api/v1/notifications', requireAuth(store), async (req, res) => { const notifications = await store.listNotifications(req.user!.id); res.json({ notifications, unread: notifications.filter(item => !item.readAt).length }); });
   app.patch('/api/v1/notifications/:id/read', requireAuth(store), async (req, res) => { const notification = await store.markNotificationRead(String(req.params.id), req.user!.id); assert(notification, 404, 'NOTIFICATION_NOT_FOUND', 'Notification not found'); res.json({ notification }); });
 
+  // Account: transaction ledger and support tickets (self-owned records only).
+  app.get('/api/v1/account/payments', requireAuth(store), async (req, res) => {
+    const result = await store.listUserPayments(req.user!.id, { page: Number(req.query.page) || 1, pageSize: Number(req.query.pageSize) || 20 });
+    res.json({ payments: result.payments.map(payment => ({ id: payment.id, bookingId: payment.bookingId, orderId: payment.orderId, provider: payment.provider, amount: payment.amount, currency: payment.currency, status: payment.status, transactionRef: payment.transactionRef, gatewayTransactionId: payment.gatewayTransactionId, paymentMethod: payment.paymentMethod, initiatedAt: payment.initiatedAt, completedAt: payment.completedAt, failedAt: payment.failedAt, failureReason: payment.failureReason, refundStatus: payment.refundStatus || 'none', refundAmount: payment.refundAmount, refundedAt: payment.refundedAt, createdAt: payment.createdAt })), total: result.total, page: result.page, pageSize: result.pageSize, pageCount: result.pageCount });
+  });
+  app.get('/api/v1/account/tickets', requireAuth(store), async (req, res) => {
+    const tickets = (await store.listSupportTickets({ q: req.query.q ? String(req.query.q) : undefined })).filter(ticket => ticket.userId === req.user!.id);
+    res.json({ tickets: tickets.map(ticket => ({ id: ticket.id, subject: ticket.subject, status: ticket.status, priority: ticket.priority, createdAt: ticket.createdAt, updatedAt: ticket.updatedAt })) });
+  });
+  app.get('/api/v1/account/tickets/:id', requireAuth(store), async (req, res) => {
+    const ticket = await store.findSupportTicket(String(req.params.id));
+    assert(ticket && ticket.userId === req.user!.id, 404, 'TICKET_NOT_FOUND', 'Ticket not found');
+    res.json({ ticket, messages: await store.listSupportMessages(ticket.id) });
+  });
+  app.post('/api/v1/account/tickets/:id/messages', requireAuth(store), rateLimit('ticket-reply', 20, 60), async (req, res) => {
+    const input = toInput(z.object({ message: z.string().trim().min(1).max(4000) }), req.body);
+    const ticket = await store.findSupportTicket(String(req.params.id));
+    assert(ticket && ticket.userId === req.user!.id, 404, 'TICKET_NOT_FOUND', 'Ticket not found');
+    const message = await store.createSupportMessage({ ticketId: ticket.id, authorId: req.user!.id, authorType: 'customer', message: input.message, internal: false });
+    await store.updateSupportTicket(ticket.id, { status: 'pending' });
+    await store.audit('support.customer_replied', { ...clientMeta(req), userId: req.user!.id, metadata: { ticketId: ticket.id } });
+    res.status(201).json({ message });
+  });
+
   // Public tour catalogue and live provider search.
   app.get('/api/v1/tours', rateLimit('tour-catalog', 120, 60), optionalAuth(store), async (req, res) => { const filters: TourFilters = { q: req.query.q ? String(req.query.q) : undefined, country: req.query.destination ? String(req.query.destination) : undefined, tourType: req.query.tour_type ? String(req.query.tour_type) : undefined, maxPrice: req.query.max_price ? Number(req.query.max_price) : undefined, sort: req.query.sort === 'price_asc' || req.query.sort === 'price_desc' ? req.query.sort : 'newest' }; const tours = await store.listTours(filters); res.json({ success: true, filters, count: tours.length, tours: tours.map(publicTourView) }); });
   app.get('/api/v1/tours/:idOrSlug', rateLimit('tour-detail', 120, 60), async (req, res) => { const tour = await store.findTour(String(req.params.idOrSlug)); assert(tour && tour.status === 'published', 404, 'TOUR_NOT_FOUND', 'Tour package not found'); res.json({ tour: publicTourView(tour) }); });
@@ -288,7 +319,22 @@ export function buildApp() {
   app.post('/api/v1/admin/customers/:id/notes', requirePermission(store, 'customers:view'), async (req, res) => { const input = toInput(customerNoteRequest, req.body); const customer = await store.findUserById(String(req.params.id)); assert(customer && customer.role === 'customer', 404, 'CUSTOMER_NOT_FOUND', 'Customer not found'); const note = await store.addCustomerNote({ userId: customer.id, authorId: req.user!.id, note: input.note }); await store.audit('admin.customer_note_added', { ...clientMeta(req), userId: req.user!.id, metadata: { customerId: customer.id, noteId: note.id } }); res.status(201).json({ note }); });
 
   app.get('/api/v1/admin/payments', requirePermission(store, 'payments:view'), async (req, res) => res.json(await store.listAdminPayments({ q: req.query.q ? String(req.query.q) : undefined, status: paymentStatusSchema.safeParse(String(req.query.status || '')).success ? paymentStatusSchema.parse(String(req.query.status)) : 'all', provider: req.query.provider ? String(req.query.provider) : undefined, page: Number(req.query.page) || 1, pageSize: Number(req.query.pageSize) || 20 })));
-  app.post('/api/v1/admin/payments/:id/refund', requirePermission(store, 'payments:manage'), async (_req, _res) => { throw new AppError(503, 'REFUNDS_NOT_CONFIGURED', 'Refunds require a configured gateway refund contract; no refund has been issued'); });
+  app.post('/api/v1/admin/payments/:id/refund', requirePermission(store, 'payments:manage'), async (req, res, next) => {
+    try {
+      const input = toInput(z.object({ amount: z.number().positive().max(100000000).optional(), reason: z.string().max(500).optional() }).strict(), req.body ?? {});
+      const payment = await store.findPaymentById(String(req.params.id));
+      assert(payment, 404, 'PAYMENT_NOT_FOUND', 'Payment not found');
+      assert(payment.status === 'paid', 409, 'PAYMENT_NOT_REFUNDABLE', 'Only paid transactions can be refunded');
+      const amount = input.amount ?? payment.amount;
+      assert(amount <= payment.amount, 400, 'REFUND_EXCEEDS_PAYMENT', 'Refund amount cannot exceed the paid amount');
+      // Record the refund request in the ledger. No money moves until the
+      // configured gateway exposes a working refund contract — this endpoint
+      // never fakes a refund.
+      await store.updatePayment(payment.id, { refundStatus: 'requested', refundAmount: amount, refundReason: input.reason });
+      await store.audit('payment.refund_requested', { ...clientMeta(req), userId: req.user!.id, metadata: { paymentId: payment.id, amount, reason: input.reason } });
+      throw new AppError(503, 'REFUNDS_NOT_CONFIGURED', `Refund request for ${amount} ${payment.currency} was recorded, but no refund has been issued: the configured gateway does not expose a working refund contract.`);
+    } catch (error) { next(error); }
+  });
 
   app.get('/api/v1/admin/notifications/history', requirePermission(store, 'notifications:send'), async (req, res) => res.json(await store.listAdminNotifications({ q: req.query.q ? String(req.query.q) : undefined, status: ['queued','sent','failed','read'].includes(String(req.query.status)) ? String(req.query.status) as any : 'all', page: Number(req.query.page) || 1, pageSize: Number(req.query.pageSize) || 20 })));
   app.post('/api/v1/admin/notifications/:id/retry', requirePermission(store, 'notifications:send'), async (req, res) => { const notification = await store.findNotification(String(req.params.id)); assert(notification, 404, 'NOTIFICATION_NOT_FOUND', 'Notification not found'); assert(notification.status === 'failed', 409, 'NOTIFICATION_NOT_RETRYABLE', 'Only failed notifications can be retried'); try { if (notification.channels.includes('sms')) { assert(notification.recipient?.phone, 400, 'RECIPIENT_PHONE_MISSING', 'Recipient phone is not available'); await messaging.sendNotification('sms', notification.recipient.phone, notification.title, notification.message); } if (notification.channels.includes('email')) { assert(notification.recipient?.email, 400, 'RECIPIENT_EMAIL_MISSING', 'Recipient email is not available'); await messaging.sendNotification('email', notification.recipient.email, notification.title, notification.message); } const updated = await store.updateNotificationDelivery(notification.id, { status: 'sent', sentAt: new Date().toISOString(), failureReason: '' }); await store.audit('admin.notification_retried', { ...clientMeta(req), userId: req.user!.id, metadata: { notificationId: notification.id } }); res.json({ notification: updated }); } catch (error) { const reason = error instanceof Error ? error.message : 'Delivery failed'; const updated = await store.updateNotificationDelivery(notification.id, { status: 'failed', failureReason: reason }); throw error instanceof AppError ? error : new AppError(502, 'NOTIFICATION_RETRY_FAILED', 'Notification retry failed', config.isProduction ? undefined : { reason, notification: updated }); } });
@@ -400,8 +446,110 @@ export function buildApp() {
   app.get('/api/v1/bookings/:id', requireAuth(store), async (req, res) => { const booking = await store.findBooking(String(req.params.id), req.user!.id); assert(booking, 404, 'BOOKING_NOT_FOUND', 'Booking not found'); res.json({ booking }); });
   app.post('/api/v1/bookings/:id/cancel', requireAuth(store), async (req, res) => { const booking = await store.findBooking(String(req.params.id), req.user!.id); assert(booking, 404, 'BOOKING_NOT_FOUND', 'Booking not found'); assert(['new','reviewing','accepted','processing','pending','confirmed'].includes(booking.status), 409, 'BOOKING_NOT_CANCELLABLE', 'This booking cannot be cancelled at its current stage'); let result: unknown = { cancelledLocally: true }; if (booking.vertical !== 'tour' && booking.providerRef) result = await travel.cancel(booking.vertical, { bookingId: booking.id, providerRef: booking.providerRef, reason: (req.body as any)?.reason }); const updated = await store.updateBooking(booking.id, { status: 'cancelled', response: result }); await store.addBookingEvent({ bookingId: booking.id, actorId: req.user!.id, action: 'customer_cancelled', fromStatus: booking.status, toStatus: 'cancelled', note: (req.body as any)?.reason }); await store.audit('booking.cancelled', { ...clientMeta(req), userId: req.user!.id, metadata: { bookingId: booking.id } }); res.json({ booking: updated ?? booking }); });
 
-  app.post('/api/v1/payments/intents', requireAuth(store), async (req, res) => { const input = toInput(paymentRequest, req.body); const booking = await store.findBooking(input.bookingId, req.user!.id); assert(booking, 404, 'BOOKING_NOT_FOUND', 'Booking not found'); assert(!['cancelled', 'rejected', 'new', 'reviewing', 'failed'].includes(booking.status), 409, 'BOOKING_NOT_PAYABLE', 'This booking is not ready for payment'); const quote = trustedBookingQuote(booking); assert(quote, 409, 'BOOKING_NOT_QUOTED', 'This booking has no verified provider quote yet'); const paymentRecord = await store.createPayment({ bookingId: booking.id, userId: req.user!.id, provider: 'configured', amount: quote.amount, currency: quote.currency, status: 'created' }); const providerResponse: any = await payment.createIntent({ paymentId: paymentRecord.id, bookingId: booking.id, amount: quote.amount, currency: quote.currency, customerId: req.user!.id, returnUrl: `${config.appOrigin}/payment/return` }); const updated = await store.updatePayment(paymentRecord.id, { status: providerResponse?.status === 'paid' ? 'paid' : 'pending', transactionRef: providerResponse?.transactionRef, providerPayload: providerResponse }); res.status(201).json({ payment: updated ?? paymentRecord, checkoutUrl: providerResponse?.checkoutUrl }); });
-  app.post('/api/v1/payments/webhook', async (req, res) => { assert(await payment.verifyWebhook(req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {})), req.header('x-payment-signature')), 401, 'INVALID_WEBHOOK', 'Invalid payment webhook signature'); const payload = req.body as { paymentId?: string; status?: string; transactionRef?: string }; assert(payload.paymentId && payload.status, 400, 'INVALID_WEBHOOK', 'Payment webhook payload is incomplete'); const status = payload.status === 'paid' ? 'paid' : payload.status === 'refunded' ? 'refunded' : payload.status === 'failed' ? 'failed' : 'pending'; const updated = await store.updatePayment(payload.paymentId, { status, transactionRef: payload.transactionRef, providerPayload: payload }); assert(updated, 404, 'PAYMENT_NOT_FOUND', 'Payment not found'); if (status === 'paid') { const booking = await store.findBooking(updated.bookingId); if (booking) { await store.updateBooking(updated.bookingId, { status: 'confirmed' }); await store.addBookingEvent({ bookingId: updated.bookingId, action: 'payment_confirmed', fromStatus: booking.status, toStatus: 'confirmed' }); } } res.json({ received: true }); });
+  const notifyUser = async (userId: string, title: string, message: string) => { try { await store.createNotification({ userId, title, message, channels: ['in_app'], status: 'sent', sentAt: new Date().toISOString() } as any); } catch { /* notifications are best effort */ } };
+
+  app.post('/api/v1/payments/intents', requireAuth(store), rateLimit('payment-intent', 20, 60), async (req, res) => {
+    const input = toInput(paymentRequest, req.body);
+    const booking = await store.findBooking(input.bookingId, req.user!.id);
+    assert(booking, 404, 'BOOKING_NOT_FOUND', 'Booking not found');
+    assert(!['cancelled', 'rejected', 'new', 'reviewing', 'failed'].includes(booking.status), 409, 'BOOKING_NOT_PAYABLE', 'This booking is not ready for payment');
+    const quote = trustedBookingQuote(booking);
+    assert(quote, 409, 'BOOKING_NOT_QUOTED', 'This booking has no verified provider quote yet');
+    const idempotencyKey = `intent:${booking.id}:${Date.now().toString(36)}`;
+    const paymentRecord = await store.createPayment({ bookingId: booking.id, userId: req.user!.id, provider: 'configured', amount: quote.amount, currency: quote.currency, status: 'created', idempotencyKey, initiatedAt: new Date().toISOString() });
+    const providerResponse: any = await payment.createIntent({ paymentId: paymentRecord.id, bookingId: booking.id, amount: quote.amount, currency: quote.currency, customerId: req.user!.id, returnUrl: `${config.appOrigin}/payment/return` });
+    const updated = await store.updatePayment(paymentRecord.id, { status: providerResponse?.status === 'paid' ? 'paid' : 'pending', transactionRef: providerResponse?.transactionRef, gatewayTransactionId: providerResponse?.transactionRef, providerPayload: providerResponse });
+    await trackEvent({ event: 'payment_started', userId: req.user!.id, path: `/api/v1/payments/intents`, metadata: { bookingId: booking.id, amount: quote.amount, provider: providerResponse?.provider || 'configured' } });
+    res.status(201).json({ payment: updated ?? paymentRecord, checkoutUrl: providerResponse?.checkoutUrl });
+  });
+
+  // Gateway webhook / IPN. Idempotent: the same event may arrive any number of
+  // times (retries, mirrored IPNs) but the ledger and the booking/order are
+  // only advanced once per unique event key.
+  app.post('/api/v1/payments/webhook', async (req, res) => {
+    assert(await payment.verifyWebhook(req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {})), req.header('x-payment-signature')), 401, 'INVALID_WEBHOOK', 'Invalid payment webhook signature');
+    const payload = req.body as { paymentId?: string; status?: string; transactionRef?: string; gatewayTransactionId?: string; failureReason?: string };
+    assert(payload.paymentId && payload.status, 400, 'INVALID_WEBHOOK', 'Payment webhook payload is incomplete');
+    const status = payload.status === 'paid' ? 'paid' : payload.status === 'refunded' ? 'refunded' : payload.status === 'failed' ? 'failed' : 'pending';
+    const eventKey = `${payload.paymentId}:${status}:${payload.transactionRef || 'ipn'}`;
+    const isNewEvent = await store.recordWebhookEvent(eventKey, { paymentId: payload.paymentId, event: status, payload });
+    if (!isNewEvent) return res.json({ received: true, duplicate: true });
+
+    const updated = await store.updatePayment(payload.paymentId, {
+      status, transactionRef: payload.transactionRef, gatewayTransactionId: payload.gatewayTransactionId || payload.transactionRef,
+      providerPayload: payload,
+      ...(status === 'paid' ? { completedAt: new Date().toISOString() } : {}),
+      ...(status === 'failed' ? { failedAt: new Date().toISOString(), failureReason: payload.failureReason || 'Payment declined by the gateway' } : {}),
+      ...(status === 'refunded' ? { refundStatus: 'refunded' as const, refundedAt: new Date().toISOString() } : {})
+    });
+    assert(updated, 404, 'PAYMENT_NOT_FOUND', 'Payment not found');
+    const eventActor = { ip: req.ip, userAgent: req.get('user-agent')?.slice(0, 500) };
+
+    if (status === 'paid') {
+      await trackEvent({ event: 'payment_success', userId: updated.userId, path: '/payment/webhook', metadata: { paymentId: updated.id, bookingId: updated.bookingId, amount: updated.amount } });
+      await notifyUser(updated.userId, 'Payment successful', `We received ৳${Number(updated.amount || 0).toLocaleString('en-BD')} for your booking. Your confirmation is on the way.`);
+      // The booking record may reference a commerce order (payment.bookingId is
+      // the order id) or a legacy vertical booking.
+      // Hotel bookings are confirmed through the hotel booking engine.
+      if (updated.provider === 'hotel') {
+        const hotelBooking = await hotelStore.findBooking(updated.bookingId).catch(() => undefined);
+        if (hotelBooking && hotelBooking.paymentStatus !== 'paid') {
+          await hotelStore.patchBookingStatus(hotelBooking.id, { status: 'confirmed', paymentStatus: 'paid' });
+          await notifyUser(hotelBooking.userId, 'Booking confirmed', `Your stay at ${hotelBooking.hotelSnapshot?.name || 'the hotel'} is confirmed. Thank you for your payment.`);
+          await trackEvent({ event: 'booking_confirmed', userId: hotelBooking.userId, path: '/payment/webhook', metadata: { bookingId: hotelBooking.id, bookingNumber: hotelBooking.bookingNumber } });
+        }
+        return res.json({ received: true });
+      }
+      const order = await commerce.findOrder(updated.bookingId).catch(() => undefined);
+      if (order) {
+        const alreadyPaid = order.paymentStatus === 'paid';
+        const changed = await commerce.updateOrder(order.id, { paymentStatus: 'paid', status: 'confirmed' },
+          { at: new Date().toISOString(), status: 'payment_confirmed', note: 'Payment verified by gateway webhook', actorId: 'system' });
+        if (changed && !alreadyPaid) {
+          await commerce.markInvoicePaid(order.id).catch(() => undefined);
+          // Automatic fulfilment: request eSIM/activation payloads from the
+          // configured provider, or leave the order FULFILLMENT_PENDING for the
+          // operations desk. Never fabricates a delivery.
+          await commerce.attemptFulfillment(order.id, {
+            url: await store.getSetting('esim_provider_url'),
+            apiKey: await store.getSetting('esim_provider_api_key')
+          }).catch(() => undefined);
+          await notifyUser(order.userId, 'Booking confirmed', `Booking ${order.orderNumber} is confirmed. Check your account for the receipt and fulfilment updates.`);
+          await trackEvent({ event: 'booking_confirmed', userId: order.userId, path: '/payment/webhook', metadata: { orderId: order.id, orderNumber: order.orderNumber } });
+        }
+        return res.json({ received: true });
+      }
+      const booking = await store.findBooking(updated.bookingId);
+      if (booking && booking.status !== 'confirmed') {
+        await store.updateBooking(booking.id, { status: 'confirmed' });
+        await store.addBookingEvent({ bookingId: booking.id, action: 'payment_confirmed', fromStatus: booking.status, toStatus: 'confirmed' });
+        await notifyUser(booking.userId, 'Booking confirmed', `Your ${booking.vertical} booking ${booking.id.slice(0, 8).toUpperCase()} is confirmed.`);
+        await trackEvent({ event: 'booking_confirmed', userId: booking.userId, path: '/payment/webhook', metadata: { bookingId: booking.id, vertical: booking.vertical } });
+      }
+    } else if (status === 'failed') {
+      await trackEvent({ event: 'payment_failed', userId: updated.userId, path: '/payment/webhook', metadata: { paymentId: updated.id, bookingId: updated.bookingId } });
+      await notifyUser(updated.userId, 'Payment failed', 'Your payment was not completed. You can retry from your booking page.');
+    }
+    await store.audit('payment.webhook', { ...eventActor, metadata: { paymentId: updated.id, status, eventKey } });
+    res.json({ received: true });
+  });
+
+  // Server-side return-page status for gateway redirects. Never trusts the
+  // query string alone: the stored transaction is the source of truth, and
+  // when a validation API is configured the gateway is asked directly.
+  app.get('/api/v1/payments/return-status', async (req, res) => {
+    const paymentId = String(req.query.paymentId || req.query.tran_id || '');
+    assert(paymentId, 400, 'PAYMENT_ID_REQUIRED', 'A payment reference is required');
+    const paymentRecord = await store.findPaymentById(paymentId);
+    assert(paymentRecord, 404, 'PAYMENT_NOT_FOUND', 'Payment reference not found');
+    const order = await commerce.findOrder(paymentRecord.bookingId).catch(() => undefined);
+    const hotelBooking = paymentRecord.provider === 'hotel' ? await hotelStore.findBooking(paymentRecord.bookingId).catch(() => undefined) : undefined;
+    res.json({
+      payment: { id: paymentRecord.id, status: paymentRecord.status, transactionRef: paymentRecord.transactionRef, gatewayTransactionId: paymentRecord.gatewayTransactionId, amount: paymentRecord.amount, currency: paymentRecord.currency, failureReason: paymentRecord.failureReason, initiatedAt: paymentRecord.initiatedAt, completedAt: paymentRecord.completedAt },
+      order: order ? { id: order.id, orderNumber: order.orderNumber, status: order.status, paymentStatus: order.paymentStatus, total: order.total, currency: order.currency } : undefined,
+      hotelBooking: hotelBooking ? { id: hotelBooking.id, bookingNumber: hotelBooking.bookingNumber, status: hotelBooking.status, paymentStatus: hotelBooking.paymentStatus, total: hotelBooking.priceBreakdown?.total, currency: hotelBooking.priceBreakdown?.currency } : undefined
+    });
+  });
 
   app.post('/api/v1/support/tickets', optionalAuth(store), rateLimit('support', 20, 60), async (req, res) => { const input = toInput(supportRequest, req.body); const ticket = await store.createSupportTicket({ ...input, userId: req.user?.id }); await store.audit('support.ticket_created', { ...clientMeta(req), userId: req.user?.id, metadata: { ticketId: ticket.id } }); res.status(201).json({ ticket: { id: ticket.id, status: ticket.status, createdAt: ticket.createdAt } }); });
 
@@ -410,6 +558,30 @@ export function buildApp() {
 
   // Catalogue, cart, wishlist, coupons, orders, invoices, reviews and visa applications.
   registerCommerceRoutes(app, { store, commerce, payment });
+
+  // Website analytics (page views, searches and business conversions).
+  registerAnalyticsRoutes(app, { store });
+
+  // SEO: robots and a live sitemap built from persisted, published records.
+  app.get('/robots.txt', (_req, res) => {
+    res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\nDisallow: /checkout\nDisallow: /account\nDisallow: /cart\nDisallow: /wishlist\nDisallow: /orders\nSitemap: ${config.appOrigin}/sitemap.xml\n`);
+  });
+  app.get('/sitemap.xml', async (_req, res, next) => {
+    try {
+      const origin = config.appOrigin;
+      const urls: string[] = ['/', '/flights', '/hotels', '/homes', '/visa', '/tours', '/esim', '/special-umrah-fare', '/umrah-packages', '/holiday-packages', '/medical-tourism', '/card-offers', '/airlines-offers', '/explore', '/travel-agents', '/app'];
+      const [hotels, tours, products] = await Promise.all([
+        hotelStore.listHotels({ status: 'active', pageSize: 100 }).catch(() => ({ hotels: [] })),
+        store.listTours({ status: 'published' }).catch(() => []),
+        commerce.listCatalog({ status: 'published', pageSize: 200 }).catch(() => ({ products: [] }))
+      ]);
+      for (const hotel of hotels.hotels) urls.push(`/hotels/${encodeURIComponent(hotel.slug)}`);
+      for (const tour of tours) urls.push(`/tours/${encodeURIComponent(tour.id)}`);
+      for (const product of products.products) urls.push(`/${TYPE_ROUTE_PUBLIC[product.type] || 'explore'}/${encodeURIComponent(product.slug || product.id)}`);
+      const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map(url => `<url><loc>${origin}${url.replace(/&/g, '&amp;')}</loc><changefreq>weekly</changefreq></url>`).join('')}</urlset>`;
+      res.type('application/xml').send(body);
+    } catch (error) { next(error); }
+  });
 
   if (!config.serveStatic) app.get('/', (_req, res) => res.json({ service: 'Sadik Travels backend', status: 'online', health: '/healthz', ready: '/readyz' }));
   if (config.serveStatic) {

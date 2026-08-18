@@ -22,6 +22,47 @@ const API_BASE = appConfig.apiBase || '';
 
 const apiRequest = (path, options = {}, canRefresh = true) => window.SadikApi.request(path, options, canRefresh);
 
+/* ------------------------------------------------------------------ SEO */
+function setSeo({ title, description, canonical, image, jsonLd }) {
+  const docTitle = title ? `${title} | Sadik Travels` : 'Sadik Travels | Online Travel Agency';
+  document.title = docTitle;
+  const setMeta = (selector, attr, value) => { const node = document.querySelector(selector); if (node) node.setAttribute(attr, value); };
+  setMeta('meta[name="description"]', 'content', description || 'Book flights, hotels, homes, visa services and eSIMs with Sadik Travels.');
+  setMeta('meta[property="og:title"]', 'content', docTitle);
+  setMeta('meta[property="og:description"]', 'content', description || 'Book flights, hotels, homes, visa services and eSIMs with Sadik Travels.');
+  setMeta('meta[name="twitter:title"]', 'content', docTitle);
+  setMeta('meta[name="twitter:description"]', 'content', description || 'Book flights, hotels, homes, visa services and eSIMs with Sadik Travels.');
+  if (image) { setMeta('meta[property="og:image"]', 'content', image); setMeta('meta[name="twitter:image"]', 'content', image); }
+  const canonicalNode = document.querySelector('link[rel="canonical"]');
+  if (canonicalNode) canonicalNode.href = canonical || location.pathname + location.search;
+  if (jsonLd) {
+    let script = document.getElementById('seoJsonLd');
+    if (!script) { script = document.createElement('script'); script.type = 'application/ld+json'; script.id = 'seoJsonLd'; document.head.appendChild(script); }
+    script.textContent = JSON.stringify(jsonLd);
+  }
+}
+
+/* -------------------------------------------------------- analytics */
+const ANALYTICS_SESSION_KEY = 'sadikSessionId';
+function analyticsSessionId() {
+  let session = sessionStorage.getItem(ANALYTICS_SESSION_KEY);
+  if (!session) { session = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`; sessionStorage.setItem(ANALYTICS_SESSION_KEY, session); }
+  return session;
+}
+/** Fire-and-forget business event tracking. Never blocks or breaks the page. */
+function trackAnalytics(event, metadata = {}) {
+  try {
+    if (!window.SadikApi) return;
+    const payload = { event, path: location.pathname + location.search, metadata };
+    fetch(`${window.SadikApi.baseUrl}/analytics/track`, {
+      method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', 'x-session-id': analyticsSessionId() },
+      body: JSON.stringify(payload)
+    }).catch(() => undefined);
+  } catch { /* analytics are best-effort */ }
+}
+window.SadikAnalytics = { track: trackAnalytics, sessionId: analyticsSessionId };
+window.setSeo = setSeo;
+
 async function applySiteSettings() {
   try {
     const response = await apiRequest('/site/settings');
@@ -853,7 +894,7 @@ function publicMetadataHtml(metadata = {}) { const entries = Object.entries(meta
 function publicDetailActions(item) { const metadata = item.metadata || {}; const actions = []; if (metadata.ctaUrl && (String(metadata.ctaUrl).startsWith('/') || /^https?:\/\//i.test(String(metadata.ctaUrl)))) actions.push(`<a class="btn btn-primary" href="${escapeHtml(metadata.ctaUrl)}" ${metadata.external ? 'target="_blank" rel="noopener"' : ''}>${escapeHtml(metadata.ctaText || 'Learn more')}</a>`); actions.push('<a class="btn btn-outline" href="#contact">Contact Sadik Travels</a>'); return actions.join(''); }
 async function renderPublicContentCollection(root, definition) { const response = await apiRequest(`/site/content?type=${encodeURIComponent(definition.type)}`); const items = response.content || []; root.innerHTML = publicPageHeader(definition.eyebrow, definition.title, definition.description, '') + `<section class="public-page-card"><div class="public-page-grid">${items.length ? items.map(publicContentCard).join('') : publicEmptyState(`No ${definition.title.toLowerCase()} yet`, 'Published content will appear here after an administrator saves and publishes it.')}</div></section>`; }
 async function renderPublicContentDetail(root, definition, id) { const response = await apiRequest(`/site/content/${encodeURIComponent(definition.type)}/${encodeURIComponent(id)}`); const item = response.content; if (!item) throw new Error('Content not found'); root.innerHTML = publicPageHeader(definition.eyebrow, item.title, item.subtitle || definition.description, '') + `<section class="public-page-card"><div class="public-detail"><div>${item.imageUrl ? `<img class="public-detail-image" src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.title)}" />` : publicEmptyState('No image published','This item does not have an image yet.')}<div class="public-detail-json"><h3>About this service</h3><p class="lead">${escapeHtml(item.description || item.subtitle || 'Published Sadik Travels content.')}</p></div></div><div><h2>${escapeHtml(item.title)}</h2><p class="lead">${escapeHtml(item.subtitle || '')}</p>${publicMetadataHtml(item.metadata)}<div class="public-detail-actions">${publicDetailActions(item)}</div></div></div></section>`; }
-async function renderPublicTours(root, id = '') { if (id) { const response = await apiRequest(`/tours/${encodeURIComponent(id)}`); const tour = response.tour; if (!tour) throw new Error('Tour not found'); const metadata = tour.metadata || {}; root.innerHTML = publicPageHeader('Go Get Tour', tour.title, `${tour.durationDays} days / ${tour.durationNights} nights · ${tour.country}`, '') + `<section class="public-page-card"><div class="public-detail"><div>${tour.imageUrl ? `<img class="public-detail-image" src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" />` : publicEmptyState('No image published','This package does not have an image yet.')}<div class="public-detail-json"><h3>Package description</h3><p class="lead">${escapeHtml(tour.description || 'Published tour package details.')}</p></div></div><div><h2>${escapeHtml(tour.title)}</h2><p class="lead">${escapeHtml(tour.destinations.join(' · '))}</p><div class="public-detail-meta"><div><dt>Duration</dt><dd>${tour.durationDays} days / ${tour.durationNights} nights</dd></div><div><dt>Starting price</dt><dd>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</dd></div></div>${publicMetadataHtml(metadata)}<div class="public-detail-actions"><button type="button" class="btn btn-primary" data-public-tour-book="${escapeHtml(tour.id)}">Book this tour</button><a class="btn btn-outline" href="#contact">Contact Sadik Travels</a></div></div></div></section>`; $('#publicRouteRoot [data-public-tour-book]')?.addEventListener('click',()=>{activateTab('tours',true);history.pushState({},'',`/?tour=${encodeURIComponent(tour.id)}`);document.querySelector('main')?.removeAttribute('hidden');root.hidden=true;}); return; } const response = await apiRequest('/tours'); const tours = response.tours || []; root.innerHTML = publicPageHeader('Go Get Tour','Tour packages','Browse all published tour packages from the existing Sadik Travels catalogue','') + `<section class="public-page-card"><div class="public-page-grid">${tours.length ? tours.map(tour => `<a class="public-page-item" href="/tours/${escapeHtml(tour.id)}" data-public-route="/tours/${escapeHtml(tour.id)}"><div class="public-page-item-image">${tour.imageUrl ? `<img src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" loading="lazy" />` : '<span>No image published</span>'}</div><div class="public-page-item-body"><small>${escapeHtml(tour.tourType)}</small><h2>${escapeHtml(tour.title)}</h2><p>${escapeHtml(tour.destinations.join(' · '))}</p><strong>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</strong></div></a>`).join('') : publicEmptyState('No tours yet','Published tour packages will appear here after an admin creates them.','<a class="btn btn-primary" href="/#searchPanel">Open tour search</a>')}</div></section>`; }
+async function renderPublicTours(root, id = '') { if (id) { const response = await apiRequest(`/tours/${encodeURIComponent(id)}`); const tour = response.tour; if (!tour) throw new Error('Tour not found'); trackAnalytics('tour_view', { id: tour.id, country: tour.country }); setSeo({ title: tour.title, description: `${tour.durationDays} days / ${tour.durationNights} nights in ${tour.country} — book with Sadik Travels.`, canonical: `/tours/${tour.id}`, image: tour.imageUrl, jsonLd: { '@context': 'https://schema.org', '@type': 'TouristTrip', name: tour.title, description: tour.description || undefined, touristType: tour.tourType } }); const metadata = tour.metadata || {}; root.innerHTML = publicPageHeader('Go Get Tour', tour.title, `${tour.durationDays} days / ${tour.durationNights} nights · ${tour.country}`, '') + `<section class="public-page-card"><div class="public-detail"><div>${tour.imageUrl ? `<img class="public-detail-image" src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" />` : publicEmptyState('No image published','This package does not have an image yet.')}<div class="public-detail-json"><h3>Package description</h3><p class="lead">${escapeHtml(tour.description || 'Published tour package details.')}</p></div></div><div><h2>${escapeHtml(tour.title)}</h2><p class="lead">${escapeHtml(tour.destinations.join(' · '))}</p><div class="public-detail-meta"><div><dt>Duration</dt><dd>${tour.durationDays} days / ${tour.durationNights} nights</dd></div><div><dt>Starting price</dt><dd>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</dd></div></div>${publicMetadataHtml(metadata)}<div class="public-detail-actions"><button type="button" class="btn btn-primary" data-public-tour-book="${escapeHtml(tour.id)}">Book this tour</button><a class="btn btn-outline" href="#contact">Contact Sadik Travels</a></div></div></div></section>`; $('#publicRouteRoot [data-public-tour-book]')?.addEventListener('click',()=>{activateTab('tours',true);history.pushState({},'',`/?tour=${encodeURIComponent(tour.id)}`);document.querySelector('main')?.removeAttribute('hidden');root.hidden=true;}); return; } const response = await apiRequest('/tours'); const tours = response.tours || []; root.innerHTML = publicPageHeader('Go Get Tour','Tour packages','Browse all published tour packages from the existing Sadik Travels catalogue','') + `<section class="public-page-card"><div class="public-page-grid">${tours.length ? tours.map(tour => `<a class="public-page-item" href="/tours/${escapeHtml(tour.id)}" data-public-route="/tours/${escapeHtml(tour.id)}"><div class="public-page-item-image">${tour.imageUrl ? `<img src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" loading="lazy" />` : '<span>No image published</span>'}</div><div class="public-page-item-body"><small>${escapeHtml(tour.tourType)}</small><h2>${escapeHtml(tour.title)}</h2><p>${escapeHtml(tour.destinations.join(' · '))}</p><strong>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</strong></div></a>`).join('') : publicEmptyState('No tours yet','Published tour packages will appear here after an admin creates them.','<a class="btn btn-primary" href="/#searchPanel">Open tour search</a>')}</div></section>`; }
 let agentsPageState = { agents: [], q: '', filter: 'all', ready: false };
 const BD_PLACES = ['bangladesh','dhaka','chattogram','chittagong',"cox's bazar",'coxsbazar','sylhet','khulna','rajshahi','barishal','rangpur','mymensingh','cumilla','comilla','gazipur','narayanganj'];
 function agentInitials(agent) { return (agent.fullName || '?').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
@@ -922,7 +963,54 @@ async function renderPublicAgentProfile(root, id) {
   root.innerHTML = publicPageHeader('People', 'Travel Agents', 'Connect with a verified Sadik Travels travel specialist.', `<a class="btn btn-outline" href="/travel-agents" data-public-route="/travel-agents">All agents</a>`) + `<div class="agent-profile"><aside class="agent-profile-card"><div class="agent-profile-photo">${photo}<span class="id-badge">Official Member</span></div><div class="agent-profile-body"><h2>${escapeHtml(agent.fullName)}</h2><p class="agent-profile-role">${escapeHtml(agent.jobTitle || agent.specialization || 'Travel Specialist')}</p><p class="agent-profile-location">${icon('i-location')}${escapeHtml(agent.officeLocation || agent.city || 'Bangladesh')}</p><div class="agent-profile-contacts">${contacts.length ? contacts.join('') : '<span class="result-summary">Contact details will appear here once published.</span>'}</div></div></aside><div class="agent-profile-info"><h2>About ${escapeHtml((agent.fullName || 'the agent').split(' ')[0])}</h2><div class="agent-profile-section"><h3>Profile</h3><p>${escapeHtml(agent.fullDescription || agent.shortBio || 'A verified Sadik Travels travel specialist ready to help you plan and book your journey.')}</p></div>${languages.length || agent.specialization ? `<div class="agent-profile-section"><h3>Languages &amp; specialties</h3><div class="chip-list">${languages.map(language => `<span class="chip">${escapeHtml(language)}</span>`).join('')}${agent.specialization ? `<span class="chip">${escapeHtml(agent.specialization)}</span>` : ''}</div></div>` : ''}<div class="agent-profile-section"><h3>Details</h3><dl class="agent-profile-meta">${metaRows.length ? metaRows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('') : '<div><dt>Status</dt><dd>Verified specialist</dd></div>'}</dl></div></div></div>`;
 }
 async function renderPublicServiceLanding(root, service) { root.innerHTML=publicPageHeader('Services',service.title,service.description,'')+`<section class="public-page-card"><div class="provider-state"><div class="provider-state-icon">${icon(service.tab==='flights'?'i-plane':service.tab==='hotels'?'i-hotel':'i-home')}</div><div><strong>Live ${escapeHtml(service.title)} search</strong><p>Availability and prices are returned only by the configured live provider. No static inventory is shown.</p></div></div><div class="public-detail-actions"><a class="btn btn-primary" href="/?service=${escapeHtml(service.tab)}" data-public-route="/?service=${escapeHtml(service.tab)}">Open ${escapeHtml(service.title)} search</a></div></section>`; }
-async function renderPublicRoute() { const root=$('#publicRouteRoot');const home=document.querySelector('main');if(!root||!home)return;const route=publicRoute();publicSetActive(route.path);if(route.path==='/'||route.path==='/'){root.hidden=true;home.hidden=false; if(route.query.get('service'))requestAnimationFrame(()=>activateTab(route.query.get('service'),true)); const hash=route.url.hash.replace(/^#/, ''); if(hash){requestAnimationFrame(()=>setTimeout(()=>scrollToHashTarget(hash),80));} return;}home.hidden=true;root.hidden=false;root.innerHTML=publicLoading();try{if(window.SadikPages&&window.SadikPages.routes[route.parts[0]]){await window.SadikPages.resolve(root,route);return;} if(route.parts[0]==='hotels'){if(!route.parts[1]){await renderHotelLanding(root);}else if(route.parts[1]==='search'){await renderHotelSearch(root,route.query);}else{await renderHotelDetail(root,route.parts[1],route.query);}return;} else if(route.parts[0]==='booking'){if(route.parts[1]==='checkout'){await renderHotelCheckout(root);}else if(route.parts[1]){await renderBookingDetail(root,route.parts[1]);}return;} else if(route.parts[0]==='bookings'){await renderMyBookings(root);return;} else if(route.parts[0]==='account'&&route.parts[1]==='bookings'){await renderMyBookings(root);return;} else if(PUBLIC_COLLECTIONS[route.parts[0]]){const definition=PUBLIC_COLLECTIONS[route.parts[0]];if(route.parts[1])await renderPublicContentDetail(root,definition,route.parts[1]);else await renderPublicContentCollection(root,definition);}else if(PUBLIC_SERVICE_LANDING[route.parts[0]]&&route.parts.length===1)await renderPublicServiceLanding(root,PUBLIC_SERVICE_LANDING[route.parts[0]]);else if(route.parts[0]==='tours')await renderPublicTours(root,route.parts[1]||'');else if(route.parts[0]==='travel-agents')await renderPublicAgents(root,route.parts[1]||'');else{root.innerHTML=publicErrorState('This public route does not exist.');} }catch(error){root.innerHTML=publicErrorState(error.message?.toLowerCase().includes('not found')?'The requested content was not found.':'The public service is temporarily unavailable.');}root.querySelector('[data-public-retry]')?.addEventListener('click',()=>void renderPublicRoute());}
+async function renderPublicRoute() {
+  const root = $('#publicRouteRoot');
+  const home = document.querySelector('main');
+  if (!root || !home) return;
+  const route = publicRoute();
+  publicSetActive(route.path);
+  trackAnalytics('page_view', { route: route.parts[0] || 'home' });
+  if (route.path === '/' || route.path === '/') {
+    root.hidden = true; home.hidden = false;
+    setSeo({ title: '', description: 'Book flights, hotels, homes, visa services, tours and eSIMs with Sadik Travels.', canonical: '/' });
+    if (route.query.get('service')) requestAnimationFrame(() => activateTab(route.query.get('service'), true));
+    const hash = route.url.hash.replace(/^#/, '');
+    if (hash) { requestAnimationFrame(() => setTimeout(() => scrollToHashTarget(hash), 80)); }
+    return;
+  }
+  home.hidden = true; root.hidden = false;
+  root.innerHTML = publicLoading();
+  try {
+    const sectionTitles = { flights: ['Flight booking', 'Search flights, compare fares and book with Sadik Travels.'], hotels: ['Hotel booking', 'Search and book verified hotels with Sadik Travels.'], homes: ['Homes & villas', 'Book homes, apartments and villas with Sadik Travels.'], visa: ['Visa services', 'Visa processing and documentation with Sadik Travels.'], tours: ['Go Get Tour', 'Tour packages across Bangladesh and the world.'], esim: ['eSIM marketplace', 'Instant eSIM plans for travel in 190+ countries.'], 'umrah-packages': ['Umrah packages', 'Complete Umrah packages with visa and hotels near Haram.'], 'holiday-packages': ['Holiday packages', 'Curated holidays bundled into one price.'], 'medical-tourism': ['Medical tourism', 'Treatment abroad with hospital coordination.'], 'card-offers': ['Card offers', 'Bank card discounts and instalment plans.'], 'airlines-offers': ['Airlines offers', 'Promotional fares and airline campaigns.'], explore: ['Explore destinations', 'Discover destinations across Bangladesh and the world.'], 'travel-agents': ['Travel agents', 'Connect with verified Sadik Travels travel specialists.'], 'track-booking': ['Track booking', 'Follow your booking status in real time.'], support: ['Support', 'Sadik Travels support centre.'], orders: ['My bookings', 'Your bookings and orders with Sadik Travels.'], account: ['My account', 'Manage your profile, bookings and preferences.'], cart: ['My cart', 'Review items in your Sadik Travels cart.'], wishlist: ['Wishlist', 'Products you saved with Sadik Travels.'], checkout: ['Checkout', 'Secure checkout with Sadik Travels.'], app: ['Sadik App', 'Track flights with the all-in-one Sadik Travels app.'] };
+    const meta = sectionTitles[route.parts[0]];
+    if (meta) setSeo({ title: meta[0], description: meta[1], canonical: route.path });
+    if (window.SadikPages && window.SadikPages.routes[route.parts[0]]) { await window.SadikPages.resolve(root, route); return; }
+    if (route.parts[0] === 'hotels') {
+      if (!route.parts[1]) { await renderHotelLanding(root); }
+      else if (route.parts[1] === 'search') { await renderHotelSearch(root, route.query); }
+      else { await renderHotelDetail(root, route.parts[1], route.query); }
+      return;
+    }
+    if (route.parts[0] === 'booking') {
+      if (route.parts[1] === 'checkout') { await renderHotelCheckout(root); }
+      else if (route.parts[1]) { await renderBookingDetail(root, route.parts[1]); }
+      return;
+    }
+    if (route.parts[0] === 'bookings') { await renderMyBookings(root); return; }
+    if (route.parts[0] === 'account' && route.parts[1] === 'bookings') { await renderMyBookings(root); return; }
+    if (PUBLIC_COLLECTIONS[route.parts[0]]) {
+      const definition = PUBLIC_COLLECTIONS[route.parts[0]];
+      if (route.parts[1]) await renderPublicContentDetail(root, definition, route.parts[1]);
+      else await renderPublicContentCollection(root, definition);
+    } else if (PUBLIC_SERVICE_LANDING[route.parts[0]] && route.parts.length === 1) await renderPublicServiceLanding(root, PUBLIC_SERVICE_LANDING[route.parts[0]]);
+    else if (route.parts[0] === 'tours') await renderPublicTours(root, route.parts[1] || '');
+    else if (route.parts[0] === 'travel-agents') await renderPublicAgents(root, route.parts[1] || '');
+    else { root.innerHTML = publicErrorState('This public route does not exist.'); }
+  } catch (error) {
+    root.innerHTML = publicErrorState(error.message?.toLowerCase().includes('not found') ? 'The requested content was not found.' : 'The public service is temporarily unavailable.');
+  }
+  root.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute());
+}
 function bindPublicRouter(){document.addEventListener('click',event=>{const link=event.target.closest('[data-public-route]');if(!link)return;event.preventDefault();publicNavigate(link.dataset.publicRoute||link.getAttribute('href'));});window.addEventListener('popstate',()=>void renderPublicRoute());}
 function publicNavigate(route,replace=false){const href=publicHref(route);if(href===`${location.pathname}${location.search}`){void renderPublicRoute();return;}if(replace)history.replaceState({},'',href);else history.pushState({},'',href);if(window.innerWidth<=767)closeSidebar();void renderPublicRoute();}
 
@@ -983,6 +1071,44 @@ function wireAgentsCarousel() {
   track.addEventListener('scroll', () => requestAnimationFrame(update), { passive: true });
   window.addEventListener('resize', update);
   update();
+  // Mouse drag + touch swipe with threshold, and pointer-cancel safety.
+  let pointer = null;
+  const startX = () => pointer?.startX || 0;
+  track.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    pointer = { pointerId: event.pointerId, startX: event.clientX, startScroll: track.scrollLeft, dragging: false };
+  }, { passive: true });
+  track.addEventListener('pointermove', (event) => {
+    if (!pointer || pointer.pointerId !== event.pointerId) return;
+    const delta = event.clientX - pointer.startX;
+    if (!pointer.dragging && Math.abs(delta) > 6) { pointer.dragging = true; track.setPointerCapture?.(pointer.pointerId); track.classList.add('is-dragging'); }
+    if (pointer.dragging) track.scrollLeft = pointer.startScroll - delta;
+  }, { passive: true });
+  const endDrag = (event) => {
+    if (!pointer) return;
+    const wasDragging = pointer.dragging;
+    if (event && pointer.pointerId !== event.pointerId) return;
+    pointer = null;
+    if (wasDragging) {
+      track.classList.remove('is-dragging');
+      const max = track.scrollWidth - track.clientWidth;
+      const atStart = track.scrollLeft <= 8;
+      const atEnd = track.scrollLeft >= max - 8;
+      // Snap to nearest card when the drag was a flick with little movement.
+      const card = track.querySelector('.id-card');
+      if (card && !atStart && !atEnd) {
+        const cardWidth = card.getBoundingClientRect().width + 18;
+        const snapped = Math.round(track.scrollLeft / cardWidth) * cardWidth;
+        track.scrollTo({ left: Math.max(0, Math.min(max, snapped)), behavior: 'smooth' });
+      }
+    }
+  };
+  track.addEventListener('pointerup', endDrag, { passive: true });
+  track.addEventListener('pointercancel', endDrag, { passive: true });
+  // Prevent click-through on cards after a drag gesture.
+  track.addEventListener('click', (event) => {
+    if (pointer && pointer.dragging) { event.preventDefault(); event.stopPropagation(); }
+  }, true);
 }
 let homeObserver = null;
 function setupSectionObserver() {
@@ -1152,6 +1278,7 @@ async function renderHotelSearch(root, query) {
   document.title = 'Hotel search | Sadik Travels';
   const search = hotelReadQuery(query); Object.assign(hotelSearchState, search);
   const nights = Math.max(1, Math.round((new Date(`${search.checkOut}T00:00:00`) - new Date(`${search.checkIn}T00:00:00`)) / 86400000));
+  trackAnalytics('search', { type: 'hotel', destination: search.destination, nights, adults: search.adults });
   root.innerHTML = publicPageHeader('Stays', 'Hotels', 'Find your stay with Sadik Travels.', '') + `
     <div class="hotel-search-bar">
       <div class="hotel-search-summary">
@@ -1227,6 +1354,8 @@ async function renderHotelDetail(root, slug, query) {
   catch { root.innerHTML = publicErrorState('The requested hotel was not found.'); return; }
   if (!hotel) { root.innerHTML = publicErrorState('The requested hotel was not found.'); return; }
   document.title = `${hotel.name} | Sadik Travels`;
+  setSeo({ title: hotel.name, description: hotel.shortDescription || `${hotel.name} in ${hotel.city}. Book with Sadik Travels.`, canonical: `/hotels/${hotel.slug}`, image: hotel.images?.[0]?.url, jsonLd: { '@context': 'https://schema.org', '@type': 'Hotel', name: hotel.name, address: { '@type': 'PostalAddress', addressLocality: hotel.city, addressCountry: hotel.country }, starRating: { '@type': 'Rating', ratingValue: hotel.starRating }, ...(hotel.priceFrom ? { priceRange: `৳${hotel.priceFrom}` } : {}) } });
+  trackAnalytics('hotel_view', { slug: hotel.slug, city: hotel.city });
   const mainImg = hotel.images?.[0]?.url;
   const selection = roomSelectionFromStore(hotel.id) || { hotelId: hotel.id, slug: hotel.slug, hotelName: hotel.name, hotelCity: hotel.city, hotelImage: mainImg, checkIn: search.checkIn, checkOut: search.checkOut, nights, rooms: [] };
   const renderDetail = () => {
@@ -1250,13 +1379,20 @@ async function renderHotelDetail(root, slug, query) {
           ${hotel.description ? `<div class="hotel-detail-section"><h3>About this property</h3><p>${escapeHtml(hotel.description)}</p></div>` : ''}
           ${hotel.shortDescription && !hotel.description ? `<div class="hotel-detail-section"><h3>About this property</h3><p>${escapeHtml(hotel.shortDescription)}</p></div>` : ''}
           ${hotel.cancellationPolicy ? `<div class="hotel-detail-section"><h3>Cancellation policy</h3><p>${escapeHtml(hotel.cancellationPolicy.type === 'free' ? `Free cancellation${hotel.cancellationPolicy.freeUntilDays ? ` up to ${hotel.cancellationPolicy.freeUntilDays} day${hotel.cancellationPolicy.freeUntilDays === 1 ? '' : 's'} before check-in` : ''}.` : 'Non-refundable.')}${hotel.cancellationPolicy.description ? ` ${escapeHtml(hotel.cancellationPolicy.description)}` : ''}</p></div>` : ''}
+          ${(hotel.phone || hotel.email || hotel.website) ? `<div class="hotel-detail-section"><h3>Contact the property</h3><div class="hotel-contact-row">${hotel.phone ? `<a href="tel:${escapeHtml(hotel.phone.replace(/[^+\d]/g, ''))}">${icon('i-phone')}${escapeHtml(hotel.phone)}</a>` : ''}${hotel.email ? `<a href="mailto:${escapeHtml(hotel.email)}">${icon('i-mail')}${escapeHtml(hotel.email)}</a>` : ''}${hotel.website ? `<a href="${escapeHtml(hotel.website)}" target="_blank" rel="noopener">${icon('i-globe')}Website</a>` : ''}</div></div>` : ''}
+          ${hotel.latitude && hotel.longitude ? `<div class="hotel-detail-section"><h3>Location</h3><div class="hotel-map"><iframe title="Map of ${escapeHtml(hotel.name)}" loading="lazy" src="https://www.openstreetmap.org/export/embed.html?bbox=${Number(hotel.longitude) - 0.01}%2C${Number(hotel.latitude) - 0.008}%2C${Number(hotel.longitude) + 0.01}%2C${Number(hotel.latitude) + 0.008}&amp;layer=mapnik&amp;marker=${Number(hotel.latitude)}%2C${Number(hotel.longitude)}"></iframe></div></div>` : ''}
         </div>
         <section class="hotel-rooms-section" id="rooms">
           <div class="section-heading"><div><span class="hs-eyebrow">${icon('i-bed')} Availability</span><h2>Choose your room</h2><p>${formatDate(search.checkIn)} → ${formatDate(search.checkOut)} · ${hotelNightWord(nights)} · ${hotelGuestsWord(search.adults, search.children)}</p></div></div>
           <div class="hotel-rooms-grid" id="hotelRoomsGrid">${hotel.rooms.map(room => hotelRoomCardHtml(room, hotel, selection)).join('')}</div>
         </section>
+        <section class="hotel-similar-section" id="similar">
+          <div class="section-heading"><div><span class="hs-eyebrow">${icon('i-hotel')} More stays</span><h2>Similar hotels</h2><p>Other properties travellers also look at in ${escapeHtml(hotel.city)}.</p></div></div>
+          <div class="hotel-results-grid" id="hotelSimilarGrid"><div class="public-public-loading"><span class="spinner"></span>Loading similar hotels…</div></div>
+        </section>
       </div>`;
     bindHotelDetail(hotel, selection, search);
+    void loadSimilarHotels();
   };
   function hotelRoomCardHtml(room, hotel, selection) {
     const soldOut = room.available <= 0;
@@ -1282,6 +1418,17 @@ async function renderHotelDetail(root, slug, query) {
         ${soldOut ? '<button class="btn btn-outline full-btn" disabled>Sold out</button>' : selected ? `<div class="room-selected"><span>${icon('i-check')} Selected</span><button class="btn btn-outline" data-remove-room="${escapeHtml(room.id)}">Remove</button></div>` : `<button class="btn btn-primary full-btn" data-select-room="${escapeHtml(room.id)}">Select room</button>`}
       </div>
     </article>`;
+  }
+  async function loadSimilarHotels() {
+    const grid = $('#hotelSimilarGrid');
+    if (!grid) return;
+    try {
+      const r = await apiRequest(`/hotels?city=${encodeURIComponent(hotel.city || '')}&pageSize=4&sort=rating`);
+      const similar = (r.hotels || []).filter(item => item.id !== hotel.id).slice(0, 3);
+      if (!similar.length) { grid.innerHTML = publicEmptyState('No similar hotels yet', 'More properties in this area will appear here.', ''); return; }
+      grid.innerHTML = similar.map(h => hotelCardHtml(h, { checkIn: search.checkIn, checkOut: search.checkOut, adults: search.adults, children: search.children, rooms: search.rooms })).join('');
+      $$('#hotelSimilarGrid [data-gallery]').forEach(el => el.addEventListener('click', async e => { e.preventDefault(); try { const detail = await apiRequest(`/hotels/${encodeURIComponent(el.dataset.gallery)}`); hotelGalleryModal(detail.hotel.images); } catch {} }));
+    } catch { grid.innerHTML = publicEmptyState('Similar hotels unavailable', 'Try searching again from the hotel search page.', '<a class="btn btn-outline" href="/hotels" data-public-route="/hotels">Search hotels</a>'); }
   }
   function bindHotelDetail(hotel, selection, search) {
     $$('.hotel-detail-hero, .hotel-detail-thumb').forEach(el => el.addEventListener('click', () => { const idx = el.dataset.thumb ? hotel.images.findIndex(i => i.url === el.dataset.thumb) : 0; hotelGalleryModal(hotel.images, Math.max(0, idx)); }));
@@ -1400,7 +1547,7 @@ async function renderBookingDetail(root, id) {
         <div class="public-page-card sticky-summary">
           <h3>Manage booking</h3>
           <div class="receipt-side-status"><span class="hotel-status hotel-status-${escapeHtml(booking.status)}">${escapeHtml(booking.status.replace(/_/g, ' '))}</span><span class="hotel-status hotel-pay-${escapeHtml(booking.paymentStatus)}">${escapeHtml(booking.paymentStatus)}</span></div>
-          ${booking.status === 'pending' && booking.paymentStatus !== 'paid' ? `<button class="btn btn-primary full-btn" id="bkPay">${icon('i-tag')} Pay now</button>` : ''}
+          ${!['cancelled', 'refunded', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' ? `<button class="btn btn-primary full-btn" id="bkPay">${icon('i-tag')} ${booking.status === 'payment_pending' ? 'Retry payment' : 'Pay now'}</button>` : ''}
           ${cancellation?.allowed ? `<button class="btn btn-outline full-btn" id="bkCancel">Cancel booking</button>${cancellation.reason ? `<p class="form-hint">${escapeHtml(cancellation.reason)}</p>` : ''}` : `<p class="form-hint">${escapeHtml(cancellation?.reason || 'This booking cannot be cancelled.')}</p>`}
           <button class="btn btn-outline full-btn" id="bkPrint">${icon('i-print')} Print receipt</button>
           <a class="btn btn-outline full-btn" href="/bookings" data-public-route="/bookings">All bookings</a>
