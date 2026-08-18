@@ -369,6 +369,13 @@ body.sidebar-open{overflow:hidden}
 .amenity-grid svg{color:#0d7656;font-size:.9rem}
 .hotel-detail-section{margin-top:18px;padding-top:14px;border-top:1px solid var(--border)}
 .hotel-detail-section p{color:var(--muted);font-size:.84rem;line-height:1.6;margin:0}
+.hotel-contact-row{display:flex;flex-wrap:wrap;gap:10px}
+.hotel-contact-row a{display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border:1px solid var(--border);border-radius:9px;background:#fff;color:var(--ink);font-size:.8rem;font-weight:600;text-decoration:none;transition:border-color .15s ease,color .15s ease}
+.hotel-contact-row a:hover{border-color:var(--brand);color:var(--brand)}
+.hotel-contact-row svg{color:var(--brand)}
+.hotel-map iframe{width:100%;height:240px;border:1px solid var(--border);border-radius:12px;display:block}
+.hotel-similar-section{margin-top:30px}
+.hotel-similar-section .hotel-results-grid{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
 .hotel-rooms-section{scroll-margin-top:90px}
 .hotel-rooms-grid{display:flex;flex-direction:column;gap:14px}
 
@@ -534,7 +541,7 @@ body.sidebar-open{overflow:hidden}
    header or the sidebar on any viewport.
    ============================================================ */
 :root{
-  --shell-sidebar-w:244px;
+  --shell-sidebar-w:268px;
   --shell-header-h:64px;
   --shell-gutter:clamp(14px,2.2vw,28px);
   --shell-max:1440px;
@@ -560,15 +567,14 @@ html,body{overflow-x:clip;max-width:100%}
 .sidebar-account>div:nth-child(2){min-width:0}
 .sidebar-account strong{font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sidebar-account span{font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sidebar-nav{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:4px 10px 10px;scrollbar-width:thin}
-.sidebar-nav::-webkit-scrollbar{width:6px}
-.sidebar-nav::-webkit-scrollbar-thumb{background:#d8e0ec;border-radius:99px}
-.sidebar-section-label{font-size:.66rem;letter-spacing:.1em;font-weight:800;color:#8994a2;text-transform:uppercase;padding:14px 10px 5px}
-.sidebar-nav .side-link{display:flex;align-items:center;gap:11px;width:100%;min-height:44px;padding:9px 11px;margin:1px 0;border:0;border-radius:10px;background:transparent;color:var(--ink);font-size:.9rem;line-height:1.25;text-align:left;transition:background .18s ease,color .18s ease,transform .18s ease}
+.sidebar-nav{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:4px 12px 10px;scrollbar-width:none;-ms-overflow-style:none;overscroll-behavior:contain}
+.sidebar-nav::-webkit-scrollbar{display:none;width:0;height:0}
+.sidebar-section-label{font-size:.7rem;letter-spacing:.1em;font-weight:800;color:#7e8ba0;text-transform:uppercase;padding:13px 12px 6px}
+.sidebar-nav .side-link{display:flex;align-items:center;gap:12px;width:100%;min-height:46px;padding:10px 12px;margin:1px 0;border:0;border-radius:10px;background:transparent;color:var(--ink);font-size:.94rem;line-height:1.25;text-align:left;transition:background .18s ease,color .18s ease,transform .18s ease}
 .sidebar-nav .side-link:hover{background:var(--brand-soft);color:var(--brand);transform:translateX(2px)}
-.sidebar-nav .side-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sidebar-nav .side-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;font-size:1.18rem;color:var(--brand)}
-.sidebar-nav .side-arrow{flex:none;margin-left:0;color:#b6c0cd;font-size:1.1rem;line-height:1;transition:transform .18s ease,color .18s ease}
+.sidebar-nav .side-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.sidebar-nav .side-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:22px;font-size:1.22rem;color:var(--brand)}
+.sidebar-nav .side-arrow{flex:none;margin-left:0;color:#b6c0cd;font-size:1.05rem;line-height:1;transition:transform .18s ease,color .18s ease}
 .sidebar-nav .side-link:hover .side-arrow{color:var(--brand);transform:translateX(2px)}
 .sidebar-nav .side-link.is-active{background:var(--brand-soft);color:var(--brand);font-weight:600;box-shadow:inset 3px 0 0 var(--brand)}
 .sidebar-nav .side-link.is-active .side-arrow{color:var(--brand)}
@@ -604,8 +610,8 @@ html,body{overflow-x:clip;max-width:100%}
   .page-backdrop{display:none!important}
   .travel-sidebar.desktop-collapsed{flex-basis:0;width:0;border-right:0;overflow:hidden;padding:0;visibility:hidden}
 }
-@media(max-width:1440px){:root{--shell-sidebar-w:236px}}
-@media(max-width:1180px){:root{--shell-sidebar-w:230px}}
+@media(max-width:1440px){:root{--shell-sidebar-w:258px}}
+@media(max-width:1180px){:root{--shell-sidebar-w:250px}}
 @media(max-width:767px){
   :root{--shell-header-h:58px}
   .public-route-root{padding:16px 0 44px}
