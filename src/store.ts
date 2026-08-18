@@ -134,6 +134,7 @@ const DEFAULT_NAVIGATION: Array<Omit<CreateNavItem,'id'>> = [
   { groupName:'Website', label:'Media Library', route:'/admin/media', icon:'image', permission:'content_manage', sortOrder:91, visible:true, enabled:true },
   { groupName:'Website', label:'Service Visibility', route:'/admin/services', icon:'eye', permission:'services_manage', sortOrder:92, visible:true, enabled:true },
   { groupName:'Catalogue', label:'All Products', route:'/admin/catalog', icon:'grid', permission:'content_manage', sortOrder:44, visible:true, enabled:true },
+  { groupName:'Catalogue', label:'eSIM Plans', route:'/admin/catalog?type=esim', icon:'sim', permission:'content_manage', sortOrder:45, visible:true, enabled:true },
   { groupName:'Catalogue', label:'Umrah Packages', route:'/admin/catalog?type=umrah_package', icon:'map', permission:'content_manage', sortOrder:45, visible:true, enabled:true },
   { groupName:'Catalogue', label:'Holiday Packages', route:'/admin/catalog?type=holiday_package', icon:'plane', permission:'content_manage', sortOrder:46, visible:true, enabled:true },
   { groupName:'Catalogue', label:'eSIM Plans', route:'/admin/catalog?type=esim', icon:'sim', permission:'content_manage', sortOrder:47, visible:true, enabled:true },

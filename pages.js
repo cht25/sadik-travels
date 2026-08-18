@@ -317,7 +317,7 @@
     const params = new URLSearchParams();
     params.set('type', 'esim');
     params.set('pageSize', '12');
-    ['q', 'country', 'dataAmount', 'validityDays', 'minPrice', 'maxPrice', 'sort', 'page'].forEach((key) => { if (query.get(key)) params.set(key, query.get(key)); });
+    ['q', 'country', 'dataAmount', 'validityDays', 'region', 'network', 'minPrice', 'maxPrice', 'sort', 'page'].forEach((key) => { if (query.get(key)) params.set(key, query.get(key)); });
 
     root.innerHTML = `<div class="sf-page">
       ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'eSIM' }])}
