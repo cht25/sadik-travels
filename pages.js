@@ -1195,17 +1195,6 @@
     </section>`;
   };
 
-  const orderRow = (order) => `
-    <a class="sf-order-row" href="/orders/${esc(order.orderNumber)}" data-public-route="/orders/${esc(order.orderNumber)}">
-      <div class="sf-order-media">${order.items?.[0]?.imageUrl ? `<img src="${esc(order.items[0].imageUrl)}" alt="" />` : icon('i-images')}</div>
-      <div class="sf-order-main">
-        <strong>${esc(order.items?.[0]?.title || titleCase(order.primaryType))}${order.items?.length > 1 ? ` +${order.items.length - 1} more` : ''}</strong>
-        <small>${esc(order.orderNumber)} · ${dateLabel(order.createdAt)}${order.travelDate ? ` · Travel ${dateLabel(order.travelDate)}` : ''}</small>
-        <div class="sf-order-pills">${statusPill(order.status)}${statusPill(order.paymentStatus)}</div>
-      </div>
-      <div class="sf-order-side"><strong>${money(order.total, order.currency)}</strong><span>View details ›</span></div>
-    </a>`;
-
   async function renderOrderDetail(root, reference) {
     if (!isLoggedIn()) return renderLoginRequired(root, 'Booking', 'Login to view this booking.');
     root.innerHTML = `<div class="sf-page">${loadingState('Loading booking…')}</div>`;
