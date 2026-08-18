@@ -133,7 +133,7 @@ const ROLE_DEFAULT_FINE: Record<string, string[]> = {
   support: ['catalog.view', 'order.view', 'visa.view', 'review.view', 'dashboard.view', 'booking.view', 'customer.view', 'support.view', 'support.reply', 'notifications.send'],
   content_manager: ['catalog.view', 'catalog.create', 'catalog.update', 'catalog.delete', 'coupon.view', 'coupon.create', 'coupon.update', 'review.view', 'review.moderate', 'dashboard.view', 'reports.view', 'hotel.view', 'hotel.create', 'hotel.update', 'hotel.delete', 'room.view', 'room.create', 'room.update', 'room.delete', 'agent.view', 'agent.create', 'agent.update', 'agent.delete', 'tour.view', 'tour.create', 'tour.update', 'tour.delete', 'content.view', 'offer.view', 'offer.create', 'offer.update', 'offer.delete', 'media.view', 'media.upload', 'media.delete', 'service.manage'],
   finance: ['order.view', 'order.refund', 'invoice.view', 'catalog.view', 'dashboard.view', 'reports.view', 'booking.view', 'payment.view', 'payment.manage', 'customer.view'],
-  staff: ['catalog.view', 'order.view', 'dashboard.view', 'booking.view', 'customer.view', 'support.view'],
+  staff: ['catalog.view', 'order.view', 'dashboard.view', 'reports.view', 'booking.view', 'customer.view', 'support.view'],
   customer: []
 };
 
