@@ -22,6 +22,7 @@ import { registerHotelRoutes } from './hotel-routes.js';
 import { createCommerceStore } from './commerce-store.js';
 import { registerCommerceRoutes } from './commerce-routes.js';
 import { registerAnalyticsRoutes, trackEvent } from './analytics.js';
+import { registerPaymentGatewayRoutes } from './payment-gateway-routes.js';
 
 const verticalSchema = z.enum(['flight', 'hotel', 'home', 'visa', 'esim', 'tour']);
 const tourStatusSchema = z.enum(['draft', 'published', 'archived']);
@@ -257,7 +258,7 @@ export function buildApp() {
   });
 
   // Public tour catalogue and live provider search.
-  app.get('/api/v1/tours', rateLimit('tour-catalog', 120, 60), optionalAuth(store), async (req, res) => { const filters: TourFilters = { q: req.query.q ? String(req.query.q) : undefined, country: req.query.destination ? String(req.query.destination) : undefined, tourType: req.query.tour_type ? String(req.query.tour_type) : undefined, maxPrice: req.query.max_price ? Number(req.query.max_price) : undefined, sort: req.query.sort === 'price_asc' || req.query.sort === 'price_desc' ? req.query.sort : 'newest' }; const tours = await store.listTours(filters); res.json({ success: true, filters, count: tours.length, tours: tours.map(publicTourView) }); });
+  app.get('/api/v1/tours', rateLimit('tour-catalog', 120, 60), optionalAuth(store), async (req, res) => { const filters: TourFilters = { q: req.query.q ? String(req.query.q) : undefined, country: req.query.destination ? String(req.query.destination) : undefined, tourType: req.query.tour_type ? String(req.query.tour_type) : undefined, minPrice: req.query.min_price ? Number(req.query.min_price) : undefined, maxPrice: req.query.max_price ? Number(req.query.max_price) : undefined, sort: req.query.sort === 'price_asc' || req.query.sort === 'price_desc' ? req.query.sort : 'newest' }; const tours = await store.listTours(filters); res.json({ success: true, filters, count: tours.length, tours: tours.map(publicTourView) }); });
   app.get('/api/v1/tours/:idOrSlug', rateLimit('tour-detail', 120, 60), async (req, res) => { const tour = await store.findTour(String(req.params.idOrSlug)); assert(tour && tour.status === 'published', 404, 'TOUR_NOT_FOUND', 'Tour package not found'); res.json({ tour: publicTourView(tour) }); });
   app.post('/api/v1/search/:vertical', rateLimit('search', 90, 60), optionalAuth(store), async (req, res) => {
     const vertical = toInput(verticalSchema, String(req.params.vertical)) as Vertical;
@@ -555,6 +556,9 @@ export function buildApp() {
 
   // Hotel booking ecosystem (search, rooms, inventory, booking engine, admin).
   registerHotelRoutes(app, { store, hotelStore, media, payment });
+
+  // SSLCommerz / SurjoPay-style initiate + return + IPN surface.
+  registerPaymentGatewayRoutes(app, { store, payment, hotelStore });
 
   // Catalogue, cart, wishlist, coupons, orders, invoices, reviews and visa applications.
   registerCommerceRoutes(app, { store, commerce, payment });

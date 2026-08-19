@@ -546,3 +546,32 @@
 .agents-carousel-track.is-dragging{scroll-snap-type:none;cursor:grabbing;user-select:none}
 .agents-carousel-track{cursor:grab}
 .agents-carousel-track:active{cursor:grabbing}
+
+/* ===== Booking overhaul: filters, mobile sheet, tour PDP ===== */
+.hotel-results-layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:900px){.hotel-results-layout{grid-template-columns:1fr}.hotel-filters{display:none}.hotel-filters-toggle{display:inline-flex!important}}
+.hotel-filters-toggle{display:none}
+.hotel-results-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+@media (max-width:1100px){.hotel-results-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:700px){.hotel-results-grid{grid-template-columns:1fr}}
+.hotel-card{display:flex;flex-direction:column;min-width:0;background:#fff;border:1px solid #e4e8ee;border-radius:16px;overflow:hidden}
+.hotel-card-name,.hotel-card-loc{overflow-wrap:anywhere;word-break:break-word}
+.filter-price{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.range-wrap{display:grid;gap:8px;margin-top:8px}
+.range-wrap input[type=range]{width:100%}
+.filter-count{font-size:12px;color:#1438b8;font-weight:700}
+.mobile-sheet{display:none}
+@media (max-width:900px){.mobile-sheet{position:fixed;left:0;right:0;bottom:0;z-index:40;background:#fff;border-top:1px solid #e4e8ee;box-shadow:0 -12px 40px rgba(16,36,80,.12);padding:10px 14px calc(10px + env(safe-area-inset-bottom));display:flex;gap:10px;align-items:center;justify-content:space-between}}
+.mobile-sheet strong{display:block;font-size:15px}
+.tour-pdp{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,360px);gap:22px;align-items:start}
+@media (max-width:900px){.tour-pdp{grid-template-columns:1fr}}
+.tour-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
+.tour-tabs button{border:1px solid #d7deea;background:#fff;border-radius:999px;padding:8px 14px;font-weight:700}
+.tour-tabs button.active{background:#1438b8;color:#fff;border-color:#1438b8}
+.tour-tab-panel{background:#fff;border:1px solid #e4e8ee;border-radius:14px;padding:16px}
+.tour-price-card{position:sticky;top:80px;background:#fff;border:1px solid #e4e8ee;border-radius:16px;padding:18px}
+.wizard-steps{display:flex;gap:8px;margin:0 0 16px;flex-wrap:wrap}
+.wizard-steps span{font-size:12px;font-weight:800;padding:6px 10px;border-radius:999px;background:#eef2fb;color:#3b4a63}
+.wizard-steps span.on{background:#1438b8;color:#fff}
+.checkout-pay .pay-option{display:flex;gap:10px;padding:10px;border:1px solid #e4e8ee;border-radius:12px;margin-bottom:8px}
+@media (max-width:700px){.checkout-layout{display:block}.sticky-summary{position:static}}

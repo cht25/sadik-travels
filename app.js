@@ -519,6 +519,8 @@ async function searchTours(query, updateUrl = true) {
   } catch (error) { showToast(error.message || 'Tour search is unavailable.', 'error'); }
 }
 function openTourDetails(tour) {
+  publicNavigate(`/tours/${encodeURIComponent(tour.id)}`);
+  return;
   const modal = $('#genericModal');
   $('#modalContent').innerHTML = `<div class="tour-detail-modal"><img class="tour-detail-image" src="${escapeHtml(tourImage(tour))}" alt="${escapeHtml(tour.title)}" /><div class="modal-heading"><div class="modal-icon blue">${icon('i-map')}</div><h2 id="modalTitle">${escapeHtml(tour.title)}</h2></div><p class="modal-subtitle">${escapeHtml(tour.durationDays)} days / ${escapeHtml(tour.durationNights)} nights · ${escapeHtml(tour.country)}</p><p class="tour-detail-description">${escapeHtml(tour.description || 'A carefully planned journey with Sadik Travels support.')}</p><div class="result-summary"><strong>Starting from ৳${Number(tour.priceBdt).toLocaleString('en-BD')} per person</strong><br><span>${tour.destinations.map(escapeHtml).join(' · ')}</span></div><form id="tourBookForm"><label class="modal-field"><span>Travellers</span><input id="tourTravellers" type="number" min="1" max="30" value="2" required /></label><label class="modal-field"><span>Preferred travel date</span><input id="tourTravelDate" type="date" required /></label><button class="btn btn-primary full-btn" type="submit">Book this tour</button></form></div>`;
   openModal(modal);
@@ -894,7 +896,65 @@ function publicMetadataHtml(metadata = {}) { const entries = Object.entries(meta
 function publicDetailActions(item) { const metadata = item.metadata || {}; const actions = []; if (metadata.ctaUrl && (String(metadata.ctaUrl).startsWith('/') || /^https?:\/\//i.test(String(metadata.ctaUrl)))) actions.push(`<a class="btn btn-primary" href="${escapeHtml(metadata.ctaUrl)}" ${metadata.external ? 'target="_blank" rel="noopener"' : ''}>${escapeHtml(metadata.ctaText || 'Learn more')}</a>`); actions.push('<a class="btn btn-outline" href="#contact">Contact Sadik Travels</a>'); return actions.join(''); }
 async function renderPublicContentCollection(root, definition) { const response = await apiRequest(`/site/content?type=${encodeURIComponent(definition.type)}`); const items = response.content || []; root.innerHTML = publicPageHeader(definition.eyebrow, definition.title, definition.description, '') + `<section class="public-page-card"><div class="public-page-grid">${items.length ? items.map(publicContentCard).join('') : publicEmptyState(`No ${definition.title.toLowerCase()} yet`, 'Published content will appear here after an administrator saves and publishes it.')}</div></section>`; }
 async function renderPublicContentDetail(root, definition, id) { const response = await apiRequest(`/site/content/${encodeURIComponent(definition.type)}/${encodeURIComponent(id)}`); const item = response.content; if (!item) throw new Error('Content not found'); root.innerHTML = publicPageHeader(definition.eyebrow, item.title, item.subtitle || definition.description, '') + `<section class="public-page-card"><div class="public-detail"><div>${item.imageUrl ? `<img class="public-detail-image" src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.title)}" />` : publicEmptyState('No image published','This item does not have an image yet.')}<div class="public-detail-json"><h3>About this service</h3><p class="lead">${escapeHtml(item.description || item.subtitle || 'Published Sadik Travels content.')}</p></div></div><div><h2>${escapeHtml(item.title)}</h2><p class="lead">${escapeHtml(item.subtitle || '')}</p>${publicMetadataHtml(item.metadata)}<div class="public-detail-actions">${publicDetailActions(item)}</div></div></div></section>`; }
-async function renderPublicTours(root, id = '') { if (id) { const response = await apiRequest(`/tours/${encodeURIComponent(id)}`); const tour = response.tour; if (!tour) throw new Error('Tour not found'); trackAnalytics('tour_view', { id: tour.id, country: tour.country }); setSeo({ title: tour.title, description: `${tour.durationDays} days / ${tour.durationNights} nights in ${tour.country} — book with Sadik Travels.`, canonical: `/tours/${tour.id}`, image: tour.imageUrl, jsonLd: { '@context': 'https://schema.org', '@type': 'TouristTrip', name: tour.title, description: tour.description || undefined, touristType: tour.tourType } }); const metadata = tour.metadata || {}; root.innerHTML = publicPageHeader('Go Get Tour', tour.title, `${tour.durationDays} days / ${tour.durationNights} nights · ${tour.country}`, '') + `<section class="public-page-card"><div class="public-detail"><div>${tour.imageUrl ? `<img class="public-detail-image" src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" />` : publicEmptyState('No image published','This package does not have an image yet.')}<div class="public-detail-json"><h3>Package description</h3><p class="lead">${escapeHtml(tour.description || 'Published tour package details.')}</p></div></div><div><h2>${escapeHtml(tour.title)}</h2><p class="lead">${escapeHtml(tour.destinations.join(' · '))}</p><div class="public-detail-meta"><div><dt>Duration</dt><dd>${tour.durationDays} days / ${tour.durationNights} nights</dd></div><div><dt>Starting price</dt><dd>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</dd></div></div>${publicMetadataHtml(metadata)}<div class="public-detail-actions"><button type="button" class="btn btn-primary" data-public-tour-book="${escapeHtml(tour.id)}">Book this tour</button><a class="btn btn-outline" href="#contact">Contact Sadik Travels</a></div></div></div></section>`; $('#publicRouteRoot [data-public-tour-book]')?.addEventListener('click',()=>{activateTab('tours',true);history.pushState({},'',`/?tour=${encodeURIComponent(tour.id)}`);document.querySelector('main')?.removeAttribute('hidden');root.hidden=true;}); return; } const response = await apiRequest('/tours'); const tours = response.tours || []; root.innerHTML = publicPageHeader('Go Get Tour','Tour packages','Browse all published tour packages from the existing Sadik Travels catalogue','') + `<section class="public-page-card"><div class="public-page-grid">${tours.length ? tours.map(tour => `<a class="public-page-item" href="/tours/${escapeHtml(tour.id)}" data-public-route="/tours/${escapeHtml(tour.id)}"><div class="public-page-item-image">${tour.imageUrl ? `<img src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" loading="lazy" />` : '<span>No image published</span>'}</div><div class="public-page-item-body"><small>${escapeHtml(tour.tourType)}</small><h2>${escapeHtml(tour.title)}</h2><p>${escapeHtml(tour.destinations.join(' · '))}</p><strong>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</strong></div></a>`).join('') : publicEmptyState('No tours yet','Published tour packages will appear here after an admin creates them.','<a class="btn btn-primary" href="/#searchPanel">Open tour search</a>')}</div></section>`; }
+async function openTourCheckoutWizard(tour) {
+  const modal = $('#genericModal');
+  const meta = tour.metadata || {};
+  const itinerary = Array.isArray(meta.itinerary) ? meta.itinerary : [];
+  const inclusions = Array.isArray(meta.inclusions) ? meta.inclusions : [];
+  const exclusions = Array.isArray(meta.exclusions) ? meta.exclusions : [];
+  const notes = meta.notes || meta.policies || '';
+  $('#modalContent').innerHTML = `<div class="tour-detail-modal">
+    <div class="wizard-steps"><span class="on">1 Travellers</span><span>2 Price</span><span>3 Pay</span></div>
+    <h2 id="modalTitle">${escapeHtml(tour.title)}</h2>
+    <div class="tour-tabs">
+      <button type="button" class="active" data-ttab="it">Itinerary</button>
+      <button type="button" data-ttab="in">Inclusions</button>
+      <button type="button" data-ttab="no">Notes</button>
+    </div>
+    <div class="tour-tab-panel" data-tpanel="it">${itinerary.length ? itinerary.map((d,i)=>`<p><strong>Day ${i+1}.</strong> ${escapeHtml(typeof d==='string'?d:(d.title||d.detail||''))}</p>`).join('') : `<p>${escapeHtml(tour.description || 'Day-by-day itinerary will appear here when published.')}</p>`}</div>
+    <div class="tour-tab-panel" data-tpanel="in" hidden><p><strong>Includes</strong></p><ul>${(inclusions.length?inclusions:['Hotel stay','Breakfast','Airport transfer']).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul><p><strong>Excludes</strong></p><ul>${(exclusions.length?exclusions:['Personal expenses','Visa fees']).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>
+    <div class="tour-tab-panel" data-tpanel="no" hidden><p>${escapeHtml(notes || 'Standard Sadik Travels booking and cancellation policies apply. VAT 15% and AIT 5% are added at checkout.')}</p></div>
+    <form id="tourBookForm">
+      <label class="modal-field"><span>Adults</span><input id="tourAdults" type="number" min="1" max="30" value="2" required /></label>
+      <label class="modal-field"><span>Children</span><input id="tourChildren" type="number" min="0" max="20" value="0" /></label>
+      <label class="modal-field"><span>Infants</span><input id="tourInfants" type="number" min="0" max="10" value="0" /></label>
+      <label class="modal-field"><span>Travel date</span><input id="tourTravelDate" type="date" required /></label>
+      <label class="modal-field"><span>Promo code</span><input id="tourPromo" placeholder="Optional" /></label>
+      <div class="result-summary" id="tourQuoteBox">Calculating…</div>
+      <button class="btn btn-primary full-btn" type="submit">Confirm booking</button>
+    </form>
+  </div>`;
+  openModal(modal);
+  $$('[data-ttab]', modal).forEach(btn => btn.addEventListener('click', () => {
+    $$('[data-ttab]', modal).forEach(b => b.classList.toggle('active', b === btn));
+    $$('[data-tpanel]', modal).forEach(p => { p.hidden = p.dataset.tpanel !== btn.dataset.ttab; });
+  }));
+  const refreshQuote = async () => {
+    try {
+      const q = await apiRequest('/tours/quote', { method: 'POST', body: JSON.stringify({ tourId: tour.id, adults: Number($('#tourAdults').value)||1, children: Number($('#tourChildren').value)||0, infants: Number($('#tourInfants').value)||0, promoCode: $('#tourPromo').value || undefined }) });
+      const b = q.quote;
+      $('#tourQuoteBox').innerHTML = `<strong>৳${Number(b.total).toLocaleString('en-BD')}</strong><br><span>Base ৳${b.baseFare.toLocaleString('en-BD')} · VAT ${b.vatPct}% ৳${b.vat.toLocaleString('en-BD')} · AIT ${b.aitPct}% ৳${b.ait.toLocaleString('en-BD')}${b.discount?` · Promo −৳${b.discount.toLocaleString('en-BD')}`:''}</span>${b.emi?.length?`<br><small>EMI from ৳${b.emi[0].installment.toLocaleString('en-BD')} / mo</small>`:''}`;
+      return b;
+    } catch (error) { $('#tourQuoteBox').textContent = error.message || 'Unable to price this tour.'; return null; }
+  };
+  ['tourAdults','tourChildren','tourInfants','tourPromo'].forEach(id => $(`#${id}`)?.addEventListener('change', () => void refreshQuote()));
+  void refreshQuote();
+  $('#tourBookForm')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    try {
+      const quote = await refreshQuote();
+      const response = await apiRequest('/bookings', { method: 'POST', body: JSON.stringify({ vertical: 'tour', payload: { tourId: tour.id, slug: tour.slug, title: tour.title, travellers: Number($('#tourAdults').value)||1, adults: Number($('#tourAdults').value)||1, children: Number($('#tourChildren').value)||0, infants: Number($('#tourInfants').value)||0, travelDate: $('#tourTravelDate').value, priceBdt: tour.priceBdt, quotedTotal: quote?.total } }) });
+      closeModal(modal);
+      try {
+        const pay = await apiRequest('/initiate-payment', { method: 'POST', body: JSON.stringify({ bookingId: response.booking.id, kind: 'tour' }) });
+        if (pay.checkoutUrl) { window.location.href = pay.checkoutUrl; return; }
+      } catch { /* fall through to operator review */ }
+      openBookingNextSteps(response.booking);
+    } catch (error) { if (error.status === 401 || error.code === 'AUTH_REQUIRED') { closeModal(modal); openLogin(); showToast('Please login to book this tour.'); } else showToast(error.message || 'Unable to create tour booking.', 'error'); }
+  });
+}
+
+async function renderPublicTours(root, id = '') { if (id) { const response = await apiRequest(`/tours/${encodeURIComponent(id)}`); const tour = response.tour; if (!tour) throw new Error('Tour not found'); trackAnalytics('tour_view', { id: tour.id, country: tour.country }); setSeo({ title: tour.title, description: `${tour.durationDays} days / ${tour.durationNights} nights in ${tour.country} — book with Sadik Travels.`, canonical: `/tours/${tour.id}`, image: tour.imageUrl, jsonLd: { '@context': 'https://schema.org', '@type': 'TouristTrip', name: tour.title, description: tour.description || undefined, touristType: tour.tourType } }); const metadata = tour.metadata || {}; root.innerHTML = publicPageHeader('Go Get Tour', tour.title, `${tour.durationDays} days / ${tour.durationNights} nights · ${tour.country}`, '') + `<section class="public-page-card"><div class="public-detail"><div>${tour.imageUrl ? `<img class="public-detail-image" src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" />` : publicEmptyState('No image published','This package does not have an image yet.')}<div class="public-detail-json"><h3>Package description</h3><p class="lead">${escapeHtml(tour.description || 'Published tour package details.')}</p></div></div><div><h2>${escapeHtml(tour.title)}</h2><p class="lead">${escapeHtml(tour.destinations.join(' · '))}</p><div class="public-detail-meta"><div><dt>Duration</dt><dd>${tour.durationDays} days / ${tour.durationNights} nights</dd></div><div><dt>Starting price</dt><dd>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</dd></div></div>${publicMetadataHtml(metadata)}<div class="public-detail-actions"><button type="button" class="btn btn-primary" data-public-tour-book="${escapeHtml(tour.id)}">Book this tour</button><a class="btn btn-outline" href="#contact">Contact Sadik Travels</a></div></div></div></section>`; $('#publicRouteRoot [data-public-tour-book]')?.addEventListener('click',()=>{ void openTourCheckoutWizard(tour); }); return; } const response = await apiRequest('/tours'); const tours = response.tours || []; root.innerHTML = publicPageHeader('Go Get Tour','Tour packages','Browse all published tour packages from the existing Sadik Travels catalogue','') + `<section class="public-page-card"><div class="public-page-grid">${tours.length ? tours.map(tour => `<a class="public-page-item" href="/tours/${escapeHtml(tour.id)}" data-public-route="/tours/${escapeHtml(tour.id)}"><div class="public-page-item-image">${tour.imageUrl ? `<img src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" loading="lazy" />` : '<span>No image published</span>'}</div><div class="public-page-item-body"><small>${escapeHtml(tour.tourType)}</small><h2>${escapeHtml(tour.title)}</h2><p>${escapeHtml(tour.destinations.join(' · '))}</p><strong>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</strong></div></a>`).join('') : publicEmptyState('No tours yet','Published tour packages will appear here after an admin creates them.','<a class="btn btn-primary" href="/#searchPanel">Open tour search</a>')}</div></section>`; }
 let agentsPageState = { agents: [], q: '', filter: 'all', ready: false };
 const BD_PLACES = ['bangladesh','dhaka','chattogram','chittagong',"cox's bazar",'coxsbazar','sylhet','khulna','rajshahi','barishal','rangpur','mymensingh','cumilla','comilla','gazipur','narayanganj'];
 function agentInitials(agent) { return (agent.fullName || '?').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
@@ -963,6 +1023,19 @@ async function renderPublicAgentProfile(root, id) {
   root.innerHTML = publicPageHeader('People', 'Travel Agents', 'Connect with a verified Sadik Travels travel specialist.', `<a class="btn btn-outline" href="/travel-agents" data-public-route="/travel-agents">All agents</a>`) + `<div class="agent-profile"><aside class="agent-profile-card"><div class="agent-profile-photo">${photo}<span class="id-badge">Official Member</span></div><div class="agent-profile-body"><h2>${escapeHtml(agent.fullName)}</h2><p class="agent-profile-role">${escapeHtml(agent.jobTitle || agent.specialization || 'Travel Specialist')}</p><p class="agent-profile-location">${icon('i-location')}${escapeHtml(agent.officeLocation || agent.city || 'Bangladesh')}</p><div class="agent-profile-contacts">${contacts.length ? contacts.join('') : '<span class="result-summary">Contact details will appear here once published.</span>'}</div></div></aside><div class="agent-profile-info"><h2>About ${escapeHtml((agent.fullName || 'the agent').split(' ')[0])}</h2><div class="agent-profile-section"><h3>Profile</h3><p>${escapeHtml(agent.fullDescription || agent.shortBio || 'A verified Sadik Travels travel specialist ready to help you plan and book your journey.')}</p></div>${languages.length || agent.specialization ? `<div class="agent-profile-section"><h3>Languages &amp; specialties</h3><div class="chip-list">${languages.map(language => `<span class="chip">${escapeHtml(language)}</span>`).join('')}${agent.specialization ? `<span class="chip">${escapeHtml(agent.specialization)}</span>` : ''}</div></div>` : ''}<div class="agent-profile-section"><h3>Details</h3><dl class="agent-profile-meta">${metaRows.length ? metaRows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('') : '<div><dt>Status</dt><dd>Verified specialist</dd></div>'}</dl></div></div></div>`;
 }
 async function renderPublicServiceLanding(root, service) { root.innerHTML=publicPageHeader('Services',service.title,service.description,'')+`<section class="public-page-card"><div class="provider-state"><div class="provider-state-icon">${icon(service.tab==='flights'?'i-plane':service.tab==='hotels'?'i-hotel':'i-home')}</div><div><strong>Live ${escapeHtml(service.title)} search</strong><p>Availability and prices are returned only by the configured live provider. No static inventory is shown.</p></div></div><div class="public-detail-actions"><a class="btn btn-primary" href="/?service=${escapeHtml(service.tab)}" data-public-route="/?service=${escapeHtml(service.tab)}">Open ${escapeHtml(service.title)} search</a></div></section>`; }
+async function renderPaymentReturn(root, query) {
+  const status = query.get('payment') || 'pending';
+  const paymentId = query.get('paymentId') || query.get('tran_id') || '';
+  let detail = null;
+  if (paymentId) {
+    try { detail = await apiRequest(`/payments/return-status?paymentId=${encodeURIComponent(paymentId)}`); } catch { /* gateway may still be settling */ }
+  }
+  const ok = status === 'success' || detail?.payment?.status === 'paid';
+  const fail = status === 'failed' || status === 'cancelled';
+  root.innerHTML = publicPageHeader('Payments', ok ? 'Payment successful' : fail ? 'Payment not completed' : 'Payment status', ok ? 'Your booking is confirmed. A receipt is available in My Bookings.' : 'If money was deducted, it will be reconciled after IPN verification.', '') +
+    `<section class="public-page-card"><p>${escapeHtml(detail?.payment?.status || status)}</p>${detail?.hotelBooking ? `<p>Hotel booking ${escapeHtml(detail.hotelBooking.bookingNumber)} · ${escapeHtml(detail.hotelBooking.status)}</p>` : ''}<div class="public-detail-actions"><a class="btn btn-primary" href="/bookings" data-public-route="/bookings">My bookings</a></div></section>`;
+}
+
 async function renderPublicRoute() {
   const root = $('#publicRouteRoot');
   const home = document.querySelector('main');
@@ -991,6 +1064,7 @@ async function renderPublicRoute() {
       else { await renderHotelDetail(root, route.parts[1], route.query); }
       return;
     }
+    if (route.parts[0] === 'payment') { await renderPaymentReturn(root, route.query); return; }
     if (route.parts[0] === 'booking') {
       if (route.parts[1] === 'checkout') { await renderHotelCheckout(root); }
       else if (route.parts[1]) { await renderBookingDetail(root, route.parts[1]); }
@@ -1155,9 +1229,11 @@ function navigateToSection(key) {
    Search · results/filters · detail · rooms · checkout ·
    confirmation · my bookings · receipt. Add-on module.
    ============================================================ */
-const HOTEL_AMENITIES = ['Wi-Fi', 'Breakfast', 'Pool', 'Parking', 'AC', 'Restaurant', 'Room Service', 'Gym', 'Spa', 'Airport Transfer', 'TV', 'Lift', 'Bar', 'Conference'];
+const HOTEL_AMENITIES = ['Free Wi-Fi', 'Swimming Pool', 'Gym', 'Couple-Friendly', 'Complimentary Breakfast', 'Parking', 'AC', 'Restaurant', 'Room Service', 'Spa', 'Airport Transfer'];
+const HOTEL_NEIGHBORHOODS = { "Cox's Bazar": ['Kolatoli Road', 'Inani Beach', 'Laboni Beach', 'Himchari'], Dhaka: ['Gulshan', 'Banani', 'Dhanmondi', 'Uttara'] };
+const REVIEW_BUCKETS = [{ id: '4.25', label: '8.5+ Excellent', min: 4.25 }, { id: '4', label: '8.0+ Very good', min: 4 }, { id: '3.5', label: '7.0+ Good', min: 3.5 }];
 const HOTEL_CHECKOUT_KEY = 'sadikHotelCheckout';
-const hotelSearchState = { destination: '', checkIn: '', checkOut: '', adults: 2, children: 0, rooms: 1, minPrice: '', maxPrice: '', minStarRating: '', propertyType: [], amenities: [], freeCancellation: false, sort: 'recommended', page: 1 };
+const hotelSearchState = { destination: '', checkIn: '', checkOut: '', adults: 2, children: 0, rooms: 1, minPrice: '', maxPrice: '', minStarRating: '', minGuestRating: '', area: '', neighborhoods: [], propertyType: [], amenities: [], freeCancellation: false, sort: 'recommended', page: 1 };
 const hotelMoney = (value) => `৳${Number(value || 0).toLocaleString('en-BD')}`;
 const hotelStars = (rating) => { const n = Math.max(0, Math.min(5, Math.round(Number(rating || 0)))); return Array.from({ length: n }, () => icon('i-star')).join(''); };
 const hotelRatingLabel = (rating) => rating >= 4.5 ? 'Excellent' : rating >= 4 ? 'Very good' : rating >= 3.5 ? 'Good' : rating >= 3 ? 'Pleasant' : 'Rated';
@@ -1181,6 +1257,9 @@ function hotelBuildUrl(params) {
   if (params.minPrice) p.set('minPrice', params.minPrice);
   if (params.maxPrice) p.set('maxPrice', params.maxPrice);
   if (params.minStarRating) p.set('minStarRating', params.minStarRating);
+  if (params.minGuestRating) p.set('minGuestRating', params.minGuestRating);
+  if (params.area) p.set('area', params.area);
+  if (params.neighborhoods?.length) p.set('neighborhoods', params.neighborhoods.join(','));
   if (params.propertyType?.length) p.set('propertyType', params.propertyType.join(','));
   if (params.amenities?.length) p.set('amenities', params.amenities.join(','));
   if (params.freeCancellation) p.set('freeCancellation', 'true');
@@ -1302,7 +1381,8 @@ async function renderHotelSearch(root, query) {
         <div class="hotel-results-grid" id="hotelResultsGrid"><div class="public-public-loading"><span class="spinner"></span>Searching hotels…</div></div>
         <div class="hotel-pagination" id="hotelPagination"></div>
       </div>
-    </div>`;
+    </div>
+    <div class="mobile-sheet" id="hotelMobileSheet"><div><small>Filters &amp; book</small><strong id="hotelSheetCount">Searching…</strong></div><div style="display:flex;gap:8px"><button type="button" class="btn btn-outline" id="hotelSheetFilters">Filters</button></div></div>`;
   $('#hotelSort').value = search.sort;
   let facetData = { propertyTypes: [], cities: [] };
   const loadResults = async () => {
@@ -1310,8 +1390,10 @@ async function renderHotelSearch(root, query) {
     try {
       const params = { ...search, propertyType: search.propertyType, amenities: search.amenities };
       const r = await apiRequest(`/hotels?${hotelBuildUrl(params)}`);
-      facetData = { propertyTypes: r.propertyTypes || [], cities: r.cities || [] };
+      facetData = { propertyTypes: r.propertyTypes || [], cities: r.cities || [], areas: r.areas || [], priceBounds: r.priceBounds || {} };
+      const hint = $('#liveFilterHint'); if (hint) hint.textContent = `${r.total} stays`;
       $('#hotelResultsCount').textContent = `${r.total} hotel${r.total === 1 ? '' : 's'} found`;
+      const sheet = $('#hotelSheetCount'); if (sheet) sheet.textContent = `${r.total} stay${r.total === 1 ? '' : 's'}`;
       grid.innerHTML = r.hotels.length ? r.hotels.map(h => hotelCardHtml(h, search)).join('') : publicEmptyState('No hotels found', 'Try changing your dates, destination, or filters.', `<button class="btn btn-outline" id="hotelClearFilters">Clear filters</button>`);
       renderHotelPagination(r);
       renderHotelFilters(facetData);
@@ -1323,14 +1405,18 @@ async function renderHotelSearch(root, query) {
     const node = $('#hotelFilters');
     const starOptions = [5, 4, 3, 2, 1];
     const priceMax = search.maxPrice || 25000;
-    node.innerHTML = `<div class="filter-group"><h4>Price per night</h4><div class="filter-price"><label>Min<input type="number" id="fMinPrice" value="${escapeHtml(search.minPrice)}" placeholder="0" min="0" /></label><label>Max<input type="number" id="fMaxPrice" value="${escapeHtml(search.maxPrice)}" placeholder="25000" min="0" /></label></div></div>
+    const hoods = HOTEL_NEIGHBORHOODS[search.destination] || facets.areas || [];
+    node.innerHTML = `<div class="filter-group"><h4>Price per night <span class="filter-count" id="liveFilterHint"></span></h4><div class="filter-price"><label>Min<input type="number" id="fMinPrice" value="${escapeHtml(search.minPrice)}" placeholder="0" min="0" /></label><label>Max<input type="number" id="fMaxPrice" value="${escapeHtml(search.maxPrice)}" placeholder="25000" min="0" /></label></div><div class="range-wrap"><input type="range" id="fPriceSlider" min="0" max="${Number(facets.priceBounds?.max || 25000)}" value="${escapeHtml(search.maxPrice || facets.priceBounds?.max || 25000)}" /></div></div>
+      <div class="filter-group"><h4>Guest score</h4><div class="filter-checks">${REVIEW_BUCKETS.map(b => `<label class="check-pill"><input type="radio" name="guestScore" data-score="${b.min}" ${Number(search.minGuestRating) === b.min ? 'checked' : ''} /><span>${escapeHtml(b.label)}</span></label>`).join('')}</div></div>
+      ${hoods.length ? `<div class="filter-group"><h4>Neighborhoods</h4><div class="filter-checks">${hoods.map(a => `<label class="check-pill"><input type="checkbox" data-hood="${escapeHtml(a)}" ${(search.neighborhoods || []).includes(a) || search.area === a ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>` : ''}
       <div class="filter-group"><h4>Star rating</h4><div class="filter-checks">${starOptions.map(s => `<label class="check-pill"><input type="checkbox" data-star="${s}" ${Number(search.minStarRating) === s ? 'checked' : ''} /><span>${hotelStars(s)} ${s}★</span></label>`).join('')}</div></div>
       ${facets.propertyTypes.length ? `<div class="filter-group"><h4>Property type</h4><div class="filter-checks">${facets.propertyTypes.map(t => `<label class="check-pill"><input type="checkbox" data-ptype="${escapeHtml(t)}" ${search.propertyType.includes(t) ? 'checked' : ''} /><span>${escapeHtml(t)}</span></label>`).join('')}</div></div>` : ''}
       <div class="filter-group"><h4>Amenities</h4><div class="filter-checks">${HOTEL_AMENITIES.map(a => `<label class="check-pill"><input type="checkbox" data-amenity="${escapeHtml(a)}" ${search.amenities.includes(a) ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>
       <div class="filter-group"><label class="check-pill"><input type="checkbox" id="fFreeCancel" ${search.freeCancellation ? 'checked' : ''} /><span>Free cancellation</span></label></div>
       <button type="button" class="btn btn-outline full-btn" id="hotelClearFiltersSide">Clear all</button>`;
-    const apply = () => { hotelSearchState.minPrice = $('#fMinPrice').value; hotelSearchState.maxPrice = $('#fMaxPrice').value; hotelSearchState.propertyType = $$('[data-ptype]:checked').map(i => i.dataset.ptype); hotelSearchState.amenities = $$('[data-amenity]:checked').map(i => i.dataset.amenity); const star = $$('[data-star]:checked').map(i => Number(i.dataset.star)); hotelSearchState.minStarRating = star.length ? String(Math.min(...star)) : ''; hotelSearchState.freeCancellation = $('#fFreeCancel').checked; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); };
-    node.querySelectorAll('input[type=checkbox], input[type=number]').forEach(i => i.addEventListener('change', apply));
+    const apply = () => { hotelSearchState.minPrice = $('#fMinPrice').value; hotelSearchState.maxPrice = $('#fMaxPrice').value; hotelSearchState.propertyType = $$('[data-ptype]:checked').map(i => i.dataset.ptype); hotelSearchState.amenities = $$('[data-amenity]:checked').map(i => i.dataset.amenity); const star = $$('[data-star]:checked').map(i => Number(i.dataset.star)); hotelSearchState.minStarRating = star.length ? String(Math.min(...star)) : ''; hotelSearchState.minGuestRating = $$('[data-score]:checked')[0]?.dataset.score || ''; hotelSearchState.neighborhoods = $$('[data-hood]:checked').map(i => i.dataset.hood); hotelSearchState.area = hotelSearchState.neighborhoods[0] || ''; hotelSearchState.freeCancellation = $('#fFreeCancel').checked; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); };
+    node.querySelectorAll('input[type=checkbox], input[type=number], input[type=radio], input[type=range]').forEach(i => i.addEventListener('change', apply));
+    $('#fPriceSlider')?.addEventListener('input', () => { $('#fMaxPrice').value = $('#fPriceSlider').value; });
     $('#fMinPrice')?.addEventListener('blur', apply); $('#fMaxPrice')?.addEventListener('blur', apply);
     $('#hotelClearFiltersSide')?.addEventListener('click', () => { ['minPrice', 'maxPrice', 'minStarRating'].forEach(k => hotelSearchState[k] = ''); hotelSearchState.propertyType = []; hotelSearchState.amenities = []; hotelSearchState.freeCancellation = false; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); });
   };
@@ -1495,7 +1581,7 @@ async function renderHotelCheckout(root) {
       const response = await apiRequest('/hotels/bookings', { method: 'POST', body: JSON.stringify({ hotelId: data.hotelId, checkIn: data.checkIn, checkOut: data.checkOut, rooms, primaryGuest: { firstName, lastName, email, phone, country: $('#ckCountry').value.trim() || undefined }, specialRequests: $('#ckRequests').value.trim() || undefined, paymentMethod: payMethod }) });
       const booking = response.booking;
       roomSelectionClear();
-      if (payMethod === 'online') { try { const pay = await apiRequest(`/hotels/bookings/${booking.id}/pay`, { method: 'POST', body: JSON.stringify({ paymentMethod: 'online' }) }); if (pay.checkoutUrl) { showToast('Booking created. Redirecting to payment…', 'success'); setTimeout(() => { window.location.href = pay.checkoutUrl; }, 800); return; } } catch (error) { showToast(`Booking created, but online payment is unavailable: ${error.message}`, 'error'); } }
+      if (payMethod === 'online') { try { const pay = await apiRequest('/initiate-payment', { method: 'POST', body: JSON.stringify({ bookingId: booking.id, kind: 'hotel' }) }); if (pay.checkoutUrl) { showToast('Booking saved. Redirecting to bKash / Nagad / card…', 'success'); setTimeout(() => { window.location.href = pay.checkoutUrl; }, 800); return; } } catch (error) { showToast(`Booking created, but online payment is unavailable: ${error.message}`, 'error'); } }
       showToast(`Booking ${booking.bookingNumber} confirmed.`, 'success');
       publicNavigate(`/booking/${booking.id}`);
     } catch (error) { showToast(error.message || 'Unable to create booking. The room may no longer be available.', 'error'); btn.disabled = false; btn.innerHTML = orig; }

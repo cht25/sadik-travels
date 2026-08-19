@@ -1,0 +1,176 @@
+// Relational contract for Hotel & Tour booking.
+// Runtime uses MongoDB; this Prisma schema documents FKs for operators.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Hotel {
+  id                 String   @id @db.Uuid
+  slug               String   @unique
+  name               String
+  shortDescription   String?
+  description        String?
+  propertyType       String
+  address            String?
+  city               String
+  country            String
+  area               String?
+  latitude           Float?
+  longitude          Float?
+  phone              String?
+  email              String?
+  website            String?
+  starRating         Int
+  guestRating        Float?
+  reviewCount        Int      @default(0)
+  amenities          String[]
+  facilities         String[]
+  images             Json
+  checkInTime        String?
+  checkOutTime       String?
+  cancellationPolicy Json?
+  status             String
+  featured           Boolean  @default(false)
+  sortOrder          Int      @default(0)
+  createdAt          DateTime
+  updatedAt          DateTime
+  rooms              HotelRoom[]
+  bookings           HotelBooking[]
+}
+
+model HotelRoom {
+  id                 String   @id @db.Uuid
+  hotelId            String   @db.Uuid
+  hotel              Hotel    @relation(fields: [hotelId], references: [id], onDelete: Restrict)
+  name               String
+  slug               String
+  description        String?
+  images             Json
+  size               Int?
+  bedType            String?
+  numBeds            Int?
+  maxAdults          Int
+  maxChildren        Int
+  maxGuests          Int
+  amenities          String[]
+  inventory          Int
+  pricePerNight      Float
+  originalPrice      Float?
+  taxesPct           Float    @default(0)
+  serviceFee         Float    @default(0)
+  cancellationPolicy Json?
+  mealPlan           String?
+  status             String
+  sortOrder          Int      @default(0)
+  createdAt          DateTime
+  updatedAt          DateTime
+  inventoryDays      RoomInventory[]
+}
+
+model RoomInventory {
+  id        String   @id @db.Uuid
+  hotelId   String   @db.Uuid
+  roomId    String   @db.Uuid
+  room      HotelRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  total     Int
+  available Int
+  blocked   Int      @default(0)
+  @@unique([roomId, date])
+}
+
+model HotelBooking {
+  id                 String   @id @db.Uuid
+  bookingNumber      String   @unique
+  userId             String   @db.Uuid
+  hotelId            String   @db.Uuid
+  hotel              Hotel    @relation(fields: [hotelId], references: [id], onDelete: Restrict)
+  checkIn            DateTime @db.Date
+  checkOut           DateTime @db.Date
+  nights             Int
+  rooms              Json
+  primaryGuest       Json
+  roomGuests         Json?
+  specialRequests    String?
+  priceBreakdown     Json
+  paymentMethod      String
+  paymentStatus      String
+  status             String
+  cancellationPolicy Json?
+  cancelledAt        DateTime?
+  refund             Json?
+  hotelSnapshot      Json
+  createdAt          DateTime
+  updatedAt          DateTime
+  transactions       Transaction[]
+}
+
+model Tour {
+  id              String   @id @db.Uuid
+  slug            String   @unique
+  title           String
+  country         String
+  tourType        String
+  destinations    String[]
+  durationDays    Int
+  durationNights  Int
+  description     String
+  imageUrl        String
+  mediaId         String?  @db.Uuid
+  metadata        Json
+  priceBdt        Float
+  status          String
+  featured        Boolean  @default(false)
+  createdAt       DateTime
+  updatedAt       DateTime
+  bookings        TourBooking[]
+}
+
+model TourBooking {
+  id            String   @id @db.Uuid
+  bookingNumber String   @unique
+  userId        String   @db.Uuid
+  tourId        String   @db.Uuid
+  tour          Tour     @relation(fields: [tourId], references: [id], onDelete: Restrict)
+  travelDate    DateTime @db.Date
+  adults        Int
+  children      Int      @default(0)
+  infants       Int      @default(0)
+  promoCode     String?
+  priceBreakdown Json
+  paymentStatus String
+  status        String
+  createdAt     DateTime
+  updatedAt     DateTime
+  transactions  Transaction[]
+}
+
+model Transaction {
+  id                   String   @id @db.Uuid
+  bookingId            String   @db.Uuid
+  hotelBookingId       String?  @db.Uuid
+  tourBookingId        String?  @db.Uuid
+  hotelBooking         HotelBooking? @relation(fields: [hotelBookingId], references: [id])
+  tourBooking          TourBooking?  @relation(fields: [tourBookingId], references: [id])
+  userId               String   @db.Uuid
+  provider             String
+  amount               Float
+  currency             String
+  status               String
+  transactionRef       String?
+  gatewayTransactionId String?
+  paymentMethod        String?
+  initiatedAt          DateTime?
+  completedAt          DateTime?
+  failedAt             DateTime?
+  failureReason        String?
+  providerPayload      Json?
+  createdAt            DateTime
+  updatedAt            DateTime
+}
