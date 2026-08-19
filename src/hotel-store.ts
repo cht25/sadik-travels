@@ -60,7 +60,8 @@ export type HotelBooking = {
 
 export type HotelFilters = {
   q?: string; destination?: string; city?: string; country?: string; propertyType?: string;
-  minPrice?: number; maxPrice?: number; minStarRating?: number; amenities?: string[];
+  minPrice?: number; maxPrice?: number; minStarRating?: number; minGuestRating?: number; amenities?: string[];
+  area?: string; neighborhoods?: string[];
   checkIn?: string; checkOut?: string; freeCancellationOnly?: boolean; sort?: string;
   page?: number; pageSize?: number; includeArchived?: boolean; status?: HotelStatus | 'all';
 };
@@ -197,9 +198,12 @@ export class HotelStore {
     if (filters.country) items = items.filter(hotel => normalize(hotel.country) === normalize(filters.country));
     if (filters.propertyType) items = items.filter(hotel => normalize(hotel.propertyType) === normalize(filters.propertyType));
     if (filters.minStarRating) items = items.filter(hotel => (hotel.starRating || 0) >= filters.minStarRating!);
+    if (filters.minGuestRating) items = items.filter(hotel => (hotel.guestRating || hotel.starRating || 0) >= filters.minGuestRating!);
+    if (filters.area) items = items.filter(hotel => normalize(hotel.area || '') === normalize(filters.area) || contains(hotel.area, filters.area));
+    if (filters.neighborhoods?.length) items = items.filter(hotel => filters.neighborhoods!.some(n => contains(`${hotel.area || ''} ${hotel.address || ''}`, n)));
     if (filters.minPrice !== undefined) items = items.filter(hotel => typeof hotel.priceFrom === 'number' && hotel.priceFrom >= filters.minPrice!);
     if (filters.maxPrice !== undefined) items = items.filter(hotel => typeof hotel.priceFrom === 'number' && hotel.priceFrom <= filters.maxPrice!);
-    if (filters.amenities?.length) items = items.filter(hotel => filters.amenities!.every(amenity => (hotel.amenities || []).some((h: string) => normalize(h) === normalize(amenity))));
+    if (filters.amenities?.length) items = items.filter(hotel => filters.amenities!.every(amenity => (hotel.amenities || []).some((h: string) => normalize(h).includes(normalize(amenity)) || normalize(amenity).includes(normalize(h)))));
     if (filters.freeCancellationOnly) items = items.filter(hotel => hotel.cancellationPolicy?.type === 'free');
     if (filters.checkIn && filters.checkOut && filters.sort !== 'distance') items = items.filter(hotel => hotel.availableRooms > 0);
 
@@ -221,9 +225,13 @@ export class HotelStore {
       images: optimizeImages(hotel.images, 600),
       thumbnail: hotel.images?.[0]?.url ? optimizedMediaUrl(hotel.images[0].url, { width: 600 }) : undefined
     }));
-    const propertyTypes = [...new Set((await this.allHotels()).filter(h => h.status === 'active' && !h.deletedAt).map(h => h.propertyType).filter(Boolean))].sort();
-    const cities = [...new Set((await this.allHotels()).filter(h => h.status === 'active' && !h.deletedAt).map(h => h.city).filter(Boolean))].sort();
-    return { hotels: view, total, page: currentPage, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)), propertyTypes, cities };
+    const live = (await this.allHotels()).filter(h => h.status === 'active' && !h.deletedAt);
+    const propertyTypes = [...new Set(live.map(h => h.propertyType).filter(Boolean))].sort();
+    const cities = [...new Set(live.map(h => h.city).filter(Boolean))].sort();
+    const areas = [...new Set(live.map(h => h.area).filter(Boolean))].sort();
+    const prices = items.map(h => h.priceFrom).filter((n): n is number => typeof n === 'number');
+    const priceBounds = { min: prices.length ? Math.min(...prices) : 0, max: prices.length ? Math.max(...prices) : 25000 };
+    return { hotels: view, total, page: currentPage, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)), propertyTypes, cities, areas, priceBounds };
   }
 
   async findHotel(idOrSlug: string, options: { checkIn?: string; checkOut?: string; withRooms?: boolean } = {}) {
