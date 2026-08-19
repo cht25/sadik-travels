@@ -164,7 +164,7 @@ export class HotelStore {
     return min === Infinity ? Math.max(0, fallbackTotal) : Math.max(0, min);
   }
 
-  async listHotels(filters: HotelFilters = {}): Promise<{ hotels: any[]; total: number; page: number; pageSize: number; pageCount: number; propertyTypes: string[]; cities: string[] }> {
+  async listHotels(filters: HotelFilters = {}): Promise<{ hotels: any[]; total: number; page: number; pageSize: number; pageCount: number; propertyTypes: string[]; cities: string[]; areas: string[]; priceBounds: { min: number; max: number } }> {
     let hotels = (await this.allHotels()).filter(hotel => !hotel.deletedAt);
     if (filters.includeArchived) { /* keep all */ }
     else if (filters.status && filters.status !== 'all') hotels = hotels.filter(hotel => hotel.status === filters.status);
