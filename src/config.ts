@@ -56,6 +56,15 @@ export const config = {
   paymentBaseUrl: env('PAYMENT_PROVIDER_BASE_URL'),
   paymentApiKey: env('PAYMENT_PROVIDER_API_KEY'),
   paymentWebhookSecret: env('PAYMENT_WEBHOOK_SECRET'),
+  // Firebase Authentication (Google "Continue with Google" admin sign-in).
+  firebaseProjectId: env('FIREBASE_PROJECT_ID'),
+  firebaseClientEmail: env('FIREBASE_CLIENT_EMAIL'),
+  firebasePrivateKey: env('FIREBASE_PRIVATE_KEY').replace(/\\n/g, '\n'),
+  // Public Firebase web config (safe to expose to the browser).
+  firebaseApiKey: env('FIREBASE_API_KEY'),
+  firebaseAuthDomain: env('FIREBASE_AUTH_DOMAIN'),
+  firebaseAppId: env('FIREBASE_APP_ID'),
+  firebaseMeasurementId: env('FIREBASE_MEASUREMENT_ID'),
   devOtpEcho: isTrue(process.env.DEV_OTP_ECHO, false),
   logLevel: env('LOG_LEVEL', 'info'),
   publicDir: process.cwd()
@@ -66,6 +75,10 @@ export function validateConfig() {
   if (!config.mongoUri) throw new Error('MONGODB_URI is required');
   if ((config.superAdminEmail && !config.superAdminPassword) || (!config.superAdminEmail && config.superAdminPassword)) throw new Error('SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD must be provided together');
   if (config.superAdminPassword && config.superAdminPassword.length < 12) throw new Error('SUPER_ADMIN_PASSWORD must be at least 12 characters');
+  const firebaseServer = [config.firebaseProjectId, config.firebaseClientEmail, config.firebasePrivateKey];
+  if (firebaseServer.some(Boolean) && !firebaseServer.every(Boolean)) throw new Error('FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY must be provided together');
+  const firebaseWeb = [config.firebaseApiKey, config.firebaseAuthDomain];
+  if (firebaseWeb.some(Boolean) && !firebaseWeb.every(Boolean)) throw new Error('FIREBASE_API_KEY and FIREBASE_AUTH_DOMAIN must be provided together');
   if (!Number.isInteger(config.smtpPort) || config.smtpPort < 1 || config.smtpPort > 65535) throw new Error('SMTP_PORT must be a valid TCP port');
   if (!Number.isInteger(config.mediaMaxUploadBytes) || config.mediaMaxUploadBytes < 1_000_000 || config.mediaMaxUploadBytes > 25_000_000) throw new Error('MEDIA_MAX_UPLOAD_BYTES must be between 1MB and 25MB');
   if (!Number.isInteger(config.mediaTimeoutMs) || config.mediaTimeoutMs < 1000 || config.mediaTimeoutMs > 120000) throw new Error('MEDIA_TIMEOUT_MS must be between 1000 and 120000');

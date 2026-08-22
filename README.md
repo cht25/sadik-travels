@@ -10,7 +10,7 @@ The repository contains no seeded tours, customer records, bookings, offers, adm
 - **MongoDB** via Mongoose — the only runtime database
 - Cloudinary for permanent image storage
 - JWT sessions in HttpOnly cookies
-- OTP customer login plus secure admin password/OTP access
+- OTP customer login plus Firebase Google sign-in for the admin console
 - Render web service deployment
 - Vanilla responsive public site and routed admin application
 
@@ -105,7 +105,24 @@ For local OTP testing only:
 DEV_OTP_ECHO=true
 ```
 
-For the first administrator, configure `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` only through `.env` or the Render secret manager. The password is hashed using `scrypt`, never stored in source, and is not overwritten after initialization. Remove bootstrap credentials after the first successful sign-in.
+For the first administrator, configure `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` only through `.env` or the Render secret manager. The password is hashed using `scrypt` and never stored in source. At startup the configured identity is treated as the authoritative super admin: the account is created (or promoted) and its password hash is rebuilt to match the configured secret, which also repairs accounts whose password was previously inserted in the wrong format/collection. Remove the bootstrap credentials after the first successful sign-in.
+
+### Google sign-in (Firebase)
+
+The admin console sign-in is powered by Firebase Authentication ("Continue with Google"). Google handles the password; the browser receives a Firebase ID token, the server verifies it with the Firebase Admin SDK, then maps the Google email to a local admin account and issues the same session cookies as any other login.
+
+Enable it with these environment variables (see `.env.example`):
+
+- `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` — the service-account credentials used to verify ID tokens (server-side, never exposed).
+- `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_APP_ID` (optional), `FIREBASE_MEASUREMENT_ID` (optional) — the public web config exposed to the browser.
+
+In the Firebase console, enable the **Google** provider under Authentication → Sign-in method, and add your deployment origin (`http://localhost:8787` locally, or your Render URL) to Authentication → Settings → Authorized domains.
+
+Authorization rules for the Google account that signs in:
+
+- If the Google email matches `SUPER_ADMIN_EMAIL`, the account is granted `super_admin`.
+- Otherwise, if the email is listed in `ADMIN_IDENTITIES` (comma-separated), the account is granted `admin`.
+- An existing admin account with a matching email is signed in regardless of the whitelist.
 
 ## MongoDB
 
@@ -157,7 +174,8 @@ Use `render.yaml` as a starting point. Configure these values in Render's secret
 - Cloudinary credentials
 - SMS/SMTP credentials
 - Travel provider and payment gateway credentials
-- `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` only for first-run bootstrap
+- `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` for the super-admin bootstrap (also repairs a broken/missing password hash at startup)
+- `FIREBASE_*` credentials for Google admin sign-in
 
 The Render service is stateless: MongoDB stores application data, and Cloudinary stores images. No Render disk is required.
 

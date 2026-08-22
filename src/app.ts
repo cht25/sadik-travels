@@ -8,6 +8,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { z, ZodError } from 'zod';
 import { config } from './config.js';
+import { verifyFirebaseIdToken, firebasePublicConfig, isFirebaseConfigured } from './firebase.js';
 import { AppError, assert } from './errors.js';
 import { createStore, type Store, type TourFilters, type CreateTour, type UpdateTour, type BookingStatus, type Booking, type ContentType, type ContentStatus } from './store.js';
 import { hashOtp, hashPassword, issueSession, normalizeIdentity, setAuthCookies, clearAuthCookies, verifyOtpHash, verifyPassword, verifyToken, REFRESH_COOKIE } from './security.js';
@@ -53,6 +54,7 @@ const isSafeBrandLogo = (value: string) => { if (!value) return true; if (value.
 const settingPatchSchema = z.object({ brand_name: z.string().max(120).optional(), brand_logo_url: z.string().max(500).refine(isSafeBrandLogo, 'Logo URL must be an https URL or a local path').optional(), support_email: z.string().email().or(z.literal('')).optional(), support_phone: z.string().max(40).optional(), feature_flights: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_hotels: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_homes: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_visa: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_tours: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_esim: z.union([z.boolean(), z.enum(['true','false'])]).optional(), payment_provider: z.enum(['sslcommerz', 'bkash']).optional(), payment_webhook_secret: z.string().max(500).optional(), sslcommerz_store_id: z.string().max(160).optional(), sslcommerz_store_password: z.string().max(500).optional(), sslcommerz_api_url: z.string().url().or(z.literal('')).optional(), sslcommerz_validation_url: z.string().url().or(z.literal('')).optional(), sslcommerz_ipn_url: z.string().url().or(z.literal('')).optional(), bkash_base_url: z.string().url().or(z.literal('')).optional(), bkash_app_key: z.string().max(500).optional(), bkash_app_secret: z.string().max(500).optional(), bkash_username: z.string().max(200).optional(), bkash_password: z.string().max(500).optional(), sms_provider: z.enum(['custom_gateway', 'bulksmsbd']).optional(), sms_gateway_url: z.string().url().or(z.literal('')).optional(), sms_gateway_username: z.string().max(200).optional(), sms_gateway_password: z.string().max(500).optional(), sms_api_key: z.string().max(500).optional(), sms_sender_id: z.string().max(120).optional(), smtp_host: z.string().max(200).optional(), smtp_port: z.coerce.number().int().min(1).max(65535).optional(), smtp_user: z.string().max(240).optional(), smtp_password: z.string().max(500).optional(), smtp_from: z.string().email().or(z.literal('')).optional(), travel_provider_url: z.string().url().or(z.literal('')).optional(), travel_provider_api_key: z.string().max(500).optional(), esim_provider_url: z.string().url().or(z.literal('')).optional(), esim_provider_api_key: z.string().max(500).optional() }).strict();
 const roleRequest = z.object({ role: z.enum(['customer', 'manager', 'admin', 'super_admin', 'support', 'content_manager', 'finance']) });
 const passwordLoginRequest = z.object({ identity: z.string().email(), password: z.string().min(8).max(200) });
+const firebaseLoginRequest = z.object({ idToken: z.string().min(20).max(20000) });
 const messageTestRequest = z.object({ destination: z.string().min(3).max(240), subject: z.string().max(160).optional(), message: z.string().min(1).max(4000) });
 const adminBookingPatchRequest = z.object({ status: bookingStatusSchema.optional(), internalNote: z.string().max(4000).optional(), ownerId: z.string().uuid().nullable().optional(), request: z.record(z.unknown()).optional() }).strict();
 const contentInputSchema = z.object({ type: contentTypeSchema, slug: z.string().trim().min(2).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9-]+)*$/), title: z.string().trim().min(2).max(180), subtitle: z.string().max(300).optional(), description: z.string().max(5000).optional(), imageUrl: z.string().max(500).optional(), mediaId: z.string().uuid().optional(), metadata: z.record(z.unknown()).default({}), status: contentStatusSchema.default('draft'), sortOrder: z.number().int().min(-100000).max(100000).default(0) });
@@ -141,7 +143,7 @@ export function buildApp() {
 
   app.use(pinoHttp({ level: config.logLevel, redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'] }));
   app.use(requestContext());
-  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' }, contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'https:'], fontSrc: ["'self'", 'https:', 'data:'], styleSrc: ["'self'", 'https:', "'unsafe-inline'"], scriptSrc: ["'self'"] } } }));
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' }, contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'https:'], fontSrc: ["'self'", 'https:', 'data:'], styleSrc: ["'self'", 'https:', "'unsafe-inline'"], scriptSrc: ["'self'", 'https://www.gstatic.com', 'https://apis.google.com'], connectSrc: ["'self'", 'https://identitytoolkit.googleapis.com', 'https://securetoken.googleapis.com', 'https://*.googleapis.com'], frameSrc: ["'self'", 'https://*.firebaseapp.com', 'https://accounts.google.com', 'https://*.google.com'] } } }));
   const corsMiddleware = cors({ origin: (origin, callback) => { if (!origin || config.corsOrigins.includes(origin)) callback(null, true); else callback(new AppError(403, 'CORS_DENIED', 'Origin is not allowed')); }, credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'] });
   app.use((req, res, next) => { const origin = req.get('origin'); let sameOrigin = !origin; if (origin) { try { sameOrigin = new URL(origin).host === req.get('host'); } catch { /* Invalid origins are handled by CORS. */ } } if (sameOrigin) return next(); return corsMiddleware(req, res, next); });
   app.use(express.json({ limit: '1mb', verify: (req, _res, buffer) => { (req as any).rawBody = Buffer.from(buffer); } }));
@@ -167,6 +169,41 @@ export function buildApp() {
 
   // Authentication: Bangladesh phone OTP first, email OTP as a fallback.
   app.post('/api/v1/auth/password-login', rateLimit('password-login', 10, 300), async (req, res) => { const input = toInput(passwordLoginRequest, req.body); const identity = normalizeIdentity(input.identity).identity; const user = await store.findUserByIdentity(identity); assert(user && ADMIN_ROLES.includes(user.role as typeof ADMIN_ROLES[number]) && user.status === 'active', 401, 'ADMIN_LOGIN_INVALID', 'Invalid admin credentials'); const hash = await store.getPasswordHash(identity); assert(hash && await verifyPassword(input.password, hash), 401, 'ADMIN_LOGIN_INVALID', 'Invalid admin credentials'); const session = await issueSession(store, user, clientMeta(req)); await store.updateLastLogin(user.id, req.ip); setAuthCookies(res, session.accessToken, session.refreshToken); await store.audit('auth.password_login', { ...clientMeta(req), userId: user.id }); res.json({ accessToken: session.accessToken, expiresIn: config.accessTokenTtl, user: userView(user, true) }); });
+
+  // Public (browser-safe) Firebase web config used by the admin console's Google sign-in.
+  app.get('/api/v1/site/firebase-config', (_req, res) => res.json({ configured: isFirebaseConfigured(), firebase: firebasePublicConfig() }));
+
+  // Admin sign-in via Firebase Google authentication (serverless Google OAuth + server-side token verification).
+  app.post('/api/v1/auth/firebase-login', rateLimit('firebase-login', 10, 300), async (req, res) => {
+    const input = toInput(firebaseLoginRequest, req.body);
+    const decoded = await verifyFirebaseIdToken(input.idToken);
+    const rawEmail = String(decoded.email || '').trim();
+    assert(decoded.email_verified === true && rawEmail, 401, 'FIREBASE_EMAIL_NOT_VERIFIED', 'Your Google account email is not verified');
+    const identity = normalizeIdentity(rawEmail).identity;
+    const superEmail = config.superAdminEmail ? normalizeIdentity(config.superAdminEmail).identity : undefined;
+    const targetRole = identity === superEmail ? 'super_admin' : (config.adminIdentities.includes(identity) ? 'admin' : undefined);
+
+    let user = await store.findUserByIdentity(identity);
+    if (user) {
+      const isAdmin = ADMIN_ROLES.includes(user.role as typeof ADMIN_ROLES[number]);
+      if (!isAdmin) {
+        assert(targetRole, 403, 'ADMIN_NOT_WHITELISTED', 'This Google account is not authorized for admin access');
+        user = (await store.setUserRole(user.id, targetRole)) ?? user;
+      } else if (targetRole === 'super_admin' && user.role !== 'super_admin') {
+        user = (await store.setUserRole(user.id, 'super_admin')) ?? user;
+      }
+    } else {
+      assert(targetRole, 403, 'ADMIN_NOT_WHITELISTED', 'This Google account is not authorized for admin access');
+      user = await store.createUser({ identity, channel: 'email', fullName: decoded.name, role: targetRole });
+    }
+    assert(user.status === 'active', 403, 'ACCOUNT_UNAVAILABLE', 'This account is suspended or disabled. Contact a Super Admin.');
+    if (!user.fullName && decoded.name) user = (await store.updateUserProfile(user.id, { fullName: decoded.name })) ?? user;
+    const session = await issueSession(store, user, clientMeta(req));
+    await store.updateLastLogin(user.id, req.ip);
+    setAuthCookies(res, session.accessToken, session.refreshToken);
+    await store.audit('auth.firebase_login', { ...clientMeta(req), userId: user.id, metadata: { firebaseUid: decoded.uid } });
+    res.json({ accessToken: session.accessToken, expiresIn: config.accessTokenTtl, user: userView(user, true) });
+  });
 
   app.post('/api/v1/auth/request-otp', rateLimit('otp', 5, 300), async (req, res) => {
     const input = toInput(identityRequest, req.body);
