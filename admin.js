@@ -86,6 +86,7 @@ async function loginWithGoogle() {
   } catch (error) {
     if (error?.code === 'auth/popup-closed-by-user') { /* user dismissed the popup — stay silent */ }
     else if (error?.code === 'auth/cancelled-popup-request' || error?.code === 'auth/popup-blocked') toast('Please allow pop-ups and try again.', 'error');
+    else if (error?.code === 'ADMIN_NOT_REGISTERED') toast('This Google account is not an existing admin. Use email and password, or ask a Super Admin to create the account.', 'error');
     else if (error?.code === 'ADMIN_NOT_WHITELISTED') toast('This Google account is not authorized for admin access.', 'error');
     else if (error?.code === 'FIREBASE_EMAIL_NOT_VERIFIED') toast('Your Google account email is not verified.', 'error');
     else if (error?.code === 'FIREBASE_NOT_CONFIGURED' || error?.code === 'FIREBASE_SDK_MISSING') toast(error.message || 'Google sign-in is not configured.', 'error');
@@ -98,9 +99,32 @@ async function loginWithGoogle() {
   }
 }
 
+async function loginWithPassword(event) {
+  event?.preventDefault?.();
+  const button = $('#adminPasswordSignIn');
+  const email = $('#adminLoginEmail')?.value.trim();
+  const password = $('#adminLoginPassword')?.value;
+  if (!email || !password) { toast('Enter your email and password.', 'error'); return; }
+  setLoading(button, true, 'Signing in…');
+  try {
+    await $admin('/auth/password-login', { method: 'POST', body: JSON.stringify({ identity: email, password }) });
+    await loadWorkspace(true);
+  } catch (error) {
+    toast(error?.message || 'Invalid admin email or password.', 'error');
+  } finally { setLoading(button, false); }
+}
+
 async function logout() { await $admin('/auth/logout', { method: 'POST' }).catch(() => undefined); state.currentAdmin = null; state.permissions.clear(); location.href = '/admin'; }
 function bindAuth() {
   $('#googleSignInButton')?.addEventListener('click', loginWithGoogle);
+  $('#adminPasswordForm')?.addEventListener('submit', loginWithPassword);
+  $('#adminPasswordToggle')?.addEventListener('click', () => {
+    const field = $('#adminLoginPassword');
+    if (!field) return;
+    const show = field.type === 'password';
+    field.type = show ? 'text' : 'password';
+    $('#adminPasswordToggle').textContent = show ? 'Hide' : 'Show';
+  });
 }
 
 function hasFineNav(value){ return value && state.finePermissions && state.finePermissions.has(String(value).replace(/_/g,'.')); }

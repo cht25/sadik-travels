@@ -147,7 +147,7 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
       minPrice: query.minPrice ? Number(query.minPrice) : undefined, maxPrice: query.maxPrice ? Number(query.maxPrice) : undefined,
       featured: query.featured === 'true' ? true : undefined, tags: query.tags ? query.tags.split(',').filter(Boolean) : undefined,
       dataAmount: query.dataAmount || undefined, validityDays: query.validityDays ? Number(query.validityDays) : undefined,
-      network: query.network || undefined, region: query.region || undefined,
+      network: query.network || undefined, region: query.region || undefined, airline: query.airline || undefined,
       sort: (query.sort as any) || 'recommended', page: Number(query.page) || 1, pageSize: Number(query.pageSize) || 12
     });
     res.setHeader('Cache-Control', 'no-store');

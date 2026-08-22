@@ -548,13 +548,6 @@
 .agents-carousel-track:active{cursor:grabbing}
 
 /* ===== Booking overhaul: filters, mobile sheet, tour PDP ===== */
-.hotel-results-layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:20px;align-items:start}
-@media (max-width:900px){.hotel-results-layout{grid-template-columns:1fr}.hotel-filters{display:none}.hotel-filters-toggle{display:inline-flex!important}}
-.hotel-filters-toggle{display:none}
-.hotel-results-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
-@media (max-width:1100px){.hotel-results-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:700px){.hotel-results-grid{grid-template-columns:1fr}}
-.hotel-card{display:flex;flex-direction:column;min-width:0;background:#fff;border:1px solid #e4e8ee;border-radius:16px;overflow:hidden}
 .hotel-card-name,.hotel-card-loc{overflow-wrap:anywhere;word-break:break-word}
 .filter-price{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .range-wrap{display:grid;gap:8px;margin-top:8px}
@@ -575,3 +568,46 @@
 .wizard-steps span.on{background:#1438b8;color:#fff}
 .checkout-pay .pay-option{display:flex;gap:10px;padding:10px;border:1px solid #e4e8ee;border-radius:12px;margin-bottom:8px}
 @media (max-width:700px){.checkout-layout{display:block}.sticky-summary{position:static}}
+
+/* Amy-style fare board + left filters */
+.amy-board{display:grid;grid-template-columns:250px minmax(0,1fr);gap:20px;align-items:start}
+.amy-filters{position:sticky;top:calc(var(--shell-header-h,64px) + 12px)}
+.amy-filter-card{background:#fff;border:1px solid var(--sf-line);border-radius:12px;padding:16px;box-shadow:var(--sf-shadow-1);display:flex;flex-direction:column;gap:12px}
+.amy-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.amy-sort{display:inline-flex;align-items:center;gap:8px;font-size:.8rem;color:var(--sf-muted)}
+.amy-sort select{height:38px;border:1px solid var(--sf-line);border-radius:8px;padding:0 10px;background:#fff}
+.amy-filter-toggle{display:none}
+.amy-airline-strip{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 14px;scrollbar-width:none}
+.amy-air-chip{flex:0 0 auto;min-width:92px;border:1px solid var(--sf-line);border-radius:12px;background:#fff;padding:8px 10px;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:.7rem}
+.amy-air-chip img{width:36px;height:36px;object-fit:contain}
+.amy-air-chip.is-active,.amy-air-chip:hover{border-color:var(--sf-brand);color:var(--sf-brand)}
+.amy-stats{display:flex;flex-wrap:wrap;gap:10px 16px;font-size:.78rem;color:#3b4a63;margin-bottom:12px}
+.amy-count{margin-bottom:10px;font-size:.86rem}
+.amy-count small{display:block;color:var(--sf-muted);font-size:.7rem}
+.amy-fare-list{display:flex;flex-direction:column;gap:14px}
+.amy-fare{background:#fff;border:1px solid var(--sf-line);border-radius:14px;padding:14px 16px;box-shadow:var(--sf-shadow-1)}
+.amy-ticket-tag{display:inline-block;background:#1438b8;color:#fff;font-size:.65rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:4px 8px;border-radius:6px}
+.amy-leg{display:grid;grid-template-columns:90px minmax(140px,.8fr) minmax(0,1.6fr);gap:12px;align-items:center;padding:10px 0}
+.amy-leg-label{font-size:.72rem;font-weight:800;color:#1438b8;text-transform:uppercase}
+.amy-leg-air{display:flex;align-items:center;gap:8px}
+.amy-leg-air img{width:34px;height:34px;object-fit:contain}
+.amy-leg-air strong{display:block;font-size:.8rem}
+.amy-leg-air small{color:var(--sf-muted);font-size:.68rem}
+.amy-leg-times{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;text-align:center}
+.amy-leg-times strong{font-size:1.05rem}
+.amy-leg-times span,.amy-leg-times small{display:block;color:var(--sf-muted);font-size:.68rem}
+.amy-leg-mid i{display:block;height:1px;background:#d7deea;margin:6px 0}
+.amy-hr{border:0;border-top:1px dashed var(--sf-line);margin:4px 0}
+.amy-fare-foot{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;border-top:1px solid #f0f3f8;padding-top:10px}
+.amy-fare-meta{display:flex;flex-wrap:wrap;gap:8px 12px;font-size:.72rem;color:var(--sf-muted)}
+.amy-fare-price{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.amy-fare-price strong{font-size:1.25rem;color:#1438b8}
+@media(max-width:1023.98px){
+  .amy-board{grid-template-columns:1fr}
+  .amy-filters{position:static;display:none}
+  .amy-filters.is-open{display:block}
+  .amy-filter-toggle{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--sf-line);background:#fff;border-radius:8px;padding:8px 12px;font-size:.78rem;font-weight:700}
+  .amy-leg{grid-template-columns:1fr}
+  .amy-leg-times{grid-template-columns:1fr 1fr;text-align:left}
+  .amy-leg-mid{grid-column:1/-1}
+}

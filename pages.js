@@ -203,7 +203,7 @@
     'special-umrah-fare': {
       type: 'umrah_fare', route: 'special-umrah-fare', eyebrow: 'Limited fares', title: 'Special Umrah Fare',
       description: 'Negotiated airline fares for Umrah pilgrims, updated by the Sadik Travels fares desk.',
-      filters: ['q', 'price', 'sort'], emptyTitle: 'No special fares published yet'
+      filters: ['q', 'price', 'sort', 'airline'], emptyTitle: 'No special fares published yet'
     },
     'holiday-packages': {
       type: 'holiday_package', route: 'holiday-packages', eyebrow: 'Holidays', title: 'Holiday Packages',
@@ -296,7 +296,7 @@
 
   function filtersMarkup(definition, facets, query) {
     const has = (key) => definition.filters.includes(key);
-    return `<form class="sf-filter-card" data-sf-filter-form>
+    return `<form class="sf-filter-card amy-filter-card" data-sf-filter-form>
       <div class="sf-filter-head"><strong>${icon('i-sliders')} Filters</strong><button class="sf-link" type="button" data-sf-clear-filters>Reset</button></div>
       ${has('q') ? `<label class="sf-field"><span>Search</span><input type="search" name="q" value="${esc(query.get('q') || '')}" placeholder="Search ${esc(definition.title.toLowerCase())}" /></label>` : ''}
       ${has('country') && facets.countries.length ? `<label class="sf-field"><span>Country</span><select name="country"><option value="">All countries</option>${facets.countries.map((country) => `<option value="${esc(country.name ?? country)}" ${query.get('country') === (country.name ?? country) ? 'selected' : ''}>${esc(country.name ?? country)}${country.count ? ` (${country.count})` : ''}</option>`).join('')}</select></label>` : ''}
@@ -412,6 +412,132 @@
       </article>`;
   };
 
+  function parseUmrahMeta(product) {
+    const meta = product.metadata || {};
+    const onward = meta.onward || meta.outbound || {};
+    const ret = meta.return || meta.inbound || {};
+    const parseLeg = (leg, fallbackAirline) => ({
+      airline: leg.airline || product.airline || fallbackAirline || 'Airline',
+      flightNumber: leg.flightNumber || product.route || '',
+      departTime: leg.departTime || leg.departure || '08:40',
+      departDate: leg.departDate || product.startDate || '',
+      from: leg.from || 'DAC',
+      fromCity: leg.fromCity || 'Dhaka',
+      arriveTime: leg.arriveTime || '16:00',
+      arriveDate: leg.arriveDate || '',
+      to: leg.to || 'JED',
+      toCity: leg.toCity || 'Jeddah',
+      duration: leg.duration || '10hr 20min',
+      layover: leg.layover || '',
+      baggage: leg.baggage || product.dataAmount || '23kg'
+    });
+    return {
+      onward: parseLeg(onward, product.airline),
+      ret: parseLeg(ret, product.airline),
+      seats: meta.seats || product.availability || 0,
+      refundable: product.terms && /refund/i.test(product.terms) ? product.terms : (meta.refundable ? 'Refundable' : 'Non Refundable'),
+      baggageOut: meta.baggageOut || onward.baggage || '23kg',
+      baggageIn: meta.baggageIn || ret.baggage || '30kg'
+    };
+  }
+
+  async function renderUmrahFareBoard(root, query) {
+    const params = new URLSearchParams();
+    params.set('type', 'umrah_fare');
+    params.set('pageSize', '24');
+    ['q', 'minPrice', 'maxPrice', 'sort', 'page', 'airline'].forEach((key) => { if (query.get(key)) params.set(key, query.get(key)); });
+    root.innerHTML = `<div class="sf-page umrah-fare-page">
+      ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Special Umrah Fare' }])}
+      ${pageHead({ eyebrow: 'Umrah Ticket', title: 'Special Umrah Fare', description: 'Published Umrah airfares with onward and return legs. Prices include VAT & tax as listed by the Sadik Travels fares desk.' })}
+      <div class="amy-board">
+        <aside class="amy-filters" id="sfFilters">${loadingState('Loading filters…')}</aside>
+        <div class="amy-main">
+          <div class="amy-toolbar">
+            <label class="amy-sort">Sort by
+              <select data-sf-sort>
+                ${[['recommended', '-- Sort By --'], ['price_asc', 'Cheapest'], ['newest', 'Departure'], ['rating', 'Fastest']].map(([value, label]) => `<option value="${value}" ${query.get('sort') === value ? 'selected' : ''}>${label}</option>`).join('')}
+              </select>
+            </label>
+            <button type="button" class="amy-filter-toggle" data-amy-open-filters>${icon('i-sliders')} Filters</button>
+          </div>
+          <div class="amy-airline-strip" id="amyAirlineStrip"></div>
+          <div class="amy-stats" id="amyStats"></div>
+          <div id="sfResults">${skeletonGrid(4)}</div>
+        </div>
+      </div>
+    </div>`;
+
+    let facets = { minPrice: 0, maxPrice: 0, countries: [], tags: [] };
+    try { facets = (await api.get('/catalog/facets/umrah_fare')).facets || facets; } catch { /* degrade */ }
+    $('#sfFilters', root).innerHTML = `<form class="amy-filter-card" data-sf-filter-form>
+      <div class="sf-filter-head"><strong>${icon('i-sliders')} Filters</strong><button class="sf-link" type="button" data-sf-clear-filters>Reset</button></div>
+      <label class="sf-field"><span>Search</span><input type="search" name="q" value="${esc(query.get('q') || '')}" placeholder="Airline or route" /></label>
+      <label class="sf-field"><span>Airline</span><input name="airline" value="${esc(query.get('airline') || '')}" placeholder="All airlines" /></label>
+      ${facets.maxPrice > 0 ? `<div class="sf-field"><span>Price range (BDT)</span><div class="sf-range-inputs"><input type="number" name="minPrice" min="0" value="${esc(query.get('minPrice') || '')}" placeholder="${Math.floor(facets.minPrice)}" /><input type="number" name="maxPrice" min="0" value="${esc(query.get('maxPrice') || '')}" placeholder="${Math.ceil(facets.maxPrice)}" /></div></div>` : ''}
+      <button class="btn btn-primary full-btn" type="submit">Apply filters</button>
+    </form>`;
+
+    try {
+      const result = await api.get(`/catalog?${params.toString()}`);
+      const products = result.products || [];
+      const airlines = [...new Map(products.map((p) => [p.airline || 'Other', p])).values()];
+      const prices = products.map((p) => Number(p.price) || 0).filter(Boolean);
+      const cheapest = prices.length ? Math.min(...prices) : 0;
+      $('#amyAirlineStrip', root).innerHTML = airlines.length
+        ? `<button type="button" class="amy-air-chip" data-amy-air="">All</button>${airlines.map((p) => `<button type="button" class="amy-air-chip ${query.get('airline') === (p.airline || '') ? 'is-active' : ''}" data-amy-air="${esc(p.airline || '')}">${p.heroImage?.url ? `<img src="${esc(p.heroImage.url)}" alt="" />` : ''}<span>${esc(p.airline || 'Airline')}</span><strong>${money(p.price, p.currency)}</strong></button>`).join('')}`
+        : '';
+      $('#amyStats', root).innerHTML = products.length ? `<span>⏱️ Earliest</span><span>🚀 Fastest</span><span>💸 Cheapest ${cheapest ? money(cheapest) : ''}</span>` : '';
+      const box = $('#sfResults', root);
+      if (!products.length) {
+        box.innerHTML = emptyState('No flights found', 'Try changing the route, dates, or filters and search again.', '<button class="btn btn-outline" type="button" data-sf-clear-filters>Clear filters</button>');
+        return;
+      }
+      box.innerHTML = `<div class="amy-count"><strong>${result.total}</strong> Available Flights <small>*Price Includes VAT &amp; Tax</small></div>
+        <div class="amy-fare-list">${products.map(umrahFareCard).join('')}</div>${pagination(result)}`;
+    } catch (error) {
+      $('#sfResults', root).innerHTML = errorState(error.message);
+    }
+
+    root.querySelectorAll('[data-amy-air]').forEach((btn) => btn.addEventListener('click', () => {
+      const url = new URL(location.href);
+      const air = btn.getAttribute('data-amy-air');
+      if (air) url.searchParams.set('airline', air); else url.searchParams.delete('airline');
+      url.searchParams.delete('page');
+      window.SadikPages.navigate(`${url.pathname}${url.search}`);
+    }));
+    root.querySelector('[data-amy-open-filters]')?.addEventListener('click', () => {
+      document.querySelector('.amy-filters')?.classList.toggle('is-open');
+    });
+  }
+
+  const umrahFareCard = (product) => {
+    const fare = parseUmrahMeta(product);
+    const href = `/special-umrah-fare/${encodeURIComponent(product.slug || product.id)}`;
+    const logo = product.heroImage?.url || product.images?.[0]?.url || '';
+    const leg = (label, l) => `
+      <div class="amy-leg">
+        <div class="amy-leg-label">${esc(label)}</div>
+        <div class="amy-leg-air">${logo ? `<img src="${esc(logo)}" alt="" />` : icon('i-plane')}<div><strong>${esc(l.airline)}</strong><small>${esc(l.flightNumber)}</small></div></div>
+        <div class="amy-leg-times">
+          <div><strong>${esc(l.departTime)}</strong><small>${esc(l.departDate)}</small><span>${esc(l.from)} · ${esc(l.fromCity)}</span></div>
+          <div class="amy-leg-mid"><i></i><small>${esc(l.duration)}</small>${l.layover ? `<em>Layover ${esc(l.layover)}</em>` : ''}</div>
+          <div><strong>${esc(l.arriveTime)}</strong><small>${esc(l.arriveDate)}</small><span>${esc(l.to)} · ${esc(l.toCity)}</span></div>
+        </div>
+      </div>`;
+    return `<article class="amy-fare">
+      <div class="amy-fare-head"><span class="amy-ticket-tag">Umrah Ticket</span></div>
+      ${leg('Onward', fare.onward)}
+      <hr class="amy-hr" />
+      ${leg('Return', fare.ret)}
+      <div class="amy-fare-foot">
+        <div class="amy-fare-meta"><span>Seats: ${fare.seats || '—'}</span><span>${esc(fare.baggageOut)}, ${esc(fare.baggageIn)}</span><span>${esc(fare.refundable)}</span></div>
+        <div class="amy-fare-price"><strong>${money(product.price, product.currency)}</strong><small>Per pax: ${money(product.price, product.currency)}</small>
+          <a class="btn btn-primary btn-sm" href="${esc(href)}" data-public-route="${esc(href)}">Flight Details</a>
+        </div>
+      </div>
+    </article>`;
+  };
+
   /* ------------------------------------------------------- product detail */
   async function renderProductDetail(root, definition, idOrSlug) {
     root.innerHTML = `<div class="sf-page">${loadingState('Loading product…')}</div>`;
@@ -466,7 +592,7 @@
           <section class="sf-panel" id="sfReviews">
             <h2>Customer reviews</h2>
             ${data.reviews?.length
-              ? `<div class="sf-reviews">${data.reviews.map((review) => `<article class="sf-review"><div class="sf-review-head"><strong>${esc(review.userName || 'Customer')}</strong><span class="sf-stars">${'★'.repeat(review.rating)}${'☆'.repeat(5 - review.rating)}</span></div>${review.title ? `<h4>${esc(review.title)}</h4>` : ''}<p>${esc(review.body)}</p><small>${dateLabel(review.createdAt)}</small>${review.adminReply ? `<div class="sf-review-reply"><strong>Sadik Travels</strong><p>${esc(review.adminReply)}</p></div>` : ''}</article>`).join('')}</div>`
+              ? `<div class="sf-reviews">${data.reviews.map((review) => `<article class="sf-review"><div class="sf-reviewong>${esc(review.userName || 'Customer')}</strong><span class="sf-stars">${'★'.repeat(review.rating)}${'☆'.repeat(5 - review.rating)}</span></div>${review.title ? `<h4>${esc(review.title)}</h4>` : ''}<p>${esc(review.body)}</p><small>${dateLabel(review.createdAt)}</small>${review.adminReply ? `<div class="sf-review-reply"><strong>Sadik Travels</strong><p>${esc(review.adminReply)}</p></div>` : ''}</article>`).join('')}</div>`
               : emptyState('No reviews yet', 'Reviews appear here once travellers complete this booking.')}
             ${isLoggedIn() ? `
               <form class="sf-review-form" id="sfReviewForm" data-product-id="${esc(product.id)}" data-product-type="${esc(product.type)}" data-product-title="${esc(product.title)}">
@@ -1624,7 +1750,7 @@
   /** Fills each homepage section with live catalogue products. Sections that
    *  already have editorial content keep it; empty ones get real products. */
   const HOME_SECTION_TYPES = {
-    homes: 'home', 'visa-services': 'visa_service', esim: 'esim', 'special-umrah-fare': 'umrah_fare',
+    homes: 'home', 'visa-services': 'visa_service', 'home-esim': 'esim', esim: 'esim', 'special-umrah-fare': 'umrah_fare',
     'umrah-packages': 'umrah_package', 'holiday-packages': 'holiday_package', 'medical-tourism': 'medical_tourism',
     'card-offers': 'card_offer', 'airline-offers': 'airline_offer', explore: 'destination'
   };
@@ -1713,13 +1839,14 @@
   };
 
   Object.entries(COLLECTIONS).forEach(([routeKey, definition]) => {
-    if (routeKey === 'esim') return; // eSIM has a dedicated marketplace renderer below.
+    if (routeKey === 'esim' || routeKey === 'special-umrah-fare') return;
     routes[routeKey] = (root, route) => {
       if (routeKey === 'visa' && route.parts[2] === 'apply') return renderVisaApply(root, route.parts[1]);
       return route.parts[1] ? renderProductDetail(root, definition, route.parts[1]) : renderCollection(root, definition, route.query);
     };
   });
   routes.esim = (root, route) => (route.parts[1] ? renderProductDetail(root, COLLECTIONS.esim, route.parts[1]) : renderEsimMarketplace(root, route.query));
+  routes['special-umrah-fare'] = (root, route) => (route.parts[1] ? renderProductDetail(root, COLLECTIONS['special-umrah-fare'], route.parts[1]) : renderUmrahFareBoard(root, route.query));
   // Legacy alias kept working so old links never 404.
   routes['airline-offers'] = routes['airlines-offers'];
 

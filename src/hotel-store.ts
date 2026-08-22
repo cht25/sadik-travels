@@ -377,7 +377,10 @@ export class HotelStore {
     hotels.sort((a, b) => (a.featured === b.featured ? a.sortOrder - b.sortOrder : a.featured ? -1 : 1) || a.name.localeCompare(b.name));
     const rooms = await this.allRooms();
     const total = hotels.length; const currentPage = pageN(filters.page); const pageSize = sizeN(filters.pageSize, 20);
-    const slice = hotels.slice((currentPage - 1) * pageSize, currentPage * pageSize).map(hotel => ({ ...hotel, roomCount: rooms.filter(r => r.hotelId === hotel.id && !r.deletedAt).length, images: optimizeImages(hotel.images, 200) }));
+    const slice = hotels.slice((currentPage - 1) * pageSize, currentPage * pageSize).map(hotel => {
+      const hotelRooms = rooms.filter(r => r.hotelId === hotel.id && !r.deletedAt && r.status === 'active');
+      return { ...hotel, roomCount: hotelRooms.length, priceFrom: this.priceFromHotel(hotelRooms), images: optimizeImages(hotel.images, 200) };
+    });
     return { hotels: slice, total, page: currentPage, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
   }
   async adminCreateHotel(input: Partial<Hotel>, actor: string) { const time = now(); const hotel: Hotel = { id: randomUUID(), slug: input.slug!, name: input.name!, shortDescription: input.shortDescription, description: input.description, propertyType: input.propertyType || 'Hotel', address: input.address, city: input.city!, country: input.country || 'Bangladesh', area: input.area, latitude: input.latitude, longitude: input.longitude, phone: input.phone, email: input.email, website: input.website, starRating: input.starRating ?? 3, guestRating: input.guestRating, reviewCount: 0, amenities: input.amenities || [], facilities: input.facilities || [], images: input.images || [], checkInTime: input.checkInTime, checkOutTime: input.checkOutTime, cancellationPolicy: input.cancellationPolicy, status: input.status || 'draft', featured: input.featured || false, sortOrder: input.sortOrder || 0, createdBy: actor, updatedAt: time, createdAt: time } as Hotel; return this.saveHotel(hotel); }

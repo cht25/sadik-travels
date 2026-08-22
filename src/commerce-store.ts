@@ -55,7 +55,7 @@ export type CatalogProduct = {
 export type CatalogFilters = {
   type?: CatalogType | 'all'; status?: CatalogStatus | 'all'; q?: string; country?: string; destination?: string;
   minPrice?: number; maxPrice?: number; featured?: boolean; tags?: string[];
-  dataAmount?: string; validityDays?: number; network?: string; region?: string;
+  dataAmount?: string; validityDays?: number; network?: string; region?: string; airline?: string;
   sort?: 'recommended' | 'price_asc' | 'price_desc' | 'rating' | 'newest' | 'popular';
   page?: number; pageSize?: number;
 };
@@ -334,6 +334,7 @@ export function createCommerceStore() {
     if (filters.validityDays !== undefined) query.validityDays = filters.validityDays;
     if (filters.network) query.network = new RegExp(escapeRegex(filters.network), 'i');
     if (filters.region) query.region = new RegExp(escapeRegex(filters.region), 'i');
+    if (filters.airline) query.airline = new RegExp(escapeRegex(filters.airline), 'i');
     if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
       query.price = {
         ...(filters.minPrice !== undefined ? { $gte: filters.minPrice } : {}),
@@ -633,7 +634,8 @@ export function createCommerceStore() {
     const updateBase = { fulfillment: { ...existing, status: 'processing' as FulfillmentStatus, updatedAt: now() } };
     await OrderModel.updateOne({ id: orderId }, { $set: { ...updateBase, updatedAt: now() } });
 
-    if (url && apiKey) {
+    // Provider API fulfilment is disabled: eSIMs and packages are uploaded and dispatched from the admin panel.
+    if (false && url && apiKey) {
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 15_000);

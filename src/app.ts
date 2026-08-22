@@ -181,20 +181,11 @@ export function buildApp() {
     assert(decoded.email_verified === true && rawEmail, 401, 'FIREBASE_EMAIL_NOT_VERIFIED', 'Your Google account email is not verified');
     const identity = normalizeIdentity(rawEmail).identity;
     const superEmail = config.superAdminEmail ? normalizeIdentity(config.superAdminEmail).identity : undefined;
-    const targetRole = identity === superEmail ? 'super_admin' : (config.adminIdentities.includes(identity) ? 'admin' : undefined);
-
     let user = await store.findUserByIdentity(identity);
-    if (user) {
-      const isAdmin = ADMIN_ROLES.includes(user.role as typeof ADMIN_ROLES[number]);
-      if (!isAdmin) {
-        assert(targetRole, 403, 'ADMIN_NOT_WHITELISTED', 'This Google account is not authorized for admin access');
-        user = (await store.setUserRole(user.id, targetRole)) ?? user;
-      } else if (targetRole === 'super_admin' && user.role !== 'super_admin') {
-        user = (await store.setUserRole(user.id, 'super_admin')) ?? user;
-      }
-    } else {
-      assert(targetRole, 403, 'ADMIN_NOT_WHITELISTED', 'This Google account is not authorized for admin access');
-      user = await store.createUser({ identity, channel: 'email', fullName: decoded.name, role: targetRole });
+    assert(user, 403, 'ADMIN_NOT_REGISTERED', 'This Google account is not an existing admin. Sign in with email and password, or ask a Super Admin to create your account.');
+    assert(ADMIN_ROLES.includes(user.role as typeof ADMIN_ROLES[number]), 403, 'ADMIN_NOT_WHITELISTED', 'This Google account is not authorized for admin access');
+    if (superEmail && identity === superEmail && user.role !== 'super_admin') {
+      user = (await store.setUserRole(user.id, 'super_admin')) ?? user;
     }
     assert(user.status === 'active', 403, 'ACCOUNT_UNAVAILABLE', 'This account is suspended or disabled. Contact a Super Admin.');
     if (!user.fullName && decoded.name) user = (await store.updateUserProfile(user.id, { fullName: decoded.name })) ?? user;
@@ -548,10 +539,7 @@ export function buildApp() {
           // Automatic fulfilment: request eSIM/activation payloads from the
           // configured provider, or leave the order FULFILLMENT_PENDING for the
           // operations desk. Never fabricates a delivery.
-          await commerce.attemptFulfillment(order.id, {
-            url: await store.getSetting('esim_provider_url'),
-            apiKey: await store.getSetting('esim_provider_api_key')
-          }).catch(() => undefined);
+          await commerce.attemptFulfillment(order.id).catch(() => undefined);
           await notifyUser(order.userId, 'Booking confirmed', `Booking ${order.orderNumber} is confirmed. Check your account for the receipt and fulfilment updates.`);
           await trackEvent({ event: 'booking_confirmed', userId: order.userId, path: '/payment/webhook', metadata: { orderId: order.id, orderNumber: order.orderNumber } });
         }
