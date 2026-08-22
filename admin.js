@@ -57,17 +57,50 @@ function initAuthScene() {
   } catch { /* Decorative WebGL may be unavailable; authentication remains functional. */ }
 }
 function stopCountdown(kind = 'admin') { const key = kind === 'admin' ? 'adminOtpTimer' : 'otpTimer'; if (state[key]) clearInterval(state[key]); state[key] = null; }
-function startCountdown(kind, seconds) { stopCountdown(kind); const button = kind === 'admin' ? $('#adminSendOtp') : null; const note = kind === 'admin' ? $('#adminOtpCountdown') : null; let remaining = seconds; const update = () => { if (note) note.textContent = remaining > 0 ? `You can request another code in ${remaining}s.` : 'You can request a new code.'; if (button) { button.disabled = remaining > 0; button.textContent = remaining > 0 ? `Code sent · ${remaining}s` : 'Resend verification code'; } if (remaining <= 0) stopCountdown(kind); remaining -= 1; }; update(); state[kind === 'admin' ? 'adminOtpTimer' : 'otpTimer'] = setInterval(update, 1000); }
+let firebaseAuthInstance = null;
 
-async function loginWithPassword(event) { event.preventDefault(); const button = event.submitter || $('#adminPasswordForm button[type="submit"]'); setLoading(button, true, 'Authenticating…'); try { await $admin('/auth/password-login', { method: 'POST', body: JSON.stringify({ identity: $('#adminPasswordIdentity').value.trim(), password: $('#adminPassword').value }) }); await loadWorkspace(true); } catch (error) { toast(error.code === 'ADMIN_LOGIN_INVALID' ? 'Invalid admin credentials. Check the account or run the secure bootstrap.' : (error.message || 'Unable to sign in.'), 'error'); } finally { setLoading(button, false); } }
-async function requestAdminOtp() { const identity = $('#adminIdentity').value.trim(); if (!identity) { toast('Enter an admin phone number or email.', 'error'); return; } const button = $('#adminSendOtp'); setLoading(button, true, 'Sending code…'); try { const response = await $admin('/auth/request-otp', { method: 'POST', body: JSON.stringify({ identity, adminOnly: true }) }); state.otpChallengeId = response.challengeId; $('#adminOtpStep').hidden = false; $('#adminAuthMessage').textContent = response.devCode ? `Development code: ${response.devCode}` : `Code sent to ${response.maskedDestination}.`; $('#adminOtp').focus(); } catch (error) { toast(error.code === 'ADMIN_NOT_WHITELISTED' ? 'This identity is not authorized for admin OTP login.' : error.message || 'Unable to send verification code.', 'error'); } finally { setLoading(button, false); if (state.otpChallengeId) startCountdown('admin', 60); } }
-async function verifyAdminOtp(event) { event.preventDefault(); if (!state.otpChallengeId) { toast('Request a verification code first.', 'error'); return; } const button = event.submitter || $('#adminLoginForm button[type="submit"]'); setLoading(button, true, 'Verifying…'); try { const response = await $admin('/auth/verify-otp', { method: 'POST', body: JSON.stringify({ challengeId: state.otpChallengeId, code: $('#adminOtp').value.trim() }) }); if (!ALL_ADMIN_ROLES.includes(response.user?.role)) { await $admin('/auth/logout', { method: 'POST' }).catch(() => undefined); throw new Error('This account does not have an admin role.'); } stopCountdown('admin'); await loadWorkspace(true); } catch (error) { toast(error.message || 'Verification failed.', 'error'); } finally { setLoading(button, false); } }
+async function ensureFirebaseAuth() {
+  if (firebaseAuthInstance) return firebaseAuthInstance;
+  const config = await $admin('/site/firebase-config', {}, false);
+  if (!config || !config.configured || !config.firebase || !config.firebase.apiKey) throw Object.assign(new Error('Google sign-in is not configured for this deployment.'), { code: 'FIREBASE_NOT_CONFIGURED' });
+  if (!window.firebase || !window.firebase.auth) throw Object.assign(new Error('Google sign-in libraries failed to load.'), { code: 'FIREBASE_SDK_MISSING' });
+  const app = window.firebase.apps.length ? window.firebase.apps[0] : window.firebase.initializeApp(config.firebase);
+  firebaseAuthInstance = window.firebase.auth(app);
+  try { firebaseAuthInstance.useDeviceLanguage(); } catch { /* best effort */ }
+  return firebaseAuthInstance;
+}
+
+async function loginWithGoogle() {
+  const button = $('#googleSignInButton');
+  const label = button?.querySelector('span');
+  if (button) { button.disabled = true; button.classList.add('is-loading'); }
+  if (label) label.textContent = 'Signing in…';
+  try {
+    const auth = await ensureFirebaseAuth();
+    const provider = new window.firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const result = await auth.signInWithPopup(provider);
+    const idToken = await result.user.getIdToken();
+    await $admin('/auth/firebase-login', { method: 'POST', body: JSON.stringify({ idToken }) });
+    await loadWorkspace(true);
+  } catch (error) {
+    if (error?.code === 'auth/popup-closed-by-user') { /* user dismissed the popup — stay silent */ }
+    else if (error?.code === 'auth/cancelled-popup-request' || error?.code === 'auth/popup-blocked') toast('Please allow pop-ups and try again.', 'error');
+    else if (error?.code === 'ADMIN_NOT_WHITELISTED') toast('This Google account is not authorized for admin access.', 'error');
+    else if (error?.code === 'FIREBASE_EMAIL_NOT_VERIFIED') toast('Your Google account email is not verified.', 'error');
+    else if (error?.code === 'FIREBASE_NOT_CONFIGURED' || error?.code === 'FIREBASE_SDK_MISSING') toast(error.message || 'Google sign-in is not configured.', 'error');
+    else if (error?.code === 'ACCOUNT_UNAVAILABLE') toast(error.message || 'This account is suspended or disabled.', 'error');
+    else if (error?.code && String(error.code).startsWith('auth/')) toast('Google sign-in failed. Please try again.', 'error');
+    else toast(error?.message || 'Unable to sign in with Google.', 'error');
+  } finally {
+    if (button) { button.disabled = false; button.classList.remove('is-loading'); }
+    if (label) label.textContent = 'Continue with Google';
+  }
+}
+
 async function logout() { await $admin('/auth/logout', { method: 'POST' }).catch(() => undefined); state.currentAdmin = null; state.permissions.clear(); location.href = '/admin'; }
 function bindAuth() {
-  $('#adminPasswordForm')?.addEventListener('submit', loginWithPassword); $('#adminSendOtp')?.addEventListener('click', requestAdminOtp); $('#adminLoginForm')?.addEventListener('submit', verifyAdminOtp);
-  $('#showOtpLogin')?.addEventListener('click', () => { $('#passwordLoginStep').hidden = true; $('#passwordLoginStep').classList.remove('is-active'); $('#otpLoginStep').hidden = false; requestAnimationFrame(() => $('#otpLoginStep').classList.add('is-active')); $('#adminIdentity').focus(); });
-  $('#backToPassword')?.addEventListener('click', () => { stopCountdown('admin'); state.otpChallengeId = ''; $('#otpLoginStep').hidden = true; $('#otpLoginStep').classList.remove('is-active'); $('#passwordLoginStep').hidden = false; requestAnimationFrame(() => $('#passwordLoginStep').classList.add('is-active')); });
-  $$('[data-password-toggle]').forEach(button => button.addEventListener('click', () => { const input = document.getElementById(button.dataset.passwordToggle); if (!input) return; const showing = input.type === 'text'; input.type = showing ? 'password' : 'text'; button.textContent = showing ? 'Show' : 'Hide'; button.setAttribute('aria-label', showing ? 'Show password' : 'Hide password'); }));
+  $('#googleSignInButton')?.addEventListener('click', loginWithGoogle);
 }
 
 function hasFineNav(value){ return value && state.finePermissions && state.finePermissions.has(String(value).replace(/_/g,'.')); }
