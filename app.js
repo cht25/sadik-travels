@@ -1089,11 +1089,11 @@ function bindPublicRouter(){document.addEventListener('click',event=>{const link
 function publicNavigate(route,replace=false){const href=publicHref(route);if(href===`${location.pathname}${location.search}`){void renderPublicRoute();return;}if(replace)history.replaceState({},'',href);else history.pushState({},'',href);if(window.innerWidth<=767)closeSidebar();void renderPublicRoute();}
 
 const HOME_SECTIONS = [
-  { id: 'hotels', eyebrow: 'Stays', title: 'Hotels', subtitle: "Find memorable stays across Bangladesh and abroad. Browse curated hotels or submit a live search to check real-time availability.", type: 'hotel', icon: 'i-hotel', limit: 4, viewAll: '/hotels' },
+  { id: 'home-hotels', eyebrow: 'Stays', title: 'Hotels', subtitle: "Find memorable stays across Bangladesh and abroad. Browse curated hotels or submit a live search to check real-time availability.", type: 'hotel', icon: 'i-hotel', limit: 4, viewAll: '/hotels' },
   { id: 'homes', eyebrow: 'Properties', title: 'Homes', subtitle: 'Smart rent and buy property solutions from Sadik Homes for every traveller and family.', type: 'home', icon: 'i-home', limit: 4, viewAll: '/homes' },
   { id: 'visa-services', eyebrow: 'Documents', title: 'Visa Services', subtitle: 'Visa information and application support from Sadik Travels visa experts.', type: 'visa', icon: 'i-passport', limit: 4, viewAll: '/visa' },
-  { id: 'tours', eyebrow: 'Go Get Tour', title: 'Go Get Tour', subtitle: 'Curated Bangladesh and international tour packages with clear pricing and Sadik Travels support.', source: 'tours', icon: 'i-map', limit: 4, viewAll: '/tours' },
-  { id: 'esim', eyebrow: 'Connectivity', title: 'eSIM', subtitle: 'Stay connected instantly with travel eSIMs for local and global destinations.', type: 'esim', icon: 'i-sim', limit: 4, viewAll: '/esim' },
+  { id: 'home-tours', eyebrow: 'Go Get Tour', title: 'Go Get Tour', subtitle: 'Curated Bangladesh and international tour packages with clear pricing and Sadik Travels support.', source: 'tours', icon: 'i-map', limit: 4, viewAll: '/tours' },
+  { id: 'home-esim', eyebrow: 'Connectivity', title: 'eSIM', subtitle: 'Stay connected instantly with travel eSIMs for local and global destinations.', type: 'esim', icon: 'i-sim', limit: 4, viewAll: '/esim' },
   { id: 'special-umrah-fare', eyebrow: 'Offers', title: 'Special Umrah Fare', subtitle: 'Exclusive Umrah fares managed and published by Sadik Travels.', type: 'umrah_fare', icon: 'i-award', limit: 4, viewAll: '/special-umrah-fare' },
   { id: 'umrah-packages', eyebrow: 'Packages', title: 'Umrah Packages', subtitle: 'Complete Umrah packages with flights, hotels and transport.', type: 'umrah_package', icon: 'i-map', limit: 4, viewAll: '/umrah-packages' },
   { id: 'holiday-packages', eyebrow: 'Holidays', title: 'Holiday Packages', subtitle: 'Hand-picked holiday itineraries for families, couples and groups.', type: 'holiday_package', icon: 'i-plane', limit: 4, viewAll: '/holiday-packages' },
@@ -1120,12 +1120,28 @@ function renderHomeSections(items, tours) {
   if (!root) return;
   root.innerHTML = HOME_SECTIONS.map(section => {
     let cards = [];
-    if (section.source === 'tours') cards = tours.slice(0, section.limit || 4).map(hsTourCard);
+    if (section.id === 'home-hotels') cards = [];
+    else if (section.source === 'tours') cards = tours.slice(0, section.limit || 4).map(hsTourCard);
     else { const types = (section.extraTypes || []).concat(section.type); cards = items.filter(item => types.includes(item.type)).slice(0, section.limit || 4).map(hsContentCard); }
     const grid = cards.length ? `<div class="hs-grid">${cards.join('')}</div>` : sectionEmpty(`No ${section.title.toLowerCase()} yet`, 'Published content will appear here after an administrator saves and publishes it.');
     return `<section class="content-section hs-section" id="${section.id}" aria-labelledby="${section.id}Title"><div class="container panel-block section-bg"><div class="section-heading"><div><span class="hs-eyebrow">${icon(section.icon)} ${escapeHtml(section.eyebrow)}</span><h2 id="${section.id}Title">${escapeHtml(section.title)}</h2><p>${escapeHtml(section.subtitle)}</p></div>${section.viewAll ? `<a class="btn btn-outline" href="${escapeHtml(section.viewAll)}" data-public-route="${escapeHtml(section.viewAll)}">View all</a>` : ''}</div>${grid}</div></section>`;
   }).join('');
 }
+async function hydrateHomeHotels() {
+  const section = document.getElementById('home-hotels');
+  if (!section) return;
+  try {
+    const result = await apiRequest('/hotels?pageSize=8&sort=recommended');
+    const hotels = result.hotels || [];
+    if (!hotels.length) return;
+    const grid = section.querySelector('.hs-grid');
+    const emptyBox = section.querySelector('.public-content-empty, .section-empty');
+    const markup = `<div class="hs-grid">${hotels.slice(0, 4).map(hsHotelCard).join('')}</div>`;
+    if (emptyBox) emptyBox.outerHTML = markup;
+    else if (grid) grid.outerHTML = markup;
+  } catch { /* keep editorial hotel cards if live list is empty */ }
+}
+
 function renderAgentsCarousel(agents) {
   const track = $('#agentsTrack');
   if (!track) return;
@@ -1651,7 +1667,35 @@ window.publicNavigate = publicNavigate;
 window.openLogin = openLogin;
 window.showToast = showToast;
 bindPublicRouter();
-document.addEventListener('click', (event) => { const link = event.target.closest('[data-scroll]'); if (!link) return; event.preventDefault(); navigateToSection(link.dataset.scroll); });
+document.addEventListener('click', (event) => {
+  const link = event.target.closest('[data-scroll]');
+  if (!link) return;
+  const path = location.pathname.replace(/\/+$/, '') || '/';
+  if (path !== '/') return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  navigateToSection(link.dataset.scroll);
+}, true);
+void renderPublicRoute();
+if (appConfig.liveApi) {
+  void applySiteSettings();
+  void applyPublicContent();
+  void apiRequest('/auth/me', {}, false).then(response => { updateAuthUi(response.user); const p = location.pathname.replace(/\/+$/, '') || '/'; if (response.user && (p.startsWith('/bookings') || p.startsWith('/booking/') || p.startsWith('/account'))) void renderPublicRoute(); }).catch(() => updateAuthUi(null));
+}
+const initialTourParams = new URLSearchParams(window.location.search);
+if (initialTourParams.get('type') === 'tour') {
+  activateTab('tours');
+  void searchTours({ destination: initialTourParams.get('destination') || '', tourType: initialTourParams.get('tour_type') || '', maxPrice: initialTourParams.get('max_price') || '', sort: initialTourParams.get('sort') || 'newest' }, false);
+}
+updatePassengerSummary();
+ = event.target.closest('[data-scroll]');
+  if (!link) return;
+  const path = location.pathname.replace(/\/+$/, '') || '/';
+  if (path !== '/') return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  navigateToSection(link.dataset.scroll);
+}, true);
 void renderPublicRoute();
 if (appConfig.liveApi) {
   void applySiteSettings();
