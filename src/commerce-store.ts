@@ -641,12 +641,12 @@ export function createCommerceStore() {
         const timer = setTimeout(() => controller.abort(), 15_000);
         const response = await fetch(new URL('/v1/esim/fulfill', url).toString(), {
           method: 'POST', signal: controller.signal,
-          headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey },
-          body: JSON.stringify({ orderId: order.id, orderNumber: order.orderNumber, userId: order.userId, items: order.items, customer: order.customer, travelers: order.travelers })
+          headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey! },
+          body: JSON.stringify({ orderId: order!.id, orderNumber: order!.orderNumber, userId: order!.userId, items: order!.items, customer: order!.customer, travelers: order!.travelers })
         }).catch(() => undefined);
         clearTimeout(timer);
         if (response?.ok) {
-          const payload = await response.json().catch(() => ({}));
+          const payload = await response!.json().catch(() => ({}));
           if (payload && typeof payload === 'object' && (payload.qrCodeUrl || payload.smDpPlus || payload.activationCode || payload.providerReference)) {
             const delivered: OrderFulfillment = {
               status: 'delivered', provider: payload.provider || 'esim_provider',
