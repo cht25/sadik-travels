@@ -12,29 +12,7 @@ async function fetchWithTimeout(input: string | URL, init: RequestInit, timeoutM
   finally { clearTimeout(timer); }
 }
 
-async function requestJson(baseUrl: string | undefined, apiKey: string | undefined, path: string, payload: unknown, timeoutMs = 12_000) {
-  if (!baseUrl || !apiKey) throw new AppError(503, 'PROVIDER_NOT_CONFIGURED', 'The requested live provider is not configured');
-  const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetchWithTimeout(new URL(path, baseUrl).toString(), { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey }, body: JSON.stringify(payload) });
-    const body = await response.text(); let parsed: unknown; try { parsed = body ? JSON.parse(body) : {}; } catch { parsed = { raw: body }; }
-    if (!response.ok) throw new AppError(502, 'PROVIDER_ERROR', `Provider returned HTTP ${response.status}`, config.isProduction ? undefined : parsed);
-    return parsed;
-  } catch (error) { if (error instanceof AppError) throw error; throw new AppError(502, 'PROVIDER_UNAVAILABLE', 'The external provider is unavailable'); }
-  finally { clearTimeout(timeout); }
-}
-
 async function runtime(store: Store, key: string, fallback = '') { return (await store.getSetting(key)) ?? fallback; }
-export type Vertical = 'flight' | 'hotel' | 'home' | 'visa' | 'esim' | 'tour';
-
-export class TravelProvider {
-  constructor(private readonly store: Store) {}
-  private async credentials() { return { baseUrl: await runtime(this.store, 'travel_provider_url', config.providerBaseUrl), apiKey: await runtime(this.store, 'travel_provider_api_key', config.providerApiKey) }; }
-  async search(vertical: Vertical, payload: unknown) { const c = await this.credentials(); return requestJson(c.baseUrl, c.apiKey, `/v1/${vertical}/search`, payload, config.providerTimeoutMs); }
-  async reserve(vertical: Vertical, payload: unknown) { const c = await this.credentials(); return requestJson(c.baseUrl, c.apiKey, `/v1/${vertical}/bookings`, payload, config.providerTimeoutMs); }
-  async cancel(vertical: Vertical, payload: unknown) { const c = await this.credentials(); return requestJson(c.baseUrl, c.apiKey, `/v1/${vertical}/bookings/cancel`, payload, config.providerTimeoutMs); }
-}
-
 function normalizeBangladeshNumber(value: string) { const raw = value.trim().replace(/[\s()-]/g, ''); if (raw.startsWith('+880')) return raw.slice(1); if (raw.startsWith('880')) return raw; if (raw.startsWith('01')) return `880${raw.slice(1)}`; return raw; }
 
 export class MessagingProvider {

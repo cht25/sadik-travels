@@ -43,21 +43,13 @@ const catalogInputSchema = z.object({
   price: z.number().nonnegative().max(100000000).default(0), originalPrice: z.number().nonnegative().max(100000000).optional(),
   currency: z.string().length(3).default('BDT'), serviceCharge: z.number().nonnegative().max(1000000).default(0), taxPct: z.number().min(0).max(100).default(0),
   durationDays: z.number().int().min(0).max(365).optional(), durationNights: z.number().int().min(0).max(365).optional(),
-  dataAmount: z.string().max(60).optional(), validityDays: z.number().int().min(0).max(3650).optional(), network: z.string().max(120).optional(),
-  activation: z.string().max(300).optional(), coverage: z.array(z.string().max(80)).max(80).default([]),
-  provider: z.string().max(160).optional(), activationMethod: z.string().max(120).optional(),
-  qrCodeUrl: z.string().max(1000).optional(), smDpPlus: z.string().max(300).optional(),
   activationCode: z.string().max(300).optional(), instructions: z.string().max(4000).optional(),
-  visaType: z.string().max(120).optional(), processingTime: z.string().max(120).optional(), validity: z.string().max(120).optional(),
   entryType: z.string().max(80).optional(), requiredDocuments: z.array(z.string().max(200)).max(40).default([]),
   itinerary: z.array(z.object({ day: z.number().int().min(1).max(365), title: z.string().max(200), detail: z.string().max(2000).optional() })).max(60).default([]),
   inclusions: z.array(z.string().max(200)).max(40).default([]), exclusions: z.array(z.string().max(200)).max(40).default([]),
   hotelInfo: z.string().max(1000).optional(), transportInfo: z.string().max(1000).optional(), guideInfo: z.string().max(1000).optional(),
-  hospital: z.string().max(200).optional(), treatmentCategory: z.string().max(160).optional(), doctor: z.string().max(200).optional(), estimatedCost: z.string().max(120).optional(),
   propertyType: z.string().max(80).optional(), guests: z.number().int().min(0).max(100).optional(), bedrooms: z.number().int().min(0).max(50).optional(),
   beds: z.number().int().min(0).max(80).optional(), bathrooms: z.number().int().min(0).max(50).optional(), amenities: z.array(z.string().max(80)).max(60).default([]),
-  bank: z.string().max(160).optional(), cardName: z.string().max(160).optional(), airline: z.string().max(160).optional(), route: z.string().max(200).optional(),
-  promoCode: z.string().max(60).optional(), discountLabel: z.string().max(120).optional(),
   startDate: z.string().max(40).optional(), endDate: z.string().max(40).optional(), terms: z.string().max(4000).optional(),
   rating: z.number().min(0).max(5).optional(), tags: z.array(z.string().max(60)).max(30).default([]),
   availability: z.number().int().min(0).max(100000).default(100), bookable: z.boolean().default(true),
@@ -110,19 +102,6 @@ const reviewInputSchema = z.object({
   title: z.string().max(160).optional(), body: z.string().trim().min(4).max(3000)
 });
 
-const visaApplicationSchema = z.object({
-  productId: z.string().min(3).max(200),
-  applicant: z.object({
-    fullName: z.string().trim().min(2).max(160), email: z.string().email(), phone: z.string().min(6).max(40),
-    dateOfBirth: z.string().max(40).optional(), nationality: z.string().max(80).optional(), address: z.string().max(300).optional()
-  }),
-  passport: z.object({
-    number: z.string().trim().min(4).max(40), issueDate: z.string().max(40).optional(),
-    expiryDate: z.string().max(40).optional(), issuingCountry: z.string().max(80).optional()
-  }),
-  documents: z.array(z.object({ label: z.string().max(120), url: z.string().max(1000), publicId: z.string().max(300).optional(), mediaId: z.string().uuid().optional() })).max(15).default([]),
-  travelDate: z.string().max(40).optional()
-});
 
 const trackSchema = z.object({ reference: z.string().trim().min(4).max(80), identity: z.string().trim().min(4).max(160) });
 
@@ -146,8 +125,7 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
       type: (query.type as CatalogType) || 'all', status: 'published', q: query.q, country: query.country, destination: query.destination,
       minPrice: query.minPrice ? Number(query.minPrice) : undefined, maxPrice: query.maxPrice ? Number(query.maxPrice) : undefined,
       featured: query.featured === 'true' ? true : undefined, tags: query.tags ? query.tags.split(',').filter(Boolean) : undefined,
-      dataAmount: query.dataAmount || undefined, validityDays: query.validityDays ? Number(query.validityDays) : undefined,
-      network: query.network || undefined, region: query.region || undefined, airline: query.airline || undefined,
+      region: query.region || undefined,
       sort: (query.sort as any) || 'recommended', page: Number(query.page) || 1, pageSize: Number(query.pageSize) || 12
     });
     res.setHeader('Cache-Control', 'no-store');
@@ -291,7 +269,7 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
     assert(pricing.total >= 0, 400, 'INVALID_TOTAL', 'The order total could not be calculated');
 
     const primaryType = pricing.items[0]?.productType || 'order';
-    const bookingTypes = ['umrah_package', 'holiday_package', 'medical_tourism', 'visa_service', 'home', 'flight_offer'];
+    const bookingTypes = ['holiday_package', 'home'];
     const order = await commerce.createOrder({
       userId: req.user!.id, kind: bookingTypes.includes(primaryType) ? 'booking' : 'order', primaryType,
       items: pricing.items, customer: input.customer, travelers: input.travelers as OrderTraveler[],
@@ -405,27 +383,6 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
     res.status(201).json({ review, message: 'Thank you. Your review is awaiting moderation.' });
   });
 
-  /* ================================================  VISA APPLICATIONS  */
-  app.post('/api/v1/visa/applications', requireAuth(store), rateLimit('visa-apply', 10, 60), async (req, res) => {
-    const input = toInput(visaApplicationSchema, req.body);
-    const product = await commerce.findCatalogProduct(input.productId, 'visa_service');
-    assert(product && product.status === 'published', 404, 'PRODUCT_NOT_FOUND', 'This visa service is no longer available');
-    const application = await commerce.createVisaApplication({
-      userId: req.user!.id, productId: product!.id, productTitle: product!.title,
-      applicant: input.applicant, passport: input.passport, documents: input.documents, travelDate: input.travelDate, status: 'submitted'
-    } as any);
-    await store.audit('visa.application_created', { ...clientMeta(req), userId: req.user!.id, metadata: { applicationId: application.id } });
-    await notify(req.user!.id, 'Visa application received', `Your application ${application.referenceNumber} for ${product!.title} has been received.`);
-    res.status(201).json({ application });
-  });
-
-  app.get('/api/v1/visa/applications', requireAuth(store), async (req, res) => res.json(await commerce.listVisaApplications({ userId: req.user!.id, pageSize: 50 })));
-  app.get('/api/v1/visa/applications/:id', requireAuth(store), async (req, res) => {
-    const application = await commerce.findVisaApplication(String(req.params.id), req.user!.id);
-    assert(application, 404, 'APPLICATION_NOT_FOUND', 'Application not found');
-    res.json({ application });
-  });
-
   /* ======================================================  ADMIN: CATALOG  */
   app.get('/api/v1/admin/catalog', requireFinePermission(store, 'catalog.view'), async (req, res) => {
     const query = req.query as Record<string, string>;
@@ -529,7 +486,6 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
   app.post('/api/v1/admin/orders/:id/fulfill', requireFinePermission(store, 'order.update'), async (req, res) => {
     const input = toInput(z.object({
       provider: z.string().max(160).optional(),
-      qrCodeUrl: z.string().max(1000).optional(), smDpPlus: z.string().max(300).optional(),
       activationCode: z.string().max(300).optional(), instructions: z.string().max(4000).optional(),
       reference: z.string().max(200).optional(), note: z.string().max(1000).optional()
     }).strict(), req.body);
@@ -562,27 +518,9 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
     res.json({ removed: true });
   });
 
-  /* ============================================  ADMIN: VISA APPLICATIONS  */
-  app.get('/api/v1/admin/visa-applications', requireFinePermission(store, 'visa.view'), async (req, res) => {
-    const query = req.query as Record<string, string>;
-    res.json(await commerce.listVisaApplications({ status: query.status, q: query.q, page: Number(query.page) || 1, pageSize: Number(query.pageSize) || 20 }));
-  });
-  app.patch('/api/v1/admin/visa-applications/:id', requireFinePermission(store, 'visa.update'), async (req, res) => {
-    const input = toInput(z.object({
-      status: z.enum(['submitted', 'document_review', 'processing', 'approved', 'rejected', 'cancelled']).optional(),
-      adminNote: z.string().max(2000).optional()
-    }).strict(), req.body);
-    const application = await commerce.updateVisaApplication(String(req.params.id), input as any,
-      { at: new Date().toISOString(), status: input.status || 'updated', note: input.adminNote, actorId: req.user!.id });
-    assert(application, 404, 'APPLICATION_NOT_FOUND', 'Application not found');
-    if (input.status) await notify(application!.userId, 'Visa application update', `Application ${application!.referenceNumber} is now ${String(input.status).replace(/_/g, ' ')}.`);
-    await store.audit('visa.application_updated', { ...clientMeta(req), userId: req.user!.id, metadata: { applicationId: application!.id, status: application!.status } });
-    res.json({ application });
-  });
-
   /* Public storefront summary used by the homepage to render every section in one round trip. */
   app.get('/api/v1/storefront/home', optionalAuth(store), async (_req, res) => {
-    const types: CatalogType[] = ['umrah_package', 'holiday_package', 'esim', 'visa_service', 'medical_tourism', 'card_offer', 'airline_offer', 'destination', 'home', 'umrah_fare'];
+    const types: CatalogType[] = ['holiday_package', 'home', 'destination'];
     const sections = await Promise.all(types.map(async type => ({ type, products: (await commerce.listCatalog({ type, status: 'published', pageSize: 6, sort: 'recommended' })).products })));
     res.setHeader('Cache-Control', 'no-store');
     res.json({ sections: sections.filter(section => section.products.length > 0) });

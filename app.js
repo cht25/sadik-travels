@@ -2,7 +2,7 @@ const $ = (selector, scope = document) => scope.querySelector(selector);
 const $$ = (selector, scope = document) => [...scope.querySelectorAll(selector)];
 
 const state = {
-  tab: 'flights',
+  tab: 'hotels',
   adults: 1,
   children: 0,
   infant: 0,
@@ -11,8 +11,8 @@ const state = {
   bannerIndex: 0,
   cardIndexes: { hotels: 0, transit: 0, destinations: 0 },
   autoBanner: null,
-  features: { flights: true, hotels: true, homes: true, visa: true, tours: true, esim: true },
-  serviceStatuses: { flights: 'active', hotels: 'active', homes: 'active', visa: 'active', tours: 'active', esim: 'active' }
+  features: { hotels: true, homes: true, tours: true },
+  serviceStatuses: { hotels: 'active', homes: 'active', tours: 'active' }
 };
 
 const icon = (id) => `<svg><use href="#${id}"></use></svg>`;
@@ -27,11 +27,11 @@ function setSeo({ title, description, canonical, image, jsonLd }) {
   const docTitle = title ? `${title} | Sadik Travels` : 'Sadik Travels | Online Travel Agency';
   document.title = docTitle;
   const setMeta = (selector, attr, value) => { const node = document.querySelector(selector); if (node) node.setAttribute(attr, value); };
-  setMeta('meta[name="description"]', 'content', description || 'Book flights, hotels, homes, visa services and eSIMs with Sadik Travels.');
+  setMeta('meta[name="description"]', 'content', description || 'Book hotels, homes & villas, tours and holiday packages with Sadik Travels.');
   setMeta('meta[property="og:title"]', 'content', docTitle);
-  setMeta('meta[property="og:description"]', 'content', description || 'Book flights, hotels, homes, visa services and eSIMs with Sadik Travels.');
+  setMeta('meta[property="og:description"]', 'content', description || 'Book hotels, homes & villas, tours and holiday packages with Sadik Travels.');
   setMeta('meta[name="twitter:title"]', 'content', docTitle);
-  setMeta('meta[name="twitter:description"]', 'content', description || 'Book flights, hotels, homes, visa services and eSIMs with Sadik Travels.');
+  setMeta('meta[name="twitter:description"]', 'content', description || 'Book hotels, homes & villas, tours and holiday packages with Sadik Travels.');
   if (image) { setMeta('meta[property="og:image"]', 'content', image); setMeta('meta[name="twitter:image"]', 'content', image); }
   const canonicalNode = document.querySelector('link[rel="canonical"]');
   if (canonicalNode) canonicalNode.href = canonical || location.pathname + location.search;
@@ -74,7 +74,7 @@ async function applySiteSettings() {
     const supportEmail = response.support?.email;
     if (supportPhone) document.querySelectorAll('[data-support-phone]').forEach(node => { node.textContent = supportPhone; node.href = `tel:${supportPhone.replace(/[^+\d]/g, '')}`; });
     if (supportEmail) document.querySelectorAll('[data-support-email]').forEach(node => { node.textContent = supportEmail; node.href = `mailto:${supportEmail}`; });
-    const featureTargets = ['flights', 'hotels', 'homes', 'visa', 'tours', 'esim'];
+    const featureTargets = ['hotels', 'homes', 'tours'];
     const serviceStatuses = { ...state.serviceStatuses, ...(response.serviceStatuses || {}) };
     state.serviceStatuses = serviceStatuses;
     featureTargets.forEach(name => {
@@ -155,13 +155,14 @@ document.addEventListener('click', (event) => {
 
 function updatePassengerSummary() {
   const total = state.adults + state.children + state.infant;
-  $('#adultCount').textContent = state.adults;
-  $('#childCount').textContent = state.children;
-  $('#infantCount').textContent = state.infant;
-  $('#passengerValue').textContent = total;
-  $('#hotelAdultCount').textContent = state.hotelAdult;
-  $('#hotelChildCount').textContent = state.hotelChild;
-  $('#guestValue').textContent = `Guests - ${state.hotelAdult + state.hotelChild}`;
+  const set = (selector, value) => { const node = $(selector); if (node) node.textContent = value; };
+  set('#adultCount', state.adults);
+  set('#childCount', state.children);
+  set('#infantCount', state.infant);
+  set('#passengerValue', total);
+  set('#hotelAdultCount', state.hotelAdult);
+  set('#hotelChildCount', state.hotelChild);
+  set('#guestValue', `Guests - ${state.hotelAdult + state.hotelChild}`);
 }
 
 $$('[data-step]').forEach(button => {
@@ -237,41 +238,14 @@ $$('[data-nav-tab]').forEach(link => {
   });
 });
 
-const syncTripType = () => {
-  const value = $('input[name="tripType"]:checked')?.value;
-  const returnField = $('.return-field');
-  const multiRow = $('#multiCityRow');
-  const returnInput = $('#returnDate');
-  const isMulti = value === 'multicity';
-  const isOneWay = value === 'oneway';
-  if (returnField) returnField.style.display = isOneWay || isMulti ? 'none' : '';
-  if (returnInput) returnInput.disabled = isOneWay || isMulti;
-  if (multiRow) multiRow.hidden = !isMulti;
-};
-$$('input[name="tripType"]').forEach(input => input.addEventListener('change', syncTripType));
-syncTripType();
-
-$$('input[name="esimScope"]').forEach(input => input.addEventListener('change', () => {
-  const label = $('#esimLocationLabel');
-  const field = $('#esimDestination');
-  if (input.checked && input.value === 'global') {
-    label.textContent = 'Destination Region';
-    field.placeholder = 'Search region...';
-    field.value = '';
-  } else if (input.checked) {
-    label.textContent = 'Destination Country';
-    field.placeholder = 'Search country...';
-    field.value = 'Singapore';
-  }
-}));
 
 const globalSearchCities = [
   { label: 'Dhaka', detail: 'Bangladesh' }, { label: "Cox's Bazar", detail: 'Bangladesh' }, { label: 'Chattogram', detail: 'Bangladesh' }, { label: 'Dubai', detail: 'United Arab Emirates' }, { label: 'Singapore', detail: 'Singapore' }, { label: 'Bangkok', detail: 'Thailand' }, { label: 'Kuala Lumpur', detail: 'Malaysia' }, { label: 'Male', detail: 'Maldives' }
 ];
-function renderGlobalSuggestions(query = '') { const input = $('#globalSearchInput'); const menu = $('#globalSearchSuggestions'); if (!input || !menu) return; const q = query.toLowerCase().trim(); const matches = globalSearchCities.filter(city => `${city.label} ${city.detail}`.toLowerCase().includes(q)).slice(0, 6); menu.innerHTML = matches.map(city => `<button type="button" data-global-city="${escapeHtml(city.label)}"><strong>${escapeHtml(city.label)}</strong><small>${escapeHtml(city.detail)}</small></button>`).join(''); menu.classList.toggle('open', matches.length > 0); $$('[data-global-city]', menu).forEach(button => button.addEventListener('click', () => { input.value = button.dataset.globalCity; menu.classList.remove('open'); activateTab('flights', true); if ($('#toAirport')) $('#toAirport').value = button.dataset.globalCity; })); }
+function renderGlobalSuggestions(query = '') { const input = $('#globalSearchInput'); const menu = $('#globalSearchSuggestions'); if (!input || !menu) return; const q = query.toLowerCase().trim(); const matches = globalSearchCities.filter(city => `${city.label} ${city.detail}`.toLowerCase().includes(q)).slice(0, 6); menu.innerHTML = matches.map(city => `<button type="button" data-global-city="${escapeHtml(city.label)}"><strong>${escapeHtml(city.label)}</strong><small>${escapeHtml(city.detail)}</small></button>`).join(''); menu.classList.toggle('open', matches.length > 0); $$('[data-global-city]', menu).forEach(button => button.addEventListener('click', () => { input.value = button.dataset.globalCity; menu.classList.remove('open'); activateTab('hotels', true); if ($('#hotelDestination')) $('#hotelDestination').value = button.dataset.globalCity; })); }
 $('#globalSearchInput')?.addEventListener('focus', () => renderGlobalSuggestions($('#globalSearchInput').value));
 $('#globalSearchInput')?.addEventListener('input', event => renderGlobalSuggestions(event.target.value));
-$('#globalSearch')?.addEventListener('submit', event => { event.preventDefault(); const value = $('#globalSearchInput').value.trim(); if (!value) return; activateTab('flights', true); if ($('#toAirport')) $('#toAirport').value = value; $('#globalSearchSuggestions')?.classList.remove('open'); });
+$('#globalSearch')?.addEventListener('submit', event => { event.preventDefault(); const value = $('#globalSearchInput').value.trim(); if (!value) return; activateTab('hotels', true); if ($('#hotelDestination')) $('#hotelDestination').value = value; $('#globalSearchSuggestions')?.classList.remove('open'); });
 $('#appBtn')?.addEventListener('click', () => $('#appTitle')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
 $$('[data-app-download]').forEach(button => button.addEventListener('click', () => { if (button.dataset.appUrl) window.open(button.dataset.appUrl, '_blank', 'noopener'); else showToast(`${button.dataset.appDownload} download link is not configured for this deployment yet.`, 'error'); }));
 document.addEventListener('click', event => { if (!event.target.closest('.global-search')) $('#globalSearchSuggestions')?.classList.remove('open'); });
@@ -321,18 +295,6 @@ $$('input[type="date"]').forEach(input => input.addEventListener('change', syncD
 syncDateLabels();
 
 const suggestionData = {
-  airport: [
-    { code: 'DAC', city: 'Dhaka', name: 'Hazrat Shahjalal International Airport' },
-    { code: 'CXB', city: "Cox's Bazar", name: 'Cox’s Bazar Airport' },
-    { code: 'CGP', city: 'Chattogram', name: 'Shah Amanat International Airport' },
-    { code: 'DXB', city: 'Dubai', name: 'Dubai International Airport' },
-    { code: 'DOH', city: 'Doha', name: 'Hamad International Airport' },
-    { code: 'SIN', city: 'Singapore', name: 'Singapore Changi Airport' },
-    { code: 'BKK', city: 'Bangkok', name: 'Suvarnabhumi Airport' },
-    { code: 'KUL', city: 'Kuala Lumpur', name: 'Kuala Lumpur International Airport' },
-    { code: 'DEL', city: 'Delhi', name: 'Indira Gandhi International Airport' },
-    { code: 'JED', city: 'Jeddah', name: 'King Abdulaziz International Airport' }
-  ],
   city: [
     { code: 'CXB', city: "Cox's Bazar", name: 'Bangladesh' },
     { code: 'DAC', city: 'Dhaka', name: 'Bangladesh' },
@@ -388,18 +350,6 @@ document.addEventListener('click', event => {
   if (!event.target.closest('.autocomplete-field')) $$('.suggestions.open').forEach(menu => menu.classList.remove('open'));
 });
 
-function buildSearchSummary(type) {
-  if (type === 'flight') {
-    const trip = $('input[name="tripType"]:checked')?.nextElementSibling?.textContent || 'One Way';
-    const passengers = `${state.adults} adult${state.adults === 1 ? '' : 's'}${state.children ? `, ${state.children} child${state.children === 1 ? '' : 'ren'}` : ''}`;
-    return `<strong>Flights · ${trip}</strong><br>${$('#fromAirport').value || 'Dhaka (DAC)'} → ${$('#toAirport').value || 'Dubai (DXB)'}<br><span>${formatDate($('#departureDate').value)} · ${passengers} · ${$('#cabinValue').textContent}</span>`;
-  }
-  if (type === 'hotel') return `<strong>Hotels</strong><br>${$('#hotelDestination').value || "Cox's Bazar"}<br><span>${formatDate($('#checkinDate').value)} to ${formatDate($('#checkoutDate').value)} · ${$('#guestValue').textContent}</span>`;
-  if (type === 'homes') return `<strong>Sadik Homes · ${$('input[name="homesType"]:checked')?.value === 'buy' ? 'Buy' : 'Rent'}</strong><br>${$('#homeDestination').value || 'Dhaka'}<br><span>${formatDate($('#homeCheckin').value)} to ${formatDate($('#homeCheckout').value)}</span>`;
-  if (type === 'visa') return `<strong>Visa services</strong><br>${$('#visaCountry').value || 'United Arab Emirates'} · ${$('#visaCategory').value || 'Tourist Visa'}`;
-  return `<strong>eSIM</strong><br>${$('#esimDestination').value || 'Singapore'}<br><span>Instant travel connectivity with Sadik Travels</span>`;
-}
-
 let modalReturnFocus = null;
 function openModal(modal) {
   if (!modal) return;
@@ -453,15 +403,6 @@ function bindDynamicModalEvents() {
       $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon green">${icon('i-check')}</div><h2 id="modalTitle">Support request received</h2></div><p class="modal-subtitle">Our support team will review your request.</p><div class="result-summary"><strong>Ticket ${escapeHtml(response.ticket.id)}</strong><br><span>Status: ${escapeHtml(response.ticket.status)}</span></div><button type="button" class="btn btn-primary full-btn" data-close-modal>Close</button>`;
     } catch (error) { showToast(error.message || 'Unable to create a support request.', 'error'); } finally { button.disabled = false; }
   });
-}
-
-function searchPayload(type) {
-  if (type === 'flight') { const tripType = $('input[name="tripType"]:checked')?.value || 'oneway'; return { tripType, cabin: $('#cabinValue')?.textContent, adults: state.adults, children: state.children, infants: state.infant, from: $('#fromAirport')?.value, to: $('#toAirport')?.value, depart: $('#departureDate')?.value, return: tripType === 'roundtrip' ? ($('#returnDate')?.value || null) : null, direct: $('#directFlight')?.checked || false }; }
-  if (type === 'hotel') return { destination: $('#hotelDestination')?.value, checkIn: $('#checkinDate')?.value, checkOut: $('#checkoutDate')?.value, adults: state.hotelAdult, children: state.hotelChild, rooms: $('#roomValue')?.textContent };
-  if (type === 'homes') return { mode: $('input[name="homesType"]:checked')?.value || 'rent', location: $('#homeDestination')?.value, checkIn: $('#homeCheckin')?.value, checkOut: $('#homeCheckout')?.value };
-  if (type === 'visa') return { country: $('#visaCountry')?.value, category: $('#visaCategory')?.value };
-  if (type === 'tour') return { destination: $('#tourDestination')?.value, tourType: $('#tourType')?.value, maxPrice: $('#tourBudget')?.value ? Number($('#tourBudget').value) : undefined, sort: $('#tourSort')?.value || 'newest' };
-  return { scope: $('input[name="esimScope"]:checked')?.value || 'local', destination: $('#esimDestination')?.value };
 }
 
 function tourQueryFromForm() {
@@ -534,32 +475,6 @@ function openTourDetails(tour) {
   });
 }
 
-function openLiveSearchResults(type, payload, queryPayload) {
-  const results = Array.isArray(payload?.results) ? payload.results : [];
-  const modal = $('#genericModal');
-  const title = `${type[0].toUpperCase()}${type.slice(1)} search results`;
-  const resultHtml = results.slice(0, 5).map((item, index) => {
-    const safeItem = item && typeof item === 'object' ? item : { value: item };
-    const values = Object.entries(safeItem).filter(([key]) => key !== 'id').slice(0, 4).map(([key, value]) => `<span><b>${escapeHtml(key.replace(/[A-Z]/g, m => ` ${m}`).replace(/^./, m => m.toUpperCase()))}</b> ${escapeHtml(typeof value === 'object' ? JSON.stringify(value) : value)}</span>`).join('');
-    const resultId = safeItem.id ? String(safeItem.id) : '';
-    return `<div class="live-result"><div class="result-rank">${index + 1}</div><div class="live-result-copy">${values}</div>${resultId ? `<button type="button" class="btn btn-outline result-select" data-result-id="${escapeHtml(resultId)}">Select</button>` : '<span class="result-unavailable">No booking id</span>'}</div>`;
-  }).join('');
-  $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon green">${icon('i-check')}</div><h2 id="modalTitle">${title}</h2></div><p class="modal-subtitle">Live availability returned by the configured provider.</p><div class="result-summary">${buildSearchSummary(type)}</div><div class="live-result-list">${resultHtml || '<div class="result-summary">No live results were returned.</div>'}</div><button type="button" class="btn btn-primary full-btn" data-close-modal>Close</button>`;
-  openModal(modal);
-  $$('.result-select', modal).forEach(button => button.addEventListener('click', () => { void createBooking(type, button.dataset.resultId, queryPayload); }));
-}
-
-async function createBooking(type, resultId, searchPayloadData) {
-  try {
-    const response = await apiRequest('/bookings', { method: 'POST', body: JSON.stringify({ vertical: type, payload: { ...searchPayloadData, resultId } }) });
-    closeModal($('#genericModal'));
-    openBookingNextSteps(response.booking);
-  } catch (error) {
-    if (error.status === 401 || error.code === 'AUTH_REQUIRED') { closeModal($('#genericModal')); openLogin(); showToast('Please login to continue with this booking.'); return; }
-    showToast(error.message || 'Unable to create booking.', 'error');
-  }
-}
-
 function openBookingNextSteps(booking) {
   const modal = $('#genericModal');
   const isOperatorReview = ['new', 'reviewing'].includes(booking?.status);
@@ -577,38 +492,8 @@ function openBookingNextSteps(booking) {
     } catch (error) { showToast(error.message || 'Unable to start payment.', 'error'); } finally { button.disabled = false; }
   });
 }
-function validateSearchPayload(type, payload) {
-  if (type === 'flight') {
-    if (!payload.from || !payload.to) return 'Choose both departure and destination airports.';
-    if (payload.from === payload.to) return 'Departure and destination must be different.';
-    if (!payload.depart) return 'Choose a departure date.';
-    if (payload.tripType === 'roundtrip' && (!payload.return || payload.return < payload.depart)) return 'Return date must be on or after the departure date.';
-  }
-  if (['hotel', 'homes'].includes(type) && (!payload.destination && !payload.location)) return 'Choose a destination.';
-  if (type === 'hotel' && payload.checkOut <= payload.checkIn) return 'Check-out must be after check-in.';
-  if (type === 'homes' && payload.checkOut <= payload.checkIn) return 'Check-out must be after check-in.';
-  if (type === 'visa' && (!payload.country || !payload.category)) return 'Choose a country and visa category.';
-  if (type === 'esim' && !payload.destination) return 'Choose a destination country or region.';
-  return '';
-}
-async function submitSearch(type) {
-  if (state.serviceStatuses[type] === 'maintenance') { showToast(`${type[0].toUpperCase()}${type.slice(1)} is temporarily under maintenance.`, 'error'); return; }
-  if (state.serviceStatuses[type] === 'archived' || state.serviceStatuses[type] === 'hidden') { showToast(`${type[0].toUpperCase()}${type.slice(1)} is currently unavailable.`, 'error'); return; }
-  if (!appConfig.liveApi) { showToast('Live API is not configured.', 'error'); return; }
-  try {
-    const payload = searchPayload(type);
-    const validationMessage = validateSearchPayload(type, payload);
-    if (validationMessage) { showToast(validationMessage, 'error'); return; }
-    const response = await apiRequest(`/search/${type}`, { method: 'POST', body: JSON.stringify(payload) });
-    openLiveSearchResults(type, response, payload);
-  } catch (error) {
-    showToast(error.message || 'Search service is unavailable.', 'error');
-  }
-}
-
-[['flightForm', 'flight'], ['hotelForm', 'hotel'], ['homesForm', 'homes'], ['visaForm', 'visa'], ['esimForm', 'esim']].forEach(([id, type]) => {
-  document.getElementById(id)?.addEventListener('submit', event => { event.preventDefault(); if (type === 'hotel') { void navigateToHotelSearch(); return; } void submitSearch(type); });
-});
+$('#hotelForm')?.addEventListener('submit', event => { event.preventDefault(); void navigateToHotelSearch(); });
+$('#homesForm')?.addEventListener('submit', event => { event.preventDefault(); const location = $('#homeDestination')?.value?.trim(); publicNavigate(`/homes${location ? `?q=${encodeURIComponent(location)}` : ''}`); });
 $('#toursForm')?.addEventListener('submit', event => { event.preventDefault(); void searchTours(tourQueryFromForm()); });
 $('#applyTourFilters')?.addEventListener('click', () => void searchTours(tourQueryFromFilters()));
 $('#tourResultsSort')?.addEventListener('change', () => void searchTours(tourQueryFromFilters()));
@@ -745,7 +630,7 @@ function openHotelDetails(title) {
 }
 function bindPromotionalInteractions(scope = document) {
   $$('.travel-card', scope).forEach(card => { if (card.dataset.interactionBound) return; card.dataset.interactionBound = 'true'; card.addEventListener('click', event => { event.preventDefault(); openHotelDetails(card.dataset.cardTitle || card.textContent.trim()); }); });
-  $$('.destination-card', scope).forEach(card => { if (card.dataset.interactionBound) return; card.dataset.interactionBound = 'true'; card.addEventListener('click', event => { event.preventDefault(); showToast(`Destination selected: ${card.dataset.destination}.`); activateTab('flights', true); $('#toAirport').value = card.dataset.destination; }); });
+  $$('.destination-card', scope).forEach(card => { if (card.dataset.interactionBound) return; card.dataset.interactionBound = 'true'; card.addEventListener('click', event => { event.preventDefault(); showToast(`Destination selected: ${card.dataset.destination}.`); activateTab('hotels', true); if ($('#hotelDestination')) $('#hotelDestination').value = card.dataset.destination; }); });
   $$('.banner-slide', scope).forEach(slide => { if (slide.dataset.liveBanner || slide.dataset.interactionBound) return; slide.dataset.interactionBound = 'true'; slide.addEventListener('click', event => { event.preventDefault(); showToast(`${slide.querySelector('img')?.alt || 'Offer'} selected.`); }); });
 }
 bindPromotionalInteractions();
@@ -864,24 +749,12 @@ $$('a[href^="#"]').forEach(link => {
 
 const PUBLIC_COLLECTIONS = {
   offers: { type: 'offer', eyebrow: 'Offers', title: 'Travel Offers', description: 'Published offers from Sadik Travels.' },
-  'umrah-packages': { type: 'umrah_package', eyebrow: 'Umrah', title: 'Umrah Packages', description: 'Published Umrah packages managed by Sadik Travels.' },
   'holiday-packages': { type: 'holiday_package', eyebrow: 'Holidays', title: 'Holiday Packages', description: 'Browse published holiday packages and complete itineraries.' },
-  visa: { type: 'visa', eyebrow: 'Visa services', title: 'Visa Services', description: 'Review published visa services, requirements and processing information.' },
-  esim: { type: 'esim', eyebrow: 'Connectivity', title: 'eSIM', description: 'Browse published eSIM products and destination connectivity details.' },
-  'medical-tourism': { type: 'medical_tourism', eyebrow: 'Medical tourism', title: 'Medical Tourism', description: 'Explore published medical tourism services and treatment information.' },
-  'card-offers': { type: 'card_offer', eyebrow: 'Offers', title: 'Card Offers', description: 'Published bank and card travel offers.' },
-  'airline-offers': { type: 'airline_offer', eyebrow: 'Offers', title: 'Airline Offers', description: 'Published airline fares and promotional offers.' },
-  'special-umrah-fare': { type: 'umrah_fare', eyebrow: 'Offers', title: 'Special Umrah Fare', description: 'Published Umrah fares managed by Sadik Travels.' },
   explore: { type: 'explore', eyebrow: 'Explore', title: 'Explore Destinations', description: 'Published destinations, travel tips and inspiration.' },
   hotels: { type: 'hotel', eyebrow: 'Stays', title: 'Hotels', description: 'Published hotel content and stay information.' },
-  homes: { type: 'home', eyebrow: 'Properties', title: 'Homes', description: 'Published homes and property information.' },
-  'sadik-app': { type: 'app', eyebrow: 'Sadik App', title: 'Sadik Travels App', description: 'Published app information, features and download links.' }
+  homes: { type: 'home', eyebrow: 'Properties', title: 'Homes & Villas', description: 'Published homes and property information.' }
 };
-const PUBLIC_SERVICE_LANDING = {
-  flights: { title: 'Flights', description: 'Search live flight inventory through the configured provider.', tab: 'flights' },
-  hotels: { title: 'Hotels', description: 'Search live hotel availability through the configured provider.', tab: 'hotels' },
-  homes: { title: 'Homes', description: 'Search live home and property inventory through the configured provider.', tab: 'homes' }
-};
+
 function publicRoute() { const url = new URL(location.href); const path = url.pathname.replace(/\/+$/, '') || '/'; return { url, path, parts: path.split('/').filter(Boolean), query: url.searchParams }; }
 function publicHref(route) { return route.startsWith('/') ? route : `/${route}`; }
 function publicSetActive(path) {
@@ -908,12 +781,12 @@ function publicLoading() { return '<div class="public-public-loading"><span clas
 function publicErrorState(message, retry = true) { return `<div class="public-public-error"><strong>Unable to load this page</strong><p>${escapeHtml(message || 'Please try again.')}</p>${retry ? '<button class="btn btn-primary" data-public-retry>Try again</button>' : ''}</div>`; }
 function publicEmptyState(title, message, action = '') { return `<div class="public-public-empty"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(message)}</p>${action}</div>`; }
 function publicPageHeader(eyebrow, title, description, action = '') { return `<div class="public-page-header"><div><span class="public-page-eyebrow">${escapeHtml(eyebrow)}</span><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p></div><div class="public-page-actions">${action}<a class="btn btn-outline" href="/" data-public-route="/">Back home</a></div></div>`; }
-function publicContentPath(item) { return { hotel:'hotels', home:'homes', app:'sadik-app', offer:'offers', umrah_package: 'umrah-packages', holiday_package: 'holiday-packages', visa: 'visa', esim: 'esim', medical_tourism: 'medical-tourism', card_offer: 'card-offers', airline_offer: 'airline-offers', umrah_fare: 'special-umrah-fare', explore: 'explore' }[item.type] || 'explore'; }
+function publicContentPath(item) { return { hotel:'hotels', home:'homes', offer:'offers', holiday_package:'holiday-packages', destination:'explore', explore:'explore' }[item.type] || 'explore'; }
 function publicImage(imageUrl, alt, className = '') { return imageUrl ? `<img class="${className}" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(alt)}" loading="lazy" />` : `<div class="public-page-item-image">Sadik Travels</div>`; }
 function publicContentCard(item) { const route = `/${publicContentPath(item)}/${item.id}`; const price = item.metadata?.price || item.metadata?.priceBdt; return `<a class="public-page-item" href="${escapeHtml(route)}" data-public-route="${escapeHtml(route)}"><div class="public-page-item-image">${item.imageUrl ? `<img src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.title)}" loading="lazy" />` : '<span>Sadik Travels</span>'}</div><div class="public-page-item-body"><small>${escapeHtml(String(item.type).replace(/_/g, ' '))}</small><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.subtitle || item.description || 'View published details.')}</p>${price ? `<strong>৳${escapeHtml(Number(price).toLocaleString('en-BD'))}</strong>` : ''}</div></a>`; }
 function publicMetadataHtml(metadata = {}) { const entries = Object.entries(metadata).filter(([key, value]) => value !== undefined && value !== null && value !== '' && !['ctaUrl','external','androidUrl','iosUrl','price','priceBdt'].includes(key)); if (!entries.length) return ''; return `<div class="public-detail-json"><h3>Details</h3><dl class="public-detail-meta">${entries.map(([key,value]) => `<div><dt>${escapeHtml(key.replace(/([A-Z])/g,' $1').replace(/^./,letter=>letter.toUpperCase()))}</dt><dd>${escapeHtml(Array.isArray(value) || typeof value === 'object' ? JSON.stringify(value) : value)}</dd></div>`).join('')}</dl></div>`; }
 function publicDetailActions(item) { const metadata = item.metadata || {}; const actions = []; if (metadata.ctaUrl && (String(metadata.ctaUrl).startsWith('/') || /^https?:\/\//i.test(String(metadata.ctaUrl)))) actions.push(`<a class="btn btn-primary" href="${escapeHtml(metadata.ctaUrl)}" ${metadata.external ? 'target="_blank" rel="noopener"' : ''}>${escapeHtml(metadata.ctaText || 'Learn more')}</a>`); actions.push('<a class="btn btn-outline" href="#contact">Contact Sadik Travels</a>'); return actions.join(''); }
-async function renderPublicContentCollection(root, definition) { const response = await apiRequest(`/site/content?type=${encodeURIComponent(definition.type)}`); const items = response.content || []; root.innerHTML = publicPageHeader(definition.eyebrow, definition.title, definition.description, '') + `<section class="public-page-card"><div class="public-page-grid">${items.length ? items.map(publicContentCard).join('') : publicEmptyState(`No ${definition.title.toLowerCase()} yet`, 'Published content will appear here after an administrator saves and publishes it.')}</div></section>`; }
+async function renderPublicContentCollection(root, definition) { root.innerHTML = publicPageHeader(definition.eyebrow, definition.title, definition.description, '') + `<section class="public-page-card" id="publicCollectionBody">${publicLoading()}</section>`; const body = root.querySelector('#publicCollectionBody'); try { const response = await apiRequest(`/site/content?type=${encodeURIComponent(definition.type)}`); const items = response.content || []; body.innerHTML = `<div class="public-page-grid">${items.length ? items.map(publicContentCard).join('') : publicEmptyState(`No ${definition.title.toLowerCase()} yet`, 'Published content will appear here after an administrator saves and publishes it.')}</div>`; } catch (error) { body.innerHTML = publicErrorState(error?.status === 503 ? 'This catalogue is temporarily unavailable. Please try again in a moment.' : (error.message || 'Unable to load this catalogue.')); body.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute()); } }
 async function renderPublicContentDetail(root, definition, id) { const response = await apiRequest(`/site/content/${encodeURIComponent(definition.type)}/${encodeURIComponent(id)}`); const item = response.content; if (!item) throw new Error('Content not found'); root.innerHTML = publicPageHeader(definition.eyebrow, item.title, item.subtitle || definition.description, '') + `<section class="public-page-card"><div class="public-detail"><div>${item.imageUrl ? `<img class="public-detail-image" src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.title)}" />` : publicEmptyState('No image published','This item does not have an image yet.')}<div class="public-detail-json"><h3>About this service</h3><p class="lead">${escapeHtml(item.description || item.subtitle || 'Published Sadik Travels content.')}</p></div></div><div><h2>${escapeHtml(item.title)}</h2><p class="lead">${escapeHtml(item.subtitle || '')}</p>${publicMetadataHtml(item.metadata)}<div class="public-detail-actions">${publicDetailActions(item)}</div></div></div></section>`; }
 async function openTourCheckoutWizard(tour) {
   const modal = $('#genericModal');
@@ -973,7 +846,7 @@ async function openTourCheckoutWizard(tour) {
   });
 }
 
-async function renderPublicTours(root, id = '') { if (id) { const response = await apiRequest(`/tours/${encodeURIComponent(id)}`); const tour = response.tour; if (!tour) throw new Error('Tour not found'); trackAnalytics('tour_view', { id: tour.id, country: tour.country }); setSeo({ title: tour.title, description: `${tour.durationDays} days / ${tour.durationNights} nights in ${tour.country} — book with Sadik Travels.`, canonical: `/tours/${tour.id}`, image: tour.imageUrl, jsonLd: { '@context': 'https://schema.org', '@type': 'TouristTrip', name: tour.title, description: tour.description || undefined, touristType: tour.tourType } }); const metadata = tour.metadata || {}; root.innerHTML = publicPageHeader('Go Get Tour', tour.title, `${tour.durationDays} days / ${tour.durationNights} nights · ${tour.country}`, '') + `<section class="public-page-card"><div class="public-detail"><div>${tour.imageUrl ? `<img class="public-detail-image" src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" />` : publicEmptyState('No image published','This package does not have an image yet.')}<div class="public-detail-json"><h3>Package description</h3><p class="lead">${escapeHtml(tour.description || 'Published tour package details.')}</p></div></div><div><h2>${escapeHtml(tour.title)}</h2><p class="lead">${escapeHtml(tour.destinations.join(' · '))}</p><div class="public-detail-meta"><div><dt>Duration</dt><dd>${tour.durationDays} days / ${tour.durationNights} nights</dd></div><div><dt>Starting price</dt><dd>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</dd></div></div>${publicMetadataHtml(metadata)}<div class="public-detail-actions"><button type="button" class="btn btn-primary" data-public-tour-book="${escapeHtml(tour.id)}">Book this tour</button><a class="btn btn-outline" href="#contact">Contact Sadik Travels</a></div></div></div></section>`; $('#publicRouteRoot [data-public-tour-book]')?.addEventListener('click',()=>{ void openTourCheckoutWizard(tour); }); return; } const response = await apiRequest('/tours'); const tours = response.tours || []; root.innerHTML = publicPageHeader('Go Get Tour','Tour packages','Browse all published tour packages from the existing Sadik Travels catalogue','') + `<section class="public-page-card"><div class="public-page-grid">${tours.length ? tours.map(tour => `<a class="public-page-item" href="/tours/${escapeHtml(tour.id)}" data-public-route="/tours/${escapeHtml(tour.id)}"><div class="public-page-item-image">${tour.imageUrl ? `<img src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" loading="lazy" />` : '<span>No image published</span>'}</div><div class="public-page-item-body"><small>${escapeHtml(tour.tourType)}</small><h2>${escapeHtml(tour.title)}</h2><p>${escapeHtml(tour.destinations.join(' · '))}</p><strong>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</strong></div></a>`).join('') : publicEmptyState('No tours yet','Published tour packages will appear here after an admin creates them.','<a class="btn btn-primary" href="/#searchPanel">Open tour search</a>')}</div></section>`; }
+async function renderPublicTours(root, id = '') { if (id) { const response = await apiRequest(`/tours/${encodeURIComponent(id)}`); const tour = response.tour; if (!tour) throw new Error('Tour not found'); trackAnalytics('tour_view', { id: tour.id, country: tour.country }); setSeo({ title: tour.title, description: `${tour.durationDays} days / ${tour.durationNights} nights in ${tour.country} — book with Sadik Travels.`, canonical: `/tours/${tour.id}`, image: tour.imageUrl, jsonLd: { '@context': 'https://schema.org', '@type': 'TouristTrip', name: tour.title, description: tour.description || undefined, touristType: tour.tourType } }); const metadata = tour.metadata || {}; root.innerHTML = publicPageHeader('Go Get Tour', tour.title, `${tour.durationDays} days / ${tour.durationNights} nights · ${tour.country}`, '') + `<section class="public-page-card"><div class="public-detail"><div>${tour.imageUrl ? `<img class="public-detail-image" src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" />` : publicEmptyState('No image published','This package does not have an image yet.')}<div class="public-detail-json"><h3>Package description</h3><p class="lead">${escapeHtml(tour.description || 'Published tour package details.')}</p></div></div><div><h2>${escapeHtml(tour.title)}</h2><p class="lead">${escapeHtml(tour.destinations.join(' · '))}</p><div class="public-detail-meta"><div><dt>Duration</dt><dd>${tour.durationDays} days / ${tour.durationNights} nights</dd></div><div><dt>Starting price</dt><dd>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</dd></div></div>${publicMetadataHtml(metadata)}<div class="public-detail-actions"><button type="button" class="btn btn-primary" data-public-tour-book="${escapeHtml(tour.id)}">Book this tour</button><a class="btn btn-outline" href="#contact">Contact Sadik Travels</a></div></div></div></section>`; $('#publicRouteRoot [data-public-tour-book]')?.addEventListener('click',()=>{ void openTourCheckoutWizard(tour); }); return; } root.innerHTML = publicPageHeader('Tours','Tour packages','Browse all published tour packages from the Sadik Travels catalogue','') + `<section class="public-page-card" id="toursListBody">${publicLoading()}</section>`; const toursBody = root.querySelector('#toursListBody'); let tours = []; try { const response = await apiRequest('/tours'); tours = response.tours || []; } catch (error) { toursBody.innerHTML = publicErrorState(error?.status === 503 ? 'Tour packages are temporarily unavailable. Please try again in a moment.' : (error.message || 'Unable to load tour packages.')); toursBody.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute()); return; } toursBody.innerHTML = `<div class="public-page-grid">${tours.length ? tours.map(tour => `<a class="public-page-item" href="/tours/${escapeHtml(tour.id)}" data-public-route="/tours/${escapeHtml(tour.id)}"><div class="public-page-item-image">${tour.imageUrl ? `<img src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" loading="lazy" />` : '<span>No image published</span>'}</div><div class="public-page-item-body"><small>${escapeHtml(tour.tourType)}</small><h2>${escapeHtml(tour.title)}</h2><p>${escapeHtml(tour.destinations.join(' · '))}</p><strong>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</strong></div></a>`).join('') : publicEmptyState('No tours yet','Published tour packages will appear here after an admin creates them.','<a class="btn btn-primary" href="/#searchPanel">Open tour search</a>')}</div>`; }
 let agentsPageState = { agents: [], q: '', filter: 'all', ready: false };
 const BD_PLACES = ['bangladesh','dhaka','chattogram','chittagong',"cox's bazar",'coxsbazar','sylhet','khulna','rajshahi','barishal','rangpur','mymensingh','cumilla','comilla','gazipur','narayanganj'];
 function agentInitials(agent) { return (agent.fullName || '?').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
@@ -1005,7 +878,7 @@ function drawAgentsPage(root) {
   const agents = agentsPageState.agents;
   const filtered = filterAgents(agents, agentsPageState.q, agentsPageState.filter);
   const filters = [['all', 'All'], ['available', 'Available'], ['international', 'International'], ['domestic', 'Domestic']];
-  root.innerHTML = publicPageHeader('People', 'Travel Agents', 'Meet our verified Sadik Travels travel specialists. Connect with the right expert for flights, hotels, visas, Umrah and more.', '') + `<section class="public-page-card"><div class="agents-toolbar"><div class="agents-search"><svg class="search-icon"><use href="#i-search"></use></svg><input id="agentsSearchInput" type="search" placeholder="Search by name, location, language or specialty" value="${escapeHtml(agentsPageState.q)}" autocomplete="off" aria-label="Search travel agents" />${agentsPageState.q ? `<button type="button" class="agents-clear" id="agentsClearSearch" aria-label="Clear search">${icon('i-close')}</button>` : ''}</div><div class="agents-filters">${filters.map(([key, label]) => `<button type="button" class="agents-filter ${agentsPageState.filter === key ? 'active' : ''}" data-agent-filter="${key}">${label}</button>`).join('')}</div></div><p class="agents-result-count">Showing <strong>${filtered.length}</strong> of ${agents.length} travel agent${agents.length === 1 ? '' : 's'}</p><div class="agents-page-grid">${filtered.length ? filtered.map(agentCardHtml).join('') : publicEmptyState('No travel agents found', 'Try another search or filter to find a specialist.', '')}</div></section>`;
+  root.innerHTML = publicPageHeader('People', 'Travel Agents', 'Meet our verified Sadik Travels travel specialists. Connect with the right expert for hotels, homes & villas, tours and holiday packages.', '') + `<section class="public-page-card"><div class="agents-toolbar"><div class="agents-search"><svg class="search-icon"><use href="#i-search"></use></svg><input id="agentsSearchInput" type="search" placeholder="Search by name, location, language or specialty" value="${escapeHtml(agentsPageState.q)}" autocomplete="off" aria-label="Search travel agents" />${agentsPageState.q ? `<button type="button" class="agents-clear" id="agentsClearSearch" aria-label="Clear search">${icon('i-close')}</button>` : ''}</div><div class="agents-filters">${filters.map(([key, label]) => `<button type="button" class="agents-filter ${agentsPageState.filter === key ? 'active' : ''}" data-agent-filter="${key}">${label}</button>`).join('')}</div></div><p class="agents-result-count">Showing <strong>${filtered.length}</strong> of ${agents.length} travel agent${agents.length === 1 ? '' : 's'}</p><div class="agents-page-grid">${filtered.length ? filtered.map(agentCardHtml).join('') : publicEmptyState('No travel agents found', 'Try another search or filter to find a specialist.', '')}</div></section>`;
   bindAgentsPage(root);
 }
 function bindAgentsPage(root) {
@@ -1021,7 +894,7 @@ async function renderPublicAgents(root, id = '') {
   if (!agentsPageState.ready) {
     root.innerHTML = publicPageHeader('People', 'Travel Agents', 'Meet our verified Sadik Travels travel specialists.', '') + `<section class="public-page-card"><div class="agents-page-grid">${Array.from({ length: 8 }, agentSkeletonHtml).join('')}</div></section>`;
     try { const response = await apiRequest('/site/agents'); agentsPageState.agents = response.agents || []; agentsPageState.ready = true; }
-    catch { root.innerHTML = publicErrorState('Travel agents are temporarily unavailable. Please try again shortly.'); root.querySelector('[data-public-retry]')?.addEventListener('click', () => { agentsPageState.ready = false; void renderPublicRoute(); }); return; }
+    catch (error) { const grid = root.querySelector('.agents-page-grid') || root; grid.innerHTML = publicErrorState(error?.status === 503 ? 'Travel agents are temporarily unavailable. Please try again in a moment.' : 'Travel agents are temporarily unavailable. Please try again shortly.'); root.querySelector('[data-public-retry]')?.addEventListener('click', () => { agentsPageState.ready = false; void renderPublicRoute(); }); return; }
   }
   drawAgentsPage(root);
 }
@@ -1041,7 +914,6 @@ async function renderPublicAgentProfile(root, id) {
   const languages = (agent.languages || []).filter(Boolean);
   root.innerHTML = publicPageHeader('People', 'Travel Agents', 'Connect with a verified Sadik Travels travel specialist.', `<a class="btn btn-outline" href="/travel-agents" data-public-route="/travel-agents">All agents</a>`) + `<div class="agent-profile"><aside class="agent-profile-card"><div class="agent-profile-photo">${photo}<span class="id-badge">Official Member</span></div><div class="agent-profile-body"><h2>${escapeHtml(agent.fullName)}</h2><p class="agent-profile-role">${escapeHtml(agent.jobTitle || agent.specialization || 'Travel Specialist')}</p><p class="agent-profile-location">${icon('i-location')}${escapeHtml(agent.officeLocation || agent.city || 'Bangladesh')}</p><div class="agent-profile-contacts">${contacts.length ? contacts.join('') : '<span class="result-summary">Contact details will appear here once published.</span>'}</div></div></aside><div class="agent-profile-info"><h2>About ${escapeHtml((agent.fullName || 'the agent').split(' ')[0])}</h2><div class="agent-profile-section"><h3>Profile</h3><p>${escapeHtml(agent.fullDescription || agent.shortBio || 'A verified Sadik Travels travel specialist ready to help you plan and book your journey.')}</p></div>${languages.length || agent.specialization ? `<div class="agent-profile-section"><h3>Languages &amp; specialties</h3><div class="chip-list">${languages.map(language => `<span class="chip">${escapeHtml(language)}</span>`).join('')}${agent.specialization ? `<span class="chip">${escapeHtml(agent.specialization)}</span>` : ''}</div></div>` : ''}<div class="agent-profile-section"><h3>Details</h3><dl class="agent-profile-meta">${metaRows.length ? metaRows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('') : '<div><dt>Status</dt><dd>Verified specialist</dd></div>'}</dl></div></div></div>`;
 }
-async function renderPublicServiceLanding(root, service) { root.innerHTML=publicPageHeader('Services',service.title,service.description,'')+`<section class="public-page-card"><div class="provider-state"><div class="provider-state-icon">${icon(service.tab==='flights'?'i-plane':service.tab==='hotels'?'i-hotel':'i-home')}</div><div><strong>Live ${escapeHtml(service.title)} search</strong><p>Availability and prices are returned only by the configured live provider. No static inventory is shown.</p></div></div><div class="public-detail-actions"><a class="btn btn-primary" href="/?service=${escapeHtml(service.tab)}" data-public-route="/?service=${escapeHtml(service.tab)}">Open ${escapeHtml(service.title)} search</a></div></section>`; }
 async function renderPaymentReturn(root, query) {
   const status = query.get('payment') || 'pending';
   const paymentId = query.get('paymentId') || query.get('tran_id') || '';
@@ -1064,7 +936,7 @@ async function renderPublicRoute() {
   trackAnalytics('page_view', { route: route.parts[0] || 'home' });
   if (route.path === '/' || route.path === '/') {
     root.hidden = true; home.hidden = false;
-    setSeo({ title: '', description: 'Book flights, hotels, homes, visa services, tours and eSIMs with Sadik Travels.', canonical: '/' });
+    setSeo({ title: '', description: 'Book hotels, homes & villas, tours and holiday packages with Sadik Travels.', canonical: '/' });
     if (route.query.get('service')) requestAnimationFrame(() => activateTab(route.query.get('service'), true));
     const hash = route.url.hash.replace(/^#/, '');
     if (hash) { requestAnimationFrame(() => setTimeout(() => scrollToHashTarget(hash), 80)); }
@@ -1073,7 +945,7 @@ async function renderPublicRoute() {
   home.hidden = true; root.hidden = false;
   root.innerHTML = publicLoading();
   try {
-    const sectionTitles = { flights: ['Flight booking', 'Search flights, compare fares and book with Sadik Travels.'], hotels: ['Hotel booking', 'Search and book verified hotels with Sadik Travels.'], homes: ['Homes & villas', 'Book homes, apartments and villas with Sadik Travels.'], visa: ['Visa services', 'Visa processing and documentation with Sadik Travels.'], tours: ['Go Get Tour', 'Tour packages across Bangladesh and the world.'], esim: ['eSIM marketplace', 'Instant eSIM plans for travel in 190+ countries.'], 'umrah-packages': ['Umrah packages', 'Complete Umrah packages with visa and hotels near Haram.'], 'holiday-packages': ['Holiday packages', 'Curated holidays bundled into one price.'], 'medical-tourism': ['Medical tourism', 'Treatment abroad with hospital coordination.'], 'card-offers': ['Card offers', 'Bank card discounts and instalment plans.'], 'airlines-offers': ['Airlines offers', 'Promotional fares and airline campaigns.'], explore: ['Explore destinations', 'Discover destinations across Bangladesh and the world.'], 'travel-agents': ['Travel agents', 'Connect with verified Sadik Travels travel specialists.'], 'track-booking': ['Track booking', 'Follow your booking status in real time.'], support: ['Support', 'Sadik Travels support centre.'], orders: ['My bookings', 'Your bookings and orders with Sadik Travels.'], account: ['My account', 'Manage your profile, bookings and preferences.'], cart: ['My cart', 'Review items in your Sadik Travels cart.'], wishlist: ['Wishlist', 'Products you saved with Sadik Travels.'], checkout: ['Checkout', 'Secure checkout with Sadik Travels.'], app: ['Sadik App', 'Track flights with the all-in-one Sadik Travels app.'] };
+    const sectionTitles = { hotels: ['Hotel booking', 'Search and book verified hotels with Sadik Travels.'], homes: ['Homes & villas', 'Book homes, apartments and villas with Sadik Travels.'], 'homes-villas': ['Homes & villas', 'Book homes, apartments and villas with Sadik Travels.'], tours: ['Tours', 'Tour packages across Bangladesh and the world.'], 'holiday-packages': ['Holiday packages', 'Curated holidays bundled into one price.'], explore: ['Explore destinations', 'Discover destinations across Bangladesh and the world.'], 'travel-agents': ['Travel agents', 'Connect with verified Sadik Travels travel specialists.'], 'track-booking': ['Track booking', 'Follow your booking status in real time.'], support: ['Support', 'Sadik Travels support centre.'], orders: ['My bookings', 'Your bookings and orders with Sadik Travels.'], account: ['My account', 'Manage your profile, bookings and preferences.'], payments: ['Payments', 'Your Sadik Travels payment history and invoices.'], cart: ['My cart', 'Review items in your Sadik Travels cart.'], wishlist: ['Wishlist', 'Products you saved with Sadik Travels.'], checkout: ['Checkout', 'Secure checkout with Sadik Travels.'], offers: ['Travel offers', 'Published offers from Sadik Travels.'] };
     const meta = sectionTitles[route.parts[0]];
     if (meta) setSeo({ title: meta[0], description: meta[1], canonical: route.path });
     if (window.SadikPages && window.SadikPages.routes[route.parts[0]]) { await window.SadikPages.resolve(root, route); return; }
@@ -1095,12 +967,19 @@ async function renderPublicRoute() {
       const definition = PUBLIC_COLLECTIONS[route.parts[0]];
       if (route.parts[1]) await renderPublicContentDetail(root, definition, route.parts[1]);
       else await renderPublicContentCollection(root, definition);
-    } else if (PUBLIC_SERVICE_LANDING[route.parts[0]] && route.parts.length === 1) await renderPublicServiceLanding(root, PUBLIC_SERVICE_LANDING[route.parts[0]]);
+    }
     else if (route.parts[0] === 'tours') await renderPublicTours(root, route.parts[1] || '');
     else if (route.parts[0] === 'travel-agents') await renderPublicAgents(root, route.parts[1] || '');
     else { root.innerHTML = publicErrorState('This public route does not exist.'); }
   } catch (error) {
-    root.innerHTML = publicErrorState(error.message?.toLowerCase().includes('not found') ? 'The requested content was not found.' : 'The public service is temporarily unavailable.');
+    const detail = error?.status === 503 || error?.code === 'SERVICE_UNAVAILABLE'
+      ? 'The public service is temporarily unavailable. Please try again in a moment.'
+      : error?.status === 404 || error?.message?.toLowerCase().includes('not found')
+        ? 'The requested content was not found.'
+        : error?.code === 'REQUEST_TIMEOUT' || error?.message?.toLowerCase().includes('network')
+          ? (error.message || 'Network problem. Please check your connection and try again.')
+          : 'Something went wrong while loading this page. Please try again.';
+    root.innerHTML = publicErrorState(detail);
   }
   root.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute());
 }
@@ -1108,17 +987,10 @@ function bindPublicRouter(){document.addEventListener('click',event=>{const link
 function publicNavigate(route,replace=false){const href=publicHref(route);if(href===`${location.pathname}${location.search}`){void renderPublicRoute();return;}if(replace)history.replaceState({},'',href);else history.pushState({},'',href);if(window.innerWidth<=767)closeSidebar();void renderPublicRoute();}
 
 const HOME_SECTIONS = [
-  { id: 'home-hotels', eyebrow: 'Stays', title: 'Hotels', subtitle: "Find memorable stays across Bangladesh and abroad. Browse curated hotels or submit a live search to check real-time availability.", type: 'hotel', icon: 'i-hotel', limit: 4, viewAll: '/hotels' },
-  { id: 'homes', eyebrow: 'Properties', title: 'Homes', subtitle: 'Smart rent and buy property solutions from Sadik Homes for every traveller and family.', type: 'home', icon: 'i-home', limit: 4, viewAll: '/homes' },
-  { id: 'visa-services', eyebrow: 'Documents', title: 'Visa Services', subtitle: 'Visa information and application support from Sadik Travels visa experts.', type: 'visa', icon: 'i-passport', limit: 4, viewAll: '/visa' },
-  { id: 'home-tours', eyebrow: 'Go Get Tour', title: 'Go Get Tour', subtitle: 'Curated Bangladesh and international tour packages with clear pricing and Sadik Travels support.', source: 'tours', icon: 'i-map', limit: 4, viewAll: '/tours' },
-  { id: 'home-esim', eyebrow: 'Connectivity', title: 'eSIM', subtitle: 'Stay connected instantly with travel eSIMs for local and global destinations.', type: 'esim', icon: 'i-sim', limit: 4, viewAll: '/esim' },
-  { id: 'special-umrah-fare', eyebrow: 'Offers', title: 'Special Umrah Fare', subtitle: 'Exclusive Umrah fares managed and published by Sadik Travels.', type: 'umrah_fare', icon: 'i-award', limit: 4, viewAll: '/special-umrah-fare' },
-  { id: 'umrah-packages', eyebrow: 'Packages', title: 'Umrah Packages', subtitle: 'Complete Umrah packages with flights, hotels and transport.', type: 'umrah_package', icon: 'i-map', limit: 4, viewAll: '/umrah-packages' },
-  { id: 'holiday-packages', eyebrow: 'Holidays', title: 'Holiday Packages', subtitle: 'Hand-picked holiday itineraries for families, couples and groups.', type: 'holiday_package', icon: 'i-plane', limit: 4, viewAll: '/holiday-packages' },
-  { id: 'medical-tourism', eyebrow: 'Wellness', title: 'Medical Tourism', subtitle: 'Trusted medical tourism services and treatment partnerships.', type: 'medical_tourism', icon: 'i-hotel', limit: 4, viewAll: '/medical-tourism' },
-  { id: 'card-offers', eyebrow: 'Offers', title: 'Card Offers', subtitle: 'Bank and card travel offers published by Sadik Travels.', type: 'card_offer', icon: 'i-check', limit: 4, viewAll: '/card-offers' },
-  { id: 'airline-offers', eyebrow: 'Offers', title: 'Airlines Offers', subtitle: 'Published airline fares and promotional offers.', type: 'airline_offer', icon: 'i-plane', limit: 4, viewAll: '/airline-offers' },
+  { id: 'home-hotels', eyebrow: 'Stays', title: 'Featured Hotels', subtitle: "Find memorable stays across Bangladesh and abroad. Browse curated hotels or submit a live search to check real-time availability.", type: 'hotel', icon: 'i-hotel', limit: 4, viewAll: '/hotels' },
+  { id: 'homes', eyebrow: 'Properties', title: 'Homes & Villas', subtitle: 'Private homes, apartments and villas with clear nightly pricing for every traveller and family.', type: 'home', icon: 'i-home', limit: 4, viewAll: '/homes' },
+  { id: 'home-tours', eyebrow: 'Tours', title: 'Popular Tours', subtitle: 'Curated Bangladesh and international tour packages with clear pricing and Sadik Travels support.', source: 'tours', icon: 'i-map', limit: 4, viewAll: '/tours' },
+  { id: 'holiday-packages', eyebrow: 'Holidays', title: 'Holiday Packages', subtitle: 'Hand-picked holiday itineraries for families, couples and groups.', type: 'holiday_package', icon: 'i-palm', limit: 4, viewAll: '/holiday-packages' },
   { id: 'explore', eyebrow: 'Explore', title: 'Explore', subtitle: 'Destinations, travel tips and inspiration for your next journey.', type: 'explore', extraTypes: ['destination'], icon: 'i-location', limit: 5, viewAll: '/explore' }
 ];
 const sectionEmpty = (title, message) => `<div class="public-content-empty"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span></div>`;
@@ -1235,7 +1107,7 @@ function setupSectionObserver() {
   sections.forEach(section => homeObserver.observe(section));
 }
 function scrollToHashTarget(key) {
-  const target = key === 'flights' ? $('#searchPanel') : document.getElementById(key);
+  const target = key === 'hotels' && !document.getElementById(key) ? $('#searchPanel') : document.getElementById(key);
   if (!target) { window.scrollTo({ top: 0, behavior: 'auto' }); return; }
   const headerHeight = window.innerWidth >= 1024 ? 64 : 58;
   const top = target.getBoundingClientRect().top + window.scrollY - headerHeight - 14;
@@ -1251,11 +1123,11 @@ function navigateToSection(key) {
   if (window.innerWidth < 1024) closeSidebar();
   const path = location.pathname.replace(/\/+$/, '') || '/';
   if (path !== '/') {
-    history.pushState({}, '', key === 'flights' ? '/' : `/#${key}`);
-    void renderPublicRoute().then(() => requestAnimationFrame(() => setTimeout(() => scrollToHashTarget(key === 'flights' ? 'flights' : key), 80)));
+    history.pushState({}, '', `/#${key}`);
+    void renderPublicRoute().then(() => requestAnimationFrame(() => setTimeout(() => scrollToHashTarget(key), 80)));
     return;
   }
-  history.replaceState({}, '', key === 'flights' ? location.pathname + location.search : `/#${key}`);
+  history.replaceState({}, '', `/#${key}`);
   scrollToHashTarget(key);
 }
 
@@ -1386,7 +1258,7 @@ async function renderHotelLanding(root) {
   document.title = 'Hotels | Sadik Travels';
   root.innerHTML = publicPageHeader('Stays', 'Hotels', 'Search and book verified hotels, resorts and apartments with Sadik Travels.', '') + `<section class="public-page-card"><div class="hotel-landing-search">${hotelCompactSearchForm({ destination: '', checkIn: isoDateFromToday(1), checkOut: isoDateFromToday(2), adults: 2, children: 0, rooms: 1 })}</div></section>`;
   bindHotelModifyForm({ destination: '', checkIn: isoDateFromToday(1), checkOut: isoDateFromToday(2), adults: 2, children: 0, rooms: 1 });
-  try { const r = await apiRequest('/hotels?pageSize=6'); const featured = r.hotels || []; const grid = $('#publicRouteRoot .hotel-featured'); root.insertAdjacentHTML('beforeend', `<section class="public-page-card"><div class="section-heading"><div><span class="hs-eyebrow">${icon('i-hotel')} Featured hotels</span><h2>Popular stays</h2><p>A selection of published Sadik Travels properties.</p></div></div><div class="hotel-results-grid">${featured.length ? featured.map(h => hotelCardHtml(h, { checkIn: isoDateFromToday(1), checkOut: isoDateFromToday(2), adults: 2, children: 0, rooms: 1 })).join('') : publicEmptyState('No hotels published yet', 'Hotels will appear here after an administrator adds and publishes them.', '<a class="btn btn-primary" href="/" data-public-route="/">Back home</a>')}</div></section>`); } catch {}
+  try { const r = await apiRequest('/hotels?pageSize=6'); const featured = r.hotels || []; const grid = $('#publicRouteRoot .hotel-featured'); root.insertAdjacentHTML('beforeend', `<section class="public-page-card"><div class="section-heading"><div><span class="hs-eyebrow">${icon('i-hotel')} Featured hotels</span><h2>Popular stays</h2><p>A selection of published Sadik Travels properties.</p></div></div><div class="hotel-results-grid">${featured.length ? featured.map(h => hotelCardHtml(h, { checkIn: isoDateFromToday(1), checkOut: isoDateFromToday(2), adults: 2, children: 0, rooms: 1 })).join('') : publicEmptyState('No hotels published yet', 'Hotels will appear here after an administrator adds and publishes them.', '<a class="btn btn-primary" href="/" data-public-route="/">Back home</a>')}</div></section>`); } catch (error) { root.insertAdjacentHTML('beforeend', `<section class="public-page-card">${publicErrorState(error?.status === 503 ? 'Hotel results are temporarily unavailable. Please try again in a moment.' : 'Unable to load hotel results. Please try again.')}</section>`); root.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute()); }
 }
 async function renderHotelSearch(root, query) {
   document.title = 'Hotel search | Sadik Travels';

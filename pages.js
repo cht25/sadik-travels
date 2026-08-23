@@ -127,7 +127,6 @@
     if (product.beds) bits.push(`${icon('i-bed')}${product.beds} beds`);
     if (product.airline) bits.push(`${icon('i-plane')}${esc(product.airline)}`);
     if (product.bank) bits.push(`${icon('i-card')}${esc(product.bank)}`);
-    if (product.hospital) bits.push(`${icon('i-medical')}${esc(product.hospital)}`);
     return bits.slice(0, 3).map((bit) => `<span>${bit}</span>`).join('');
   }
 
@@ -183,47 +182,13 @@
   };
 
   /* ------------------------------------------------- catalogue definitions */
-  const TYPE_ROUTE = {
-    esim: 'esim', umrah_package: 'umrah-packages', umrah_fare: 'special-umrah-fare', holiday_package: 'holiday-packages',
-    medical_tourism: 'medical-tourism', visa_service: 'visa', home: 'homes', card_offer: 'card-offers',
-    airline_offer: 'airlines-offers', destination: 'explore', flight_offer: 'flights', accessory: 'shop'
-  };
+  const TYPE_ROUTE = { holiday_package: 'holiday-packages', home: 'homes', destination: 'explore' };
 
   const COLLECTIONS = {
-    esim: {
-      type: 'esim', route: 'esim', eyebrow: 'Connectivity', title: 'eSIM Marketplace',
-      description: 'Stay connected the moment you land. Instant digital SIM plans with country and regional coverage.',
-      filters: ['q', 'country', 'price', 'sort'], emptyTitle: 'No eSIM plans published yet'
-    },
-    'umrah-packages': {
-      type: 'umrah_package', route: 'umrah-packages', eyebrow: 'Pilgrimage', title: 'Umrah Packages',
-      description: 'Complete Umrah packages with visa, hotels near Haram, transport and guided ziyarat.',
-      filters: ['q', 'price', 'sort'], emptyTitle: 'No Umrah packages published yet'
-    },
-    'special-umrah-fare': {
-      type: 'umrah_fare', route: 'special-umrah-fare', eyebrow: 'Limited fares', title: 'Special Umrah Fare',
-      description: 'Negotiated airline fares for Umrah pilgrims, updated by the Sadik Travels fares desk.',
-      filters: ['q', 'price', 'sort', 'airline'], emptyTitle: 'No special fares published yet'
-    },
     'holiday-packages': {
       type: 'holiday_package', route: 'holiday-packages', eyebrow: 'Holidays', title: 'Holiday Packages',
       description: 'Curated holidays with flights, stays, transfers and experiences bundled into one price.',
       filters: ['q', 'country', 'price', 'sort'], emptyTitle: 'No holiday packages published yet'
-    },
-    'medical-tourism': {
-      type: 'medical_tourism', route: 'medical-tourism', eyebrow: 'Health travel', title: 'Medical Tourism',
-      description: 'Treatment abroad with hospital coordination, appointments, visa support and travel logistics.',
-      filters: ['q', 'country', 'sort'], emptyTitle: 'No medical tourism programmes published yet'
-    },
-    'card-offers': {
-      type: 'card_offer', route: 'card-offers', eyebrow: 'Bank offers', title: 'Card Offers',
-      description: 'Discounts and instalment plans with partner bank cards on Sadik Travels bookings.',
-      filters: ['q', 'sort'], emptyTitle: 'No card offers published yet'
-    },
-    'airlines-offers': {
-      type: 'airline_offer', route: 'airlines-offers', eyebrow: 'Airline deals', title: 'Airlines Offers',
-      description: 'Promotional fares, route launches and airline campaigns available through Sadik Travels.',
-      filters: ['q', 'sort'], emptyTitle: 'No airline offers published yet'
     },
     explore: {
       type: 'destination', route: 'explore', eyebrow: 'Inspiration', title: 'Explore Destinations',
@@ -234,11 +199,6 @@
       type: 'home', route: 'homes', eyebrow: 'Stays', title: 'Homes, Apartments & Villas',
       description: 'Entire homes, serviced apartments, villas, resorts and guest houses for longer, calmer stays.',
       filters: ['q', 'country', 'price', 'sort'], emptyTitle: 'No homes published yet'
-    },
-    visa: {
-      type: 'visa_service', route: 'visa', eyebrow: 'Documentation', title: 'Visa Services',
-      description: 'Visa processing with document checklists, transparent government and service fees, and live tracking.',
-      filters: ['q', 'country', 'sort'], emptyTitle: 'No visa services published yet'
     }
   };
 
@@ -313,231 +273,6 @@
   }
 
   /* ------------------------------------------------------ eSIM marketplace */
-  async function renderEsimMarketplace(root, query) {
-    const params = new URLSearchParams();
-    params.set('type', 'esim');
-    params.set('pageSize', '12');
-    ['q', 'country', 'dataAmount', 'validityDays', 'region', 'network', 'minPrice', 'maxPrice', 'sort', 'page'].forEach((key) => { if (query.get(key)) params.set(key, query.get(key)); });
-
-    root.innerHTML = `<div class="sf-page">
-      ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'eSIM' }])}
-      ${pageHead({ eyebrow: 'Connectivity', title: 'eSIM Marketplace', description: 'Instant digital SIM plans for 190+ countries and regions. Pick a country, choose your data, and stay connected the moment you land.' })}
-      <div class="sf-esim-layout">
-        <aside class="sf-filters" id="sfFilters">${loadingState('Loading filters…')}</aside>
-        <div class="sf-esim-main" id="sfEsimMain">
-          <div class="sf-esim-countries" id="sfEsimCountries">${skeletonGrid(3).replace('sf-grid', 'sf-grid sf-grid-2')}</div>
-          <div class="sf-results" id="sfResults">${skeletonGrid(6)}</div>
-        </div>
-      </div>
-    </div>`;
-    track('esim_view', { country: query.get('country') || 'all' });
-
-    const countriesBox = $('#sfEsimCountries', root);
-    const resultsBox = $('#sfResults', root);
-    const filtersBox = $('#sfFilters', root);
-
-    let facets = { minPrice: 0, maxPrice: 0, countries: [], regions: [], networks: [], dataAmounts: [], validities: [] };
-    try { facets = (await api.get(`/catalog/facets/esim`)).facets || facets; } catch { /* filters degrade gracefully */ }
-
-    const esimCountryChips = (list, active) => `
-      <div class="sf-esim-countries-head"><strong>${icon('i-globe')} Popular countries</strong><a class="sf-link" href="/esim" data-public-route="/esim">All countries</a></div>
-      <div class="sf-chip-row">${list.map((country) => `<a class="sf-chip ${active === (country.name ?? country) ? 'is-active' : ''}" href="/esim?country=${encodeURIComponent(country.name ?? country)}" data-public-route="/esim?country=${encodeURIComponent(country.name ?? country)}">${esc(country.name ?? country)}${country.count ? `<small>${country.count}</small>` : ''}</a>`).join('') || '<span class="sf-hint">Countries appear once an admin publishes eSIM plans.</span>'}</div>`;
-    countriesBox.innerHTML = `<div class="sf-panel sf-esim-countries-panel">${esimCountryChips((facets.countries || []).slice(0, 16), query.get('country') || '')}</div>`;
-
-    filtersBox.innerHTML = `<form class="sf-filter-card" data-sf-filter-form>
-      <div class="sf-filter-head"><strong>${icon('i-sliders')} Filters</strong><button class="sf-link" type="button" data-sf-clear-filters>Reset</button></div>
-      <label class="sf-field"><span>Search</span><input type="search" name="q" value="${esc(query.get('q') || '')}" placeholder="Country, carrier or network" /></label>
-      ${(facets.countries || []).length ? `<label class="sf-field"><span>Country</span><select name="country"><option value="">All countries</option>${facets.countries.map((country) => `<option value="${esc(country.name)}" ${query.get('country') === country.name ? 'selected' : ''}>${esc(country.name)} (${country.count})</option>`).join('')}</select></label>` : ''}
-      ${(facets.dataAmounts || []).length ? `<label class="sf-field"><span>Data</span><select name="dataAmount"><option value="">Any data</option>${facets.dataAmounts.map((amount) => `<option value="${esc(amount)}" ${query.get('dataAmount') === amount ? 'selected' : ''}>${esc(amount)}</option>`).join('')}</select></label>` : ''}
-      ${(facets.validities || []).length ? `<label class="sf-field"><span>Validity</span><select name="validityDays"><option value="">Any validity</option>${facets.validities.map((days) => `<option value="${days}" ${query.get('validityDays') === String(days) ? 'selected' : ''}>${days} days</option>`).join('')}</select></label>` : ''}
-      ${(facets.regions || []).length ? `<label class="sf-field"><span>Coverage region</span><select name="region"><option value="">All regions</option>${facets.regions.map((region) => `<option value="${esc(region)}" ${query.get('region') === region ? 'selected' : ''}>${esc(region)}</option>`).join('')}</select></label>` : ''}
-      ${facets.maxPrice > 0 ? `<div class="sf-field"><span>Price range (৳)</span><div class="sf-range-inputs"><input type="number" name="minPrice" min="0" placeholder="${Math.floor(facets.minPrice)}" value="${esc(query.get('minPrice') || '')}" /><input type="number" name="maxPrice" min="0" placeholder="${Math.ceil(facets.maxPrice)}" value="${esc(query.get('maxPrice') || '')}" /></div></div>` : ''}
-      <button class="btn btn-primary full-btn" type="submit">Apply filters</button>
-    </form>`;
-
-    try {
-      const result = await api.get(`/catalog?${params.toString()}`);
-      if (!result.products.length) {
-        resultsBox.innerHTML = emptyState(
-          'No eSIM plans found',
-          query.toString() ? 'No plans match these filters. Try another country or data amount.' : 'Our team is publishing eSIM plans. Please check back shortly.',
-          query.toString() ? `<button class="btn btn-outline" type="button" data-sf-clear-filters>Clear filters</button>` : `<a class="btn btn-primary" href="/" data-public-route="/">Back home</a>`
-        );
-        return;
-      }
-      resultsBox.innerHTML = `
-        <div class="sf-results-head">
-          <span class="sf-results-count"><strong>${result.total}</strong> plan${result.total === 1 ? '' : 's'}</span>
-          <label class="sf-sort"><span>Sort</span>
-            <select data-sf-sort>
-              ${[['recommended', 'Recommended'], ['price_asc', 'Price: low to high'], ['price_desc', 'Price: high to low'], ['rating', 'Rating'], ['newest', 'Newest']]
-                .map(([value, label]) => `<option value="${value}" ${query.get('sort') === value ? 'selected' : ''}>${label}</option>`).join('')}
-            </select>
-          </label>
-        </div>
-        <div class="sf-grid sf-grid-esim">${result.products.map(esimPlanCard).join('')}</div>
-        ${pagination(result)}`;
-    } catch (error) {
-      resultsBox.innerHTML = errorState(error.message);
-    }
-  }
-
-  const esimPlanCard = (plan) => {
-    const href = `/esim/${encodeURIComponent(plan.slug || plan.id)}`;
-    const discount = plan.originalPrice && plan.originalPrice > plan.price ? Math.round(((plan.originalPrice - plan.price) / plan.originalPrice) * 100) : 0;
-    const image = plan.heroImage?.url || plan.images?.[0]?.url;
-    const saved = state.wishlist.has(plan.id);
-    return `
-      <article class="sf-card sf-esim-card" data-product-id="${esc(plan.id)}">
-        <a class="sf-card-media" href="${esc(href)}" data-public-route="${esc(href)}">
-          ${image ? `<img src="${esc(image)}" alt="${esc(plan.title)}" loading="lazy" />` : `<span class="sf-card-media-fallback sf-esim-fallback">${icon('i-sim')}</span>`}
-          ${discount ? `<span class="sf-badge sf-badge-save">${discount}% off</span>` : ''}
-        </a>
-        <button class="sf-wish ${saved ? 'is-saved' : ''}" type="button" data-sf-wish="${esc(plan.id)}" aria-label="${saved ? 'Remove from wishlist' : 'Save to wishlist'}">${icon(saved ? 'i-heart-fill' : 'i-heart')}</button>
-        <div class="sf-card-body">
-          <div class="sf-esim-country">${icon('i-location')}${esc(plan.country || plan.region || 'Global')}</div>
-          <div class="sf-esim-data">
-            <strong>${esc(plan.dataAmount || 'Data plan')}</strong>
-            <span>${plan.validityDays ? `${plan.validityDays} days` : esc(plan.validity || 'Validity')}</span>
-          </div>
-          ${plan.network ? `<p class="sf-esim-network">${icon('i-sim')}${esc(plan.network)}${plan.provider ? ` · ${esc(plan.provider)}` : ''}</p>` : ''}
-          ${plan.coverage?.length ? `<p class="sf-esim-coverage">${esc(plan.coverage.slice(0, 3).join(' · '))}</p>` : ''}
-          <div class="sf-card-foot">
-            <div class="sf-price">${plan.originalPrice && plan.originalPrice > plan.price ? `<s>${money(plan.originalPrice, plan.currency)}</s>` : ''}<strong>${money(plan.price, plan.currency)}</strong></div>
-            <div class="sf-card-actions">
-              <a class="btn btn-primary btn-sm" href="${esc(href)}" data-public-route="${esc(href)}">Buy plan</a>
-            </div>
-          </div>
-        </div>
-      </article>`;
-  };
-
-  function parseUmrahMeta(product) {
-    const meta = product.metadata || {};
-    const onward = meta.onward || meta.outbound || {};
-    const ret = meta.return || meta.inbound || {};
-    const parseLeg = (leg, fallbackAirline) => ({
-      airline: leg.airline || product.airline || fallbackAirline || 'Airline',
-      flightNumber: leg.flightNumber || product.route || '',
-      departTime: leg.departTime || leg.departure || '08:40',
-      departDate: leg.departDate || product.startDate || '',
-      from: leg.from || 'DAC',
-      fromCity: leg.fromCity || 'Dhaka',
-      arriveTime: leg.arriveTime || '16:00',
-      arriveDate: leg.arriveDate || '',
-      to: leg.to || 'JED',
-      toCity: leg.toCity || 'Jeddah',
-      duration: leg.duration || '10hr 20min',
-      layover: leg.layover || '',
-      baggage: leg.baggage || product.dataAmount || '23kg'
-    });
-    return {
-      onward: parseLeg(onward, product.airline),
-      ret: parseLeg(ret, product.airline),
-      seats: meta.seats || product.availability || 0,
-      refundable: product.terms && /refund/i.test(product.terms) ? product.terms : (meta.refundable ? 'Refundable' : 'Non Refundable'),
-      baggageOut: meta.baggageOut || onward.baggage || '23kg',
-      baggageIn: meta.baggageIn || ret.baggage || '30kg'
-    };
-  }
-
-  async function renderUmrahFareBoard(root, query) {
-    const params = new URLSearchParams();
-    params.set('type', 'umrah_fare');
-    params.set('pageSize', '24');
-    ['q', 'minPrice', 'maxPrice', 'sort', 'page', 'airline'].forEach((key) => { if (query.get(key)) params.set(key, query.get(key)); });
-    root.innerHTML = `<div class="sf-page umrah-fare-page">
-      ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Special Umrah Fare' }])}
-      ${pageHead({ eyebrow: 'Umrah Ticket', title: 'Special Umrah Fare', description: 'Published Umrah airfares with onward and return legs. Prices include VAT & tax as listed by the Sadik Travels fares desk.' })}
-      <div class="amy-board">
-        <aside class="amy-filters" id="sfFilters">${loadingState('Loading filters…')}</aside>
-        <div class="amy-main">
-          <div class="amy-toolbar">
-            <label class="amy-sort">Sort by
-              <select data-sf-sort>
-                ${[['recommended', '-- Sort By --'], ['price_asc', 'Cheapest'], ['newest', 'Departure'], ['rating', 'Fastest']].map(([value, label]) => `<option value="${value}" ${query.get('sort') === value ? 'selected' : ''}>${label}</option>`).join('')}
-              </select>
-            </label>
-            <button type="button" class="amy-filter-toggle" data-amy-open-filters>${icon('i-sliders')} Filters</button>
-          </div>
-          <div class="amy-airline-strip" id="amyAirlineStrip"></div>
-          <div class="amy-stats" id="amyStats"></div>
-          <div id="sfResults">${skeletonGrid(4)}</div>
-        </div>
-      </div>
-    </div>`;
-
-    let facets = { minPrice: 0, maxPrice: 0, countries: [], tags: [] };
-    try { facets = (await api.get('/catalog/facets/umrah_fare')).facets || facets; } catch { /* degrade */ }
-    $('#sfFilters', root).innerHTML = `<form class="amy-filter-card" data-sf-filter-form>
-      <div class="sf-filter-head"><strong>${icon('i-sliders')} Filters</strong><button class="sf-link" type="button" data-sf-clear-filters>Reset</button></div>
-      <label class="sf-field"><span>Search</span><input type="search" name="q" value="${esc(query.get('q') || '')}" placeholder="Airline or route" /></label>
-      <label class="sf-field"><span>Airline</span><input name="airline" value="${esc(query.get('airline') || '')}" placeholder="All airlines" /></label>
-      ${facets.maxPrice > 0 ? `<div class="sf-field"><span>Price range (BDT)</span><div class="sf-range-inputs"><input type="number" name="minPrice" min="0" value="${esc(query.get('minPrice') || '')}" placeholder="${Math.floor(facets.minPrice)}" /><input type="number" name="maxPrice" min="0" value="${esc(query.get('maxPrice') || '')}" placeholder="${Math.ceil(facets.maxPrice)}" /></div></div>` : ''}
-      <button class="btn btn-primary full-btn" type="submit">Apply filters</button>
-    </form>`;
-
-    try {
-      const result = await api.get(`/catalog?${params.toString()}`);
-      const products = result.products || [];
-      const airlines = [...new Map(products.map((p) => [p.airline || 'Other', p])).values()];
-      const prices = products.map((p) => Number(p.price) || 0).filter(Boolean);
-      const cheapest = prices.length ? Math.min(...prices) : 0;
-      $('#amyAirlineStrip', root).innerHTML = airlines.length
-        ? `<button type="button" class="amy-air-chip" data-amy-air="">All</button>${airlines.map((p) => `<button type="button" class="amy-air-chip ${query.get('airline') === (p.airline || '') ? 'is-active' : ''}" data-amy-air="${esc(p.airline || '')}">${p.heroImage?.url ? `<img src="${esc(p.heroImage.url)}" alt="" />` : ''}<span>${esc(p.airline || 'Airline')}</span><strong>${money(p.price, p.currency)}</strong></button>`).join('')}`
-        : '';
-      $('#amyStats', root).innerHTML = products.length ? `<span>⏱️ Earliest</span><span>🚀 Fastest</span><span>💸 Cheapest ${cheapest ? money(cheapest) : ''}</span>` : '';
-      const box = $('#sfResults', root);
-      if (!products.length) {
-        box.innerHTML = emptyState('No flights found', 'Try changing the route, dates, or filters and search again.', '<button class="btn btn-outline" type="button" data-sf-clear-filters>Clear filters</button>');
-        return;
-      }
-      box.innerHTML = `<div class="amy-count"><strong>${result.total}</strong> Available Flights <small>*Price Includes VAT &amp; Tax</small></div>
-        <div class="amy-fare-list">${products.map(umrahFareCard).join('')}</div>${pagination(result)}`;
-    } catch (error) {
-      $('#sfResults', root).innerHTML = errorState(error.message);
-    }
-
-    root.querySelectorAll('[data-amy-air]').forEach((btn) => btn.addEventListener('click', () => {
-      const url = new URL(location.href);
-      const air = btn.getAttribute('data-amy-air');
-      if (air) url.searchParams.set('airline', air); else url.searchParams.delete('airline');
-      url.searchParams.delete('page');
-      window.SadikPages.navigate(`${url.pathname}${url.search}`);
-    }));
-    root.querySelector('[data-amy-open-filters]')?.addEventListener('click', () => {
-      document.querySelector('.amy-filters')?.classList.toggle('is-open');
-    });
-  }
-
-  const umrahFareCard = (product) => {
-    const fare = parseUmrahMeta(product);
-    const href = `/special-umrah-fare/${encodeURIComponent(product.slug || product.id)}`;
-    const logo = product.heroImage?.url || product.images?.[0]?.url || '';
-    const leg = (label, l) => `
-      <div class="amy-leg">
-        <div class="amy-leg-label">${esc(label)}</div>
-        <div class="amy-leg-air">${logo ? `<img src="${esc(logo)}" alt="" />` : icon('i-plane')}<div><strong>${esc(l.airline)}</strong><small>${esc(l.flightNumber)}</small></div></div>
-        <div class="amy-leg-times">
-          <div><strong>${esc(l.departTime)}</strong><small>${esc(l.departDate)}</small><span>${esc(l.from)} · ${esc(l.fromCity)}</span></div>
-          <div class="amy-leg-mid"><i></i><small>${esc(l.duration)}</small>${l.layover ? `<em>Layover ${esc(l.layover)}</em>` : ''}</div>
-          <div><strong>${esc(l.arriveTime)}</strong><small>${esc(l.arriveDate)}</small><span>${esc(l.to)} · ${esc(l.toCity)}</span></div>
-        </div>
-      </div>`;
-    return `<article class="amy-fare">
-      <div class="amy-fare-head"><span class="amy-ticket-tag">Umrah Ticket</span></div>
-      ${leg('Onward', fare.onward)}
-      <hr class="amy-hr" />
-      ${leg('Return', fare.ret)}
-      <div class="amy-fare-foot">
-        <div class="amy-fare-meta"><span>Seats: ${fare.seats || '—'}</span><span>${esc(fare.baggageOut)}, ${esc(fare.baggageIn)}</span><span>${esc(fare.refundable)}</span></div>
-        <div class="amy-fare-price"><strong>${money(product.price, product.currency)}</strong><small>Per pax: ${money(product.price, product.currency)}</small>
-          <a class="btn btn-primary btn-sm" href="${esc(href)}" data-public-route="${esc(href)}">Flight Details</a>
-        </div>
-      </div>
-    </article>`;
-  };
-
   /* ------------------------------------------------------- product detail */
   async function renderProductDetail(root, definition, idOrSlug) {
     root.innerHTML = `<div class="sf-page">${loadingState('Loading product…')}</div>`;
@@ -549,8 +284,7 @@
     const gallery = [product.heroImage, ...(product.images || [])].filter((image) => image && image.url);
     const saved = state.wishlist.has(product.id);
     const canBook = product.bookable && product.price > 0;
-    const isVisa = product.type === 'visa_service';
-    track(product.type === 'esim' ? 'esim_view' : 'product_view', { productId: product.id, slug: product.slug, type: product.type });
+    track('product_view', { productId: product.id, slug: product.slug, type: product.type });
     if (typeof window.setSeo === 'function') window.setSeo({ title: product.title, description: product.summary || product.subtitle || `${product.title} — book with Sadik Travels.`, canonical: `/${definition.route}/${product.slug || product.id}`, image: gallery[0]?.url, jsonLd: { '@context': 'https://schema.org', '@type': 'Product', name: product.title, description: product.summary || product.subtitle || undefined, ...(product.price ? { offers: { '@type': 'Offer', price: product.price, priceCurrency: product.currency || 'BDT', availability: product.availability > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } } : {}) } });
 
     root.innerHTML = `<div class="sf-page">
@@ -618,9 +352,7 @@
             ${product.serviceCharge ? `<div class="sf-booking-row"><span>Service charge</span><span>${money(product.serviceCharge, product.currency)}</span></div>` : ''}
             ${product.taxPct ? `<div class="sf-booking-row"><span>Tax / VAT</span><span>${product.taxPct}%</span></div>` : ''}
             <div class="sf-booking-row"><span>Availability</span><span class="${product.availability > 0 ? 'sf-ok' : 'sf-warn'}">${product.availability > 0 ? `${product.availability} available` : 'Sold out'}</span></div>
-            ${isVisa
-              ? `<a class="btn btn-primary full-btn" href="/visa/${esc(product.slug)}/apply" data-public-route="/visa/${esc(product.slug)}/apply">${icon('i-passport')} Apply now</a>`
-              : canBook
+            ${canBook
                 ? `<button class="btn btn-primary full-btn" type="button" data-sf-book="${esc(product.id)}">${icon('i-check')} Book now</button>
                    <button class="btn btn-outline full-btn" type="button" data-sf-cart="${esc(product.id)}">${icon('i-cart')} Add to cart</button>`
                 : `<a class="btn btn-primary full-btn" href="/support" data-public-route="/support">${icon('i-headset')} Request a quote</a>`}
@@ -651,7 +383,6 @@
     push('Validity', product.validityDays ? `${product.validityDays} days` : product.validity);
     push('Network', product.network);
     push('Activation', product.activation);
-    push('Visa type', product.visaType);
     push('Processing time', product.processingTime);
     push('Entry type', product.entryType);
     push('Hospital', product.hospital);
@@ -672,101 +403,6 @@
     return rows.slice(0, 8);
   }
 
-  /* ------------------------------------------------------------- flights */
-  async function renderFlights(root, query) {
-    const trip = query.get('trip') || 'oneway';
-    root.innerHTML = `<div class="sf-page">
-      ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Flights' }])}
-      ${pageHead({ eyebrow: 'Air travel', title: 'Flight Booking', description: 'Search one way, round trip and multi city itineraries across every airline Sadik Travels works with.' })}
-      <section class="sf-panel sf-search-panel">
-        <div class="sf-trip-tabs" role="tablist">
-          ${[['oneway', 'One Way'], ['round', 'Round Trip'], ['multi', 'Multi City']].map(([value, label]) => `<button type="button" role="tab" class="sf-trip-tab ${trip === value ? 'is-active' : ''}" data-sf-trip="${value}">${label}</button>`).join('')}
-        </div>
-        <form class="sf-flight-form" id="sfFlightForm" data-trip="${esc(trip)}">
-          <div class="sf-flight-legs" id="sfFlightLegs">${flightLeg(0, query)}</div>
-          ${trip === 'multi' ? '<button class="sf-link" type="button" data-sf-add-leg>+ Add another city</button>' : ''}
-          <div class="sf-flight-grid">
-            <label class="sf-field"><span>Passengers</span>
-              <div class="sf-pax">
-                <select name="adults">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<option value="${n}">${n} adult${n > 1 ? 's' : ''}</option>`).join('')}</select>
-                <select name="children">${[0, 1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}">${n} child${n === 1 ? '' : 'ren'}</option>`).join('')}</select>
-                <select name="infants">${[0, 1, 2, 3, 4].map((n) => `<option value="${n}">${n} infant${n === 1 ? '' : 's'}</option>`).join('')}</select>
-              </div>
-            </label>
-            <label class="sf-field"><span>Cabin class</span>
-              <select name="cabin">
-                <option value="economy">Economy</option><option value="premium_economy">Premium Economy</option>
-                <option value="business">Business</option><option value="first">First Class</option>
-              </select>
-            </label>
-            <button class="btn btn-primary sf-search-btn" type="submit">${icon('i-search')} Search flights</button>
-          </div>
-        </form>
-      </section>
-      <div id="sfFlightResults"></div>
-      <section class="sf-related" id="sfAirlineOffers"></section>
-    </div>`;
-
-    // Airline offers are real catalogue records and always render, search or not.
-    try {
-      const offers = await api.get('/catalog?type=airline_offer&pageSize=3');
-      if (offers.products.length) {
-        $('#sfAirlineOffers', root).innerHTML = `<h2>Airline offers you can use today</h2><div class="sf-grid">${offers.products.map((product) => productCard(product)).join('')}</div>`;
-      }
-    } catch { /* offers are supplementary */ }
-
-    if (query.get('from') && query.get('to')) await runFlightSearch(root, query);
-  }
-
-  const flightLeg = (index, query) => `
-    <div class="sf-flight-leg" data-leg="${index}">
-      <label class="sf-field"><span>From</span><input name="from" required placeholder="Dhaka (DAC)" value="${esc(query?.get('from') || '')}" autocomplete="off" /></label>
-      <button class="sf-swap" type="button" data-sf-swap aria-label="Swap airports">${icon('i-arrow-right')}</button>
-      <label class="sf-field"><span>To</span><input name="to" required placeholder="Dubai (DXB)" value="${esc(query?.get('to') || '')}" autocomplete="off" /></label>
-      <label class="sf-field"><span>Departure</span><input type="date" name="departure" required min="${todayPlus(0)}" value="${esc(query?.get('departure') || todayPlus(7))}" /></label>
-      <label class="sf-field sf-return-field"><span>Return</span><input type="date" name="return" min="${todayPlus(0)}" value="${esc(query?.get('return') || '')}" /></label>
-    </div>`;
-
-  async function runFlightSearch(root, query) {
-    const box = $('#sfFlightResults', root);
-    if (!box) return;
-    track('flight_search', { from: query.get('from'), to: query.get('to'), trip: query.get('trip') || 'oneway' });
-    box.innerHTML = `<section class="sf-panel">${loadingState('Searching live airline availability…')}</section>`;
-    try {
-      const payload = {
-        from: query.get('from'), to: query.get('to'), departure: query.get('departure'),
-        returnDate: query.get('return') || undefined, adults: Number(query.get('adults') || 1),
-        children: Number(query.get('children') || 0), infants: Number(query.get('infants') || 0),
-        cabin: query.get('cabin') || 'economy', tripType: query.get('trip') || 'oneway'
-      };
-      const result = await api.post('/search/flight', payload);
-      const offers = result.results || result.offers || result.flights || [];
-      if (!offers.length) {
-        box.innerHTML = `<section class="sf-panel">${emptyState('No flights found', 'No airline returned availability for this itinerary. Try nearby dates or another airport.')}</section>`;
-        return;
-      }
-      box.innerHTML = `<section class="sf-panel"><div class="sf-results-head"><span class="sf-results-count"><strong>${offers.length}</strong> flights</span></div>
-        <div class="sf-flight-list">${offers.map(flightRow).join('')}</div></section>`;
-    } catch (error) {
-      box.innerHTML = `<section class="sf-panel">${providerState('Flight search', error)}</section>`;
-    }
-  }
-
-  const flightRow = (offer) => `
-    <article class="sf-flight-row">
-      <div class="sf-flight-airline">${offer.airlineLogo ? `<img src="${esc(offer.airlineLogo)}" alt="${esc(offer.airline || '')}" />` : icon('i-plane')}<div><strong>${esc(offer.airline || 'Airline')}</strong><small>${esc(offer.flightNumber || '')}</small></div></div>
-      <div class="sf-flight-times">
-        <div><strong>${esc(offer.departureTime || '—')}</strong><small>${esc(offer.origin || '')}</small></div>
-        <div class="sf-flight-duration"><span>${esc(offer.duration || '')}</span><i></i><small>${offer.stops ? `${offer.stops} stop${offer.stops > 1 ? 's' : ''}` : 'Non-stop'}</small></div>
-        <div><strong>${esc(offer.arrivalTime || '—')}</strong><small>${esc(offer.destination || '')}</small></div>
-      </div>
-      <div class="sf-flight-extra">
-        ${offer.baggage ? `<span>${icon('i-tag')}${esc(offer.baggage)}</span>` : ''}
-        ${offer.refundable !== undefined ? `<span class="${offer.refundable ? 'sf-ok' : 'sf-warn'}">${offer.refundable ? 'Refundable' : 'Non-refundable'}</span>` : ''}
-      </div>
-      <div class="sf-flight-price"><strong>${money(offer.price || offer.fare || 0, offer.currency)}</strong><button class="btn btn-primary btn-sm" type="button" data-sf-flight-select='${esc(JSON.stringify({ id: offer.id, airline: offer.airline, price: offer.price || offer.fare }))}'>Select</button></div>
-    </article>`;
-
   const providerState = (label, error) => `
     <div class="sf-state sf-provider">
       <div class="sf-state-icon">${icon('i-info')}</div>
@@ -778,131 +414,6 @@
       </div>
     </div>`;
 
-  /* --------------------------------------------------- flight booking flow */
-  const FLIGHT_SELECTION_KEY = 'sadikFlightSelection';
-  const flightSelection = () => { try { const raw = sessionStorage.getItem(FLIGHT_SELECTION_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; } };
-
-  async function renderFlightBooking(root, query) {
-    if (!isLoggedIn()) return renderLoginRequired(root, 'Flight booking', 'Login to continue with your flight booking.');
-    const selection = flightSelection();
-    root.innerHTML = `<div class="sf-page">${loadingState('Preparing your flight booking…')}</div>`;
-    if (!selection || !selection.id) {
-      root.innerHTML = `<div class="sf-page">
-        ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Flights', href: '/flights' }, { label: 'Booking' }])}
-        ${pageHead({ eyebrow: 'Air travel', title: 'Flight booking', description: 'Select a flight first, then continue with passenger details.' })}
-        ${emptyState('No flight selected', 'Choose a flight from the search results to continue.', '<a class="btn btn-primary" href="/flights" data-public-route="/flights">Search flights</a>')}
-      </div>`;
-      return;
-    }
-    const adults = Number(query.get('adults')) || 1;
-    const children = Number(query.get('children')) || 0;
-    const infants = Number(query.get('infants')) || 0;
-    const total = Math.min(12, adults + children + infants);
-    const prefill = { fullName: state.user.fullName || '', email: state.user.email || '', phone: state.user.phone || '' };
-    root.innerHTML = `<div class="sf-page">
-      ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Flights', href: '/flights' }, { label: 'Booking' }])}
-      ${pageHead({ eyebrow: 'Air travel', title: 'Complete your flight booking', description: 'Confirm passenger details. The final fare is re-quoted and verified by our server before payment.' })}
-      <form class="sf-checkout" id="sfFlightBookingForm">
-        <div class="sf-checkout-main">
-          <section class="sf-panel">
-            <div class="sf-panel-head"><h2>Contact details</h2><span class="sf-tag">Auto-filled from your account</span></div>
-            <div class="sf-form-grid">
-              <label class="sf-field"><span>Full name *</span><input name="contactName" required value="${esc(prefill.fullName)}" /></label>
-              <label class="sf-field"><span>Email *</span><input type="email" name="contactEmail" required value="${esc(prefill.email)}" /></label>
-              <label class="sf-field"><span>Phone *</span><input name="contactPhone" required value="${esc(prefill.phone)}" /></label>
-            </div>
-          </section>
-          <section class="sf-panel">
-            <div class="sf-panel-head"><h2>Passengers</h2><span class="sf-tag">${adults} adult${adults === 1 ? '' : 's'} · ${children} child${children === 1 ? '' : 'ren'} · ${infants} infant${infants === 1 ? '' : 's'}</span></div>
-            <div id="sfFlightTravelers" class="sf-travelers"></div>
-            <p class="sf-hint">Passport details speed up airline processing and are used only for this booking.</p>
-          </section>
-        </div>
-        <aside class="sf-summary sf-summary-sticky">
-          <h2>Your flight</h2>
-          <div class="sf-flight-mini">
-            <div class="sf-flight-mini-airline">${selection.airlineLogo ? `<img src="${esc(selection.airlineLogo)}" alt="" />` : icon('i-plane')}<div><strong>${esc(selection.airline || 'Selected flight')}</strong><small>${esc(selection.flightNumber || '')}</small></div></div>
-            <div class="sf-flight-mini-route"><strong>${esc(selection.origin || query.get('from') || '')}</strong><span>→</span><strong>${esc(selection.destination || query.get('to') || '')}</strong></div>
-            <div class="sf-flight-mini-meta">${esc(selection.departureTime || query.get('departure') || '')}${selection.duration ? ` · ${esc(selection.duration)}` : ''}${selection.stops ? ` · ${selection.stops} stop${selection.stops > 1 ? 's' : ''}` : ''}</div>
-          </div>
-          <div class="sf-summary-rows">
-            <div><span>Displayed fare</span><span>${money(selection.price || 0, selection.currency)}</span></div>
-            <div><span>Taxes &amp; fees</span><span>Re-quoted at booking</span></div>
-          </div>
-          <label class="sf-terms"><input type="checkbox" name="acceptTerms" required /><span>I accept the airline fare rules and Sadik Travels booking terms.</span></label>
-          <button class="btn btn-primary full-btn" type="submit" id="sfFlightBook">${icon('i-shield')} Book &amp; continue to payment</button>
-          <p class="sf-secure">${icon('i-shield')} The final fare is calculated on our servers from the airline quote.</p>
-        </aside>
-      </form>`;
-    for (let index = 0; index < total; index += 1) addFlightTravelerRow(index, adults, children, infants, prefill);
-    $('#sfFlightBookingForm', root).addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const form = event.target;
-      const button = $('#sfFlightBook');
-      const data = new FormData(form);
-      const travelers = $$('.sf-traveler-row', form).map((row, index) => ({
-        fullName: $('[name="tFullName"]', row).value.trim(), dateOfBirth: $('[name="tDob"]', row).value || undefined,
-        gender: $('[name="tGender"]', row).value || undefined, nationality: $('[name="tNationality"]', row).value.trim() || undefined,
-        passportNumber: $('[name="tPassport"]', row).value.trim() || undefined, passportExpiry: $('[name="tPassportExpiry"]', row).value || undefined
-      })).filter((traveler) => traveler.fullName.length > 1);
-      if (!travelers.length) { toast('Add at least one passenger', 'error'); return; }
-      button.disabled = true; button.innerHTML = 'Booking your flight…';
-      try {
-        const booking = await api.post('/bookings', {
-          vertical: 'flight',
-          payload: {
-            flight: selection, from: query.get('from'), to: query.get('to'),
-            departure: query.get('departure'), returnDate: query.get('return') || undefined,
-            tripType: query.get('trip') || 'oneway', cabin: query.get('cabin') || 'economy',
-            adults, children, infants, passengers: travelers,
-            contact: { fullName: String(data.get('contactName') || '').trim(), email: String(data.get('contactEmail') || '').trim(), phone: String(data.get('contactPhone') || '').trim() }
-          }
-        });
-        track('booking_created', { vertical: 'flight', bookingId: booking.booking?.id });
-        toast('Flight booking created', 'success');
-        try {
-          const intent = await api.post('/payments/intents', { bookingId: booking.booking.id });
-          track('payment_started', { bookingId: booking.booking.id });
-          if (intent.checkoutUrl) { window.location.href = intent.checkoutUrl; return; }
-        } catch (error) {
-          toast(error.message || 'Payment could not be started', 'error');
-        }
-        root.innerHTML = `<div class="sf-page">
-          ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Flights', href: '/flights' }, { label: 'Booking' }])}
-          ${pageHead({ eyebrow: 'Air travel', title: 'Booking received', description: 'Our flight desk is reviewing your booking request.' })}
-          <section class="sf-panel">
-            <div class="sf-booking-reference"><small>Booking reference</small><strong>${esc(booking.booking.id)}</strong></div>
-            <p>Use this reference with your contact details on the <a href="/track-booking" data-public-route="/track-booking">track booking</a> page to follow your status.</p>
-            <div class="sf-state-actions"><a class="btn btn-primary" href="/track-booking" data-public-route="/track-booking">Track booking</a><a class="btn btn-outline" href="/flights" data-public-route="/flights">Search again</a></div>
-          </section>
-        </div>`;
-        sessionStorage.removeItem(FLIGHT_SELECTION_KEY);
-      } catch (error) {
-        toast(error.message || 'We could not book this flight right now.', 'error');
-        button.disabled = false; button.innerHTML = `${icon('i-shield')} Book &amp; continue to payment`;
-        root.querySelector('.sf-checkout')?.insertAdjacentHTML('afterbegin', errorState(error.message));
-      }
-    });
-  }
-
-  function addFlightTravelerRow(index, adults, children, infants, prefill) {
-    const holder = $('#sfFlightTravelers');
-    if (!holder) return;
-    const type = index < adults ? 'Adult' : index < adults + children ? 'Child' : 'Infant';
-    const row = document.createElement('div');
-    row.className = 'sf-traveler-row';
-    row.innerHTML = `
-      <div class="sf-traveler-head"><strong>Passenger ${index + 1} · ${type}</strong><button class="sf-link sf-link-danger" type="button" data-sf-remove-traveler>Remove</button></div>
-      <div class="sf-form-grid">
-        <label class="sf-field"><span>Full name (as on passport) *</span><input name="tFullName" required value="${esc(index === 0 ? prefill.fullName : '')}" /></label>
-        <label class="sf-field"><span>Date of birth</span><input type="date" name="tDob" /></label>
-        <label class="sf-field"><span>Gender</span><select name="tGender"><option value="">—</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></label>
-        <label class="sf-field"><span>Nationality</span><input name="tNationality" /></label>
-        <label class="sf-field"><span>Passport number</span><input name="tPassport" /></label>
-        <label class="sf-field"><span>Passport expiry</span><input type="date" name="tPassportExpiry" /></label>
-      </div>`;
-    holder.appendChild(row);
-  }
 
   /* ------------------------------------------------ payment return page */
   async function renderPaymentReturn(root, query) {
@@ -938,46 +449,6 @@
   const track = (event, metadata) => { try { window.SadikAnalytics?.track(event, metadata); } catch { /* best effort */ } };
 
   /* ---------------------------------------------------------------- app */
-  async function renderAppPage(root) {
-    root.innerHTML = `<div class="sf-page">${loadingState('Loading…')}</div>`;
-    let content = null;
-    try { const response = await api.get('/site/content?type=app'); content = (response.content || [])[0] || null; } catch { /* fall back to defaults */ }
-    const meta = content?.metadata || {};
-    const features = Array.isArray(meta.features) && meta.features.length ? meta.features : [
-      { title: 'Book in seconds', detail: 'Flights, hotels, homes, tours and eSIM in a single checkout.' },
-      { title: 'Live booking status', detail: 'Push notifications from booking created to trip completed.' },
-      { title: 'Digital documents', detail: 'Invoices, e-tickets and visa papers stored in your account.' },
-      { title: '24/7 support', detail: 'Chat with the Sadik Travels support desk from inside the app.' }
-    ];
-    root.innerHTML = `<div class="sf-page">
-      ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Sadik App' }])}
-      <section class="sf-app-hero">
-        <div>
-          <span class="sf-eyebrow">Mobile</span>
-          <h1>${esc(content?.title || 'The Sadik Travels app')}</h1>
-          <p>${esc(content?.subtitle || content?.description || 'Plan, book and manage every trip from your pocket. Available for Android and iOS.')}</p>
-          <div class="sf-app-badges">
-            <a class="sf-store" href="${esc(meta.androidUrl || '#')}" ${meta.androidUrl ? 'target="_blank" rel="noopener"' : 'aria-disabled="true"'}><img src="/assets/images__amy-android.png" alt="Get it on Google Play" /></a>
-            <a class="sf-store" href="${esc(meta.iosUrl || '#')}" ${meta.iosUrl ? 'target="_blank" rel="noopener"' : 'aria-disabled="true"'}><img src="/assets/images__amy-ios.png" alt="Download on the App Store" /></a>
-          </div>
-          <div class="sf-app-qr">
-            <img src="/assets/images__qr-google.svg" alt="Android QR code" />
-            <img src="/assets/images__qr-apple.svg" alt="iOS QR code" />
-            <span>Scan to install on your phone</span>
-          </div>
-        </div>
-        <div class="sf-app-shot">${content?.imageUrl ? `<img src="${esc(content.imageUrl)}" alt="Sadik Travels app" />` : `<div class="sf-gallery-fallback">${icon('i-phone')}<span>App preview</span></div>`}</div>
-      </section>
-      <section class="sf-panel"><h2>Why travellers use the app</h2>
-        <div class="sf-feature-grid">${features.map((feature) => `<div class="sf-feature">${icon('i-check')}<div><strong>${esc(feature.title || feature)}</strong>${feature.detail ? `<p>${esc(feature.detail)}</p>` : ''}</div></div>`).join('')}</div>
-      </section>
-      <section class="sf-panel sf-cta-panel">
-        <div><h2>Need help installing?</h2><p>Our support desk walks you through installation, login and your first booking.</p></div>
-        <a class="btn btn-primary" href="/support" data-public-route="/support">${icon('i-headset')} Contact support</a>
-      </section>
-    </div>`;
-  }
-
   /* ------------------------------------------------------------ wishlist */
   async function renderWishlist(root) {
     if (!isLoggedIn()) return renderLoginRequired(root, 'Wishlist', 'Login to see the stays, tours and packages you saved.');
@@ -1249,7 +720,7 @@
   const statusPill = (status) => `<span class="sf-pill sf-pill-${esc(status)}">${esc(titleCase(status))}</span>`;
 
   /** Unified booking history: catalogue orders + hotel stays + legacy vertical
-   *  requests (flight/visa/tour…) sorted by creation date. */
+   *  requests (tour, hotel…) sorted by creation date. */
   async function loadUnifiedBookings() {
     const [orders, hotel, legacy] = await Promise.all([
       api.get('/orders?pageSize=50').catch(() => ({ orders: [] })),
@@ -1651,61 +1122,6 @@
     </div>`;
   };
 
-  /* ----------------------------------------------------- visa application */
-  async function renderVisaApply(root, slug) {
-    if (!isLoggedIn()) return renderLoginRequired(root, 'Visa application', 'Login to start a visa application.');
-    root.innerHTML = `<div class="sf-page">${loadingState('Loading visa service…')}</div>`;
-    try {
-      const { product } = await api.get(`/catalog/${encodeURIComponent(slug)}`);
-      const prefill = await api.get('/checkout/prefill').catch(() => ({ customer: {} }));
-      const customer = prefill.customer || {};
-      root.innerHTML = `<div class="sf-page">
-        ${breadcrumbs([{ label: 'Home', href: '/' }, { label: 'Visa Services', href: '/visa' }, { label: product.title, href: `/visa/${esc(product.slug)}` }, { label: 'Apply' }])}
-        ${pageHead({ eyebrow: 'Visa application', title: `Apply — ${product.title}`, description: 'Your account details are pre-filled. Add passport information and submit; our visa desk takes it from there.' })}
-        <form class="sf-checkout" id="sfVisaForm" data-product="${esc(product.id)}">
-          <div class="sf-checkout-main">
-            <section class="sf-panel">
-              <div class="sf-panel-head"><h2>Applicant details</h2>${customer.fullName ? '<span class="sf-tag">Auto-filled from your account</span>' : ''}</div>
-              <div class="sf-form-grid">
-                <label class="sf-field"><span>Full name *</span><input name="fullName" required value="${esc(customer.fullName || '')}" /></label>
-                <label class="sf-field"><span>Email *</span><input type="email" name="email" required value="${esc(customer.email || '')}" /></label>
-                <label class="sf-field"><span>Phone *</span><input name="phone" required value="${esc(customer.phone || '')}" /></label>
-                <label class="sf-field"><span>Date of birth</span><input type="date" name="dateOfBirth" /></label>
-                <label class="sf-field"><span>Nationality</span><input name="nationality" value="${esc(customer.nationality || '')}" /></label>
-                <label class="sf-field sf-field-wide"><span>Address</span><input name="address" value="${esc(customer.address || '')}" /></label>
-              </div>
-            </section>
-            <section class="sf-panel">
-              <h2>Passport details</h2>
-              <div class="sf-form-grid">
-                <label class="sf-field"><span>Passport number *</span><input name="passportNumber" required /></label>
-                <label class="sf-field"><span>Issuing country</span><input name="issuingCountry" /></label>
-                <label class="sf-field"><span>Issue date</span><input type="date" name="issueDate" /></label>
-                <label class="sf-field"><span>Expiry date</span><input type="date" name="expiryDate" /></label>
-                <label class="sf-field"><span>Intended travel date</span><input type="date" name="travelDate" min="${todayPlus(0)}" /></label>
-              </div>
-            </section>
-            ${product.requiredDocuments?.length ? `<section class="sf-panel"><h2>Documents you will need</h2><ul class="sf-list sf-list-doc">${product.requiredDocuments.map((item) => `<li>${icon('i-file')}${esc(item)}</li>`).join('')}</ul><p class="sf-hint">Our visa desk emails you a secure upload link right after submission.</p></section>` : ''}
-          </div>
-          <aside class="sf-summary sf-summary-sticky">
-            <h2>${esc(product.title)}</h2>
-            <div class="sf-summary-rows">
-              ${product.visaType ? `<div><span>Visa type</span><span>${esc(product.visaType)}</span></div>` : ''}
-              ${product.processingTime ? `<div><span>Processing</span><span>${esc(product.processingTime)}</span></div>` : ''}
-              ${product.entryType ? `<div><span>Entry</span><span>${esc(product.entryType)}</span></div>` : ''}
-              <div><span>Service fee</span><span>${money(product.serviceCharge || 0)}</span></div>
-              <div class="sf-summary-total"><span>Total payable</span><span>${money(product.price + (product.serviceCharge || 0))}</span></div>
-            </div>
-            <label class="sf-terms"><input type="checkbox" required /><span>I confirm the information provided is accurate.</span></label>
-            <button class="btn btn-primary full-btn" type="submit">${icon('i-passport')} Submit application</button>
-          </aside>
-        </form>
-      </div>`;
-    } catch (error) {
-      root.innerHTML = `<div class="sf-page">${errorState(error.message)}</div>`;
-    }
-  }
-
   /* ------------------------------------------------------------- actions */
   async function addToCart(productId, quantity = 1) {
     if (!isLoggedIn()) return requireLogin('Login to add items to your cart');
@@ -1750,9 +1166,7 @@
   /** Fills each homepage section with live catalogue products. Sections that
    *  already have editorial content keep it; empty ones get real products. */
   const HOME_SECTION_TYPES = {
-    homes: 'home', 'visa-services': 'visa_service', 'home-esim': 'esim', esim: 'esim', 'special-umrah-fare': 'umrah_fare',
-    'umrah-packages': 'umrah_package', 'holiday-packages': 'holiday_package', 'medical-tourism': 'medical_tourism',
-    'card-offers': 'card_offer', 'airline-offers': 'airline_offer', explore: 'destination'
+    homes: 'home', 'holiday-packages': 'holiday_package', explore: 'destination'
   };
 
   async function hydrateHomeSections() {
@@ -1771,14 +1185,6 @@
       if (emptyBox) emptyBox.outerHTML = markup;
       else if (grid && !grid.children.length) grid.outerHTML = markup;
       else if (!grid) section.querySelector('.panel-block')?.insertAdjacentHTML('beforeend', markup);
-      // eSIM: add a clickable country strip under the plan cards.
-      if (type === 'esim') {
-        const countries = [...new Set(products.map((product) => product.country).filter(Boolean))];
-        if (countries.length) {
-          const strip = `<div class="hs-esim-countries"><span>Shop by country:</span>${countries.slice(0, 8).map((country) => `<a class="sf-chip" href="/esim?country=${encodeURIComponent(country)}" data-public-route="/esim?country=${encodeURIComponent(country)}">${esc(country)}</a>`).join('')}<a class="sf-link" href="/esim" data-public-route="/esim">View all plans →</a></div>`;
-          section.querySelector('.panel-block')?.insertAdjacentHTML('beforeend', strip);
-        }
-      }
     });
   }
 
@@ -1820,13 +1226,10 @@
   }
 
   /** Routes that render differently once the customer is authenticated. */
-  const AUTH_ROUTES = new Set(['cart', 'wishlist', 'checkout', 'orders', 'invoice', 'account']);
+  const AUTH_ROUTES = new Set(['cart', 'wishlist', 'checkout', 'orders', 'invoice', 'account', 'payments']);
 
   /* ---------------------------------------------------------- route table */
   const routes = {
-    flights: (root, route) => (route.parts[1] === 'booking' ? renderFlightBooking(root, route.query) : renderFlights(root, route.query)),
-    app: (root) => renderAppPage(root),
-    'sadik-app': (root) => renderAppPage(root),
     cart: (root) => renderCart(root),
     wishlist: (root) => renderWishlist(root),
     checkout: (root, route) => renderCheckout(root, route.query),
@@ -1839,16 +1242,13 @@
   };
 
   Object.entries(COLLECTIONS).forEach(([routeKey, definition]) => {
-    if (routeKey === 'esim' || routeKey === 'special-umrah-fare') return;
     routes[routeKey] = (root, route) => {
-      if (routeKey === 'visa' && route.parts[2] === 'apply') return renderVisaApply(root, route.parts[1]);
       return route.parts[1] ? renderProductDetail(root, definition, route.parts[1]) : renderCollection(root, definition, route.query);
     };
   });
-  routes.esim = (root, route) => (route.parts[1] ? renderProductDetail(root, COLLECTIONS.esim, route.parts[1]) : renderEsimMarketplace(root, route.query));
-  routes['special-umrah-fare'] = (root, route) => (route.parts[1] ? renderProductDetail(root, COLLECTIONS['special-umrah-fare'], route.parts[1]) : renderUmrahFareBoard(root, route.query));
-  // Legacy alias kept working so old links never 404.
-  routes['airline-offers'] = routes['airlines-offers'];
+  // Canonical marketplace aliases: /homes-villas mirrors /homes, /payments opens payment history.
+  routes['homes-villas'] = routes.homes;
+  routes.payments = (root, route) => { const query = new URLSearchParams(route.query); query.set('tab', 'payments'); return routes.account(root, { ...route, query }); };
 
   /* --------------------------------------------------------------- events */
   function bindGlobalEvents() {
@@ -1949,22 +1349,6 @@
         return;
       }
 
-      if (closest('[data-sf-add-leg]')) {
-        event.preventDefault();
-        const legs = document.getElementById('sfFlightLegs');
-        if (legs && legs.children.length < 5) legs.insertAdjacentHTML('beforeend', flightLeg(legs.children.length, new URLSearchParams()));
-        return;
-      }
-
-      const swap = closest('[data-sf-swap]');
-      if (swap) {
-        event.preventDefault();
-        const leg = swap.closest('.sf-flight-leg');
-        const from = $('[name="from"]', leg); const to = $('[name="to"]', leg);
-        const value = from.value; from.value = to.value; to.value = value;
-        return;
-      }
-
       if (closest('[data-sf-add-traveler]')) { event.preventDefault(); addTravelerRow(); return; }
 
       const useTraveler = closest('[data-sf-use-traveler]');
@@ -2002,14 +1386,6 @@
         return;
       }
 
-      const flightSelect = closest('[data-sf-flight-select]');
-      if (flightSelect) {
-        event.preventDefault();
-        let option = {};
-        try { option = JSON.parse(flightSelect.dataset.sfFlightSelect || '{}'); } catch { /* keep empty */ }
-        sessionStorage.setItem('sadikFlightSelection', JSON.stringify({ ...option, searchUrl: location.search }));
-        window.SadikPages.navigate(`/flights/booking${location.search}`);
-      }
     });
 
     document.addEventListener('submit', async (event) => {
@@ -2030,19 +1406,6 @@
         const code = new FormData(form).get('code');
         try { const result = await api.post('/cart/coupon', { code: String(code || '').trim() }); toast(result.message || 'Coupon updated', 'success'); await paintCart(document); }
         catch (error) { toast(error.message || 'Coupon could not be applied', 'error'); }
-        return;
-      }
-
-      if (form.id === 'sfFlightForm') {
-        event.preventDefault();
-        const data = new FormData(form);
-        const url = new URL(location.origin + '/flights');
-        url.searchParams.set('trip', form.dataset.trip || 'oneway');
-        ['from', 'to', 'departure', 'return', 'adults', 'children', 'infants', 'cabin'].forEach((key) => {
-          const value = data.get(key);
-          if (value) url.searchParams.set(key, String(value));
-        });
-        window.SadikPages.navigate(`${url.pathname}${url.search}`);
         return;
       }
 
@@ -2120,22 +1483,6 @@
         return;
       }
 
-      if (form.id === 'sfVisaForm') {
-        event.preventDefault();
-        const data = Object.fromEntries(new FormData(form).entries());
-        const button = form.querySelector('button[type="submit"]');
-        button.disabled = true;
-        try {
-          const result = await api.post('/visa/applications', {
-            productId: form.dataset.product,
-            applicant: { fullName: data.fullName, email: data.email, phone: data.phone, dateOfBirth: data.dateOfBirth || undefined, nationality: data.nationality || undefined, address: data.address || undefined },
-            passport: { number: data.passportNumber, issueDate: data.issueDate || undefined, expiryDate: data.expiryDate || undefined, issuingCountry: data.issuingCountry || undefined },
-            documents: [], travelDate: data.travelDate || undefined
-          });
-          toast(`Application ${result.application.referenceNumber} submitted`, 'success');
-          window.SadikPages.navigate('/account?tab=bookings');
-        } catch (error) { toast(error.message || 'Submission failed', 'error'); button.disabled = false; }
-      }
     });
 
     document.addEventListener('change', (event) => {

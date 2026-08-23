@@ -59,10 +59,7 @@
   }
 
   const CATALOG_TYPES = [
-    ['esim', 'eSIM plan'], ['umrah_package', 'Umrah package'], ['umrah_fare', 'Special Umrah fare'],
-    ['holiday_package', 'Holiday package'], ['medical_tourism', 'Medical tourism'], ['visa_service', 'Visa service'],
-    ['home', 'Home / apartment'], ['card_offer', 'Card offer'], ['airline_offer', 'Airline offer'],
-    ['destination', 'Destination'], ['flight_offer', 'Flight offer'], ['accessory', 'Travel accessory']
+    ['holiday_package', 'Holiday package'], ['home', 'Home / villa'], ['destination', 'Destination']
   ];
 
   /* ============================================================ CATALOGUE */
@@ -85,7 +82,7 @@
 
     const typeStats = stats.stats || {};
     outlet().innerHTML = header('Catalogue', type ? titleCase(type) : 'All products',
-      'Every eSIM, package, visa service, home, offer and destination sold on the website is managed here.',
+      'Every holiday package, home & villa and destination sold on the website is managed here.',
       `${can('catalog.create') ? '<button class="admin-primary" data-ac-new-product>+ New product</button>' : ''}<button class="admin-secondary" data-ac-refresh>Refresh</button>`)
       + `<div class="admin-card">
           <form class="admin-filter-row" id="acCatalogFilter">
@@ -188,23 +185,6 @@
           ${field('Sort order', 'sortOrder', product?.sortOrder ?? 0, { type: 'number' })}
           ${field('Duration (days)', 'durationDays', product?.durationDays ?? '', { type: 'number' })}
           ${field('Duration (nights)', 'durationNights', product?.durationNights ?? '', { type: 'number' })}
-          ${field('Data amount', 'dataAmount', product?.dataAmount || '', { hint: 'eSIM, e.g. 5 GB' })}
-          ${field('Validity (days)', 'validityDays', product?.validityDays ?? '', { type: 'number' })}
-          ${field('Network', 'network', product?.network || '')}
-          ${field('Provider', 'provider', product?.provider || '', { hint: 'eSIM provider / supplier' })}
-          ${field('Activation method', 'activationMethod', product?.activationMethod || '', { hint: 'QR code, SM-DP+, manual…' })}
-          ${field('Activation', 'activation', product?.activation || '')}
-          ${field('QR code URL', 'qrCodeUrl', product?.qrCodeUrl || '', { hint: 'Public QR image for this plan' })}
-          ${field('SM-DP+ address', 'smDpPlus', product?.smDpPlus || '')}
-          ${field('Activation code', 'activationCode', product?.activationCode || '')}
-          ${field('Installation instructions', 'instructions', product?.instructions || '', { textarea: true, rows: 2, wide: true })}
-          ${field('Visa type', 'visaType', product?.visaType || '')}
-          ${field('Processing time', 'processingTime', product?.processingTime || '')}
-          ${field('Entry type', 'entryType', product?.entryType || '')}
-          ${field('Hospital', 'hospital', product?.hospital || '')}
-          ${field('Treatment category', 'treatmentCategory', product?.treatmentCategory || '')}
-          ${field('Doctor / service', 'doctor', product?.doctor || '')}
-          ${field('Estimated cost', 'estimatedCost', product?.estimatedCost || '')}
           ${field('Property type', 'propertyType', product?.propertyType || '')}
           ${field('Guests', 'guests', product?.guests ?? '', { type: 'number' })}
           ${field('Bedrooms', 'bedrooms', product?.bedrooms ?? '', { type: 'number' })}
@@ -276,18 +256,8 @@
       serviceCharge: number('serviceCharge') ?? 0, taxPct: number('taxPct') ?? 0,
       availability: number('availability') ?? 100, sortOrder: number('sortOrder') ?? 0,
       durationDays: number('durationDays'), durationNights: number('durationNights'),
-      dataAmount: text('dataAmount') || undefined, validityDays: number('validityDays'),
-      network: text('network') || undefined, activation: text('activation') || undefined,
-      provider: text('provider') || undefined, activationMethod: text('activationMethod') || undefined,
-      qrCodeUrl: text('qrCodeUrl') || undefined, smDpPlus: text('smDpPlus') || undefined,
-      activationCode: text('activationCode') || undefined, instructions: text('instructions') || undefined,
-      visaType: text('visaType') || undefined, processingTime: text('processingTime') || undefined, entryType: text('entryType') || undefined,
-      hospital: text('hospital') || undefined, treatmentCategory: text('treatmentCategory') || undefined,
-      doctor: text('doctor') || undefined, estimatedCost: text('estimatedCost') || undefined,
       propertyType: text('propertyType') || undefined, guests: number('guests'), bedrooms: number('bedrooms'),
       beds: number('beds'), bathrooms: number('bathrooms'),
-      bank: text('bank') || undefined, cardName: text('cardName') || undefined, airline: text('airline') || undefined,
-      route: text('route') || undefined, promoCode: text('promoCode') || undefined, discountLabel: text('discountLabel') || undefined,
       startDate: text('startDate') || undefined, endDate: text('endDate') || undefined, terms: text('terms') || undefined,
       inclusions: lines('inclusions'), exclusions: lines('exclusions'), requiredDocuments: lines('requiredDocuments'),
       amenities: lines('amenities'), coverage: lines('coverage'), tags: lines('tags'),
@@ -312,7 +282,7 @@
     ]);
     const stats = statsResponse.stats;
 
-    outlet().innerHTML = header('E-commerce', 'Orders & bookings', 'Every checkout from the website: packages, eSIM, homes, visa services and offers.', '<button class="admin-secondary" data-ac-refresh>Refresh</button>')
+    outlet().innerHTML = header('E-commerce', 'Orders & bookings', 'Every checkout from the website: holiday packages, homes & villas and destination products.', '<button class="admin-secondary" data-ac-refresh>Refresh</button>')
       + (stats ? `<div class="ac-stat-row">
           <div class="ac-stat"><strong>${stats.orders}</strong><span>Total orders</span></div>
           <div class="ac-stat"><strong>${money(stats.revenue)}</strong><span>Paid revenue</span></div>
@@ -398,10 +368,7 @@
               ? `<p class="admin-muted">${esc(order.fulfillment.note || 'Order fulfilled.')}</p>${order.fulfillment.payload ? `<dl class="ac-dl">${Object.entries(order.fulfillment.payload).filter(([, value]) => Boolean(value) && value !== undefined && value !== null && value !== '').map(([key, value]) => `<div><dt>${esc(titleCase(key))}</dt><dd class="ac-break">${esc(String(value))}</dd></div>`).join('')}</dl>` : ''}`
               : `<p class="admin-muted">Status: <strong>${esc(titleCase(order.fulfillment?.status || 'none'))}</strong>${order.fulfillment?.note ? ` — ${esc(order.fulfillment.note)}` : ''}</p>
                  <form id="acFulfillForm" class="admin-form-grid">
-                   ${field('Provider', 'provider', '', { hint: 'e.g. esim_provider, manual dispatch' })}
-                   ${field('QR code URL', 'qrCodeUrl', '', { hint: 'eSIM activation QR image URL' })}
-                   ${field('SM-DP+ address', 'smDpPlus', '')}
-                   ${field('Activation code', 'activationCode', '')}
+                   ${field('Provider', 'provider', '', { hint: 'e.g. manual dispatch, operations desk' })}
                    ${field('Reference', 'reference', '', { hint: 'Provider/despatch reference' })}
                    ${field('Instructions', 'instructions', '', { textarea: true, rows: 2, wide: true })}
                    ${field('Note', 'note', '', { textarea: true, rows: 2, wide: true })}
@@ -510,7 +477,7 @@
           ${field('End date', 'endDate', coupon?.endDate ? String(coupon.endDate).slice(0, 10) : '', { type: 'date' })}
           ${field('Total usage limit', 'usageLimit', coupon?.usageLimit ?? '', { type: 'number' })}
           ${field('Per customer limit', 'perUserLimit', coupon?.perUserLimit ?? 1, { type: 'number' })}
-          ${field('Applicable product types', 'applicableTypes', (coupon?.applicableTypes || []).join('\n'), { textarea: true, rows: 3, wide: true, hint: 'One type per line (esim, umrah_package…). Leave empty for all products.' })}
+          ${field('Applicable product types', 'applicableTypes', (coupon?.applicableTypes || []).join('\n'), { textarea: true, rows: 3, wide: true, hint: 'One type per line (holiday_package, home, destination). Empty = all types.' })}
         </div>
         <div class="admin-modal-actions">
           <button type="button" class="admin-secondary" data-close-modal>Cancel</button>
@@ -607,59 +574,12 @@
   }
 
   /* ==================================================== VISA APPLICATIONS */
-  async function renderVisaApplications() {
-    await loadPermissions();
-    const current = route();
-    const params = new URLSearchParams({ page: current.query.get('page') || '1', pageSize: '20' });
-    if (current.query.get('status')) params.set('status', current.query.get('status'));
-    if (current.query.get('q')) params.set('q', current.query.get('q'));
-    const result = await request(`/admin/visa-applications?${params}`);
-
-    outlet().innerHTML = header('Services', 'Visa applications', 'Applications submitted from the website with applicant, passport and document details.', '<button class="admin-secondary" data-ac-refresh>Refresh</button>')
-      + `<div class="admin-card"><form class="admin-filter-row" id="acVisaFilter">
-          <input name="q" placeholder="Search reference" value="${attr(current.query.get('q') || '')}" />
-          <select name="status"><option value="">All statuses</option>${['submitted', 'document_review', 'processing', 'approved', 'rejected', 'cancelled'].map((value) => `<option value="${value}" ${current.query.get('status') === value ? 'selected' : ''}>${titleCase(value)}</option>`).join('')}</select>
-          <button class="admin-primary" type="submit">Apply</button>
-        </form></div>`
-      + (result.applications.length ? tableWrap(`
-          <thead><tr><th>Reference</th><th>Applicant</th><th>Service</th><th>Passport</th><th>Travel</th><th>Status</th><th>Update</th></tr></thead>
-          <tbody>${result.applications.map((application) => `
-            <tr>
-              <td><strong>${esc(application.referenceNumber)}</strong><small>${day(application.createdAt)}</small></td>
-              <td>${esc(application.applicant?.fullName || '—')}<small>${esc(application.applicant?.email || '')}</small></td>
-              <td>${esc(application.productTitle || '—')}</td>
-              <td>${esc(application.passport?.number ? `••••${String(application.passport.number).slice(-4)}` : '—')}</td>
-              <td>${day(application.travelDate)}</td>
-              <td>${pill(application.status)}</td>
-              <td>
-                <select data-ac-visa="${attr(application.id)}" ${can('visa.update') ? '' : 'disabled'}>
-                  ${['submitted', 'document_review', 'processing', 'approved', 'rejected', 'cancelled'].map((value) => `<option value="${value}" ${application.status === value ? 'selected' : ''}>${titleCase(value)}</option>`).join('')}
-                </select>
-              </td>
-            </tr>`).join('')}</tbody>`) + pager(result, `/admin/visa-applications?${params}`)
-        : empty('No visa applications yet', 'Applications submitted from the Visa Services pages appear here.'));
-
-    q('#acVisaFilter')?.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const data = new FormData(event.currentTarget);
-      const next = new URLSearchParams();
-      for (const [key, value] of data.entries()) if (value) next.set(key, String(value));
-      go(`/admin/visa-applications?${next}`);
-    });
-    qa('[data-ac-visa]').forEach((select) => select.addEventListener('change', async () => {
-      select.disabled = true;
-      try { await request(`/admin/visa-applications/${select.dataset.acVisa}`, { method: 'PATCH', body: JSON.stringify({ status: select.value }) }); notify('Application updated', 'success'); refresh(); }
-      catch (error) { notify(error.message || 'Update failed', 'error'); select.disabled = false; }
-    }));
-  }
-
   /* ------------------------------------------------------------ dispatch */
   const routes = {
     catalog: renderCatalog,
     orders: renderOrders,
     coupons: renderCoupons,
-    reviews: renderReviews,
-    'visa-applications': renderVisaApplications
+    reviews: renderReviews
   };
 
   document.addEventListener('click', (event) => {

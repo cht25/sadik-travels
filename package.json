@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "audit": "npm audit --omit=dev --audit-level=high",
     "admin:create": "tsx src/admin-create.ts",
+    "cleanup:legacy": "tsx src/cleanup-legacy.ts",
     "test": "npm run build && node --test dist/smoke.test.js"
   },
   "dependencies": {
