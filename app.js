@@ -884,7 +884,26 @@ const PUBLIC_SERVICE_LANDING = {
 };
 function publicRoute() { const url = new URL(location.href); const path = url.pathname.replace(/\/+$/, '') || '/'; return { url, path, parts: path.split('/').filter(Boolean), query: url.searchParams }; }
 function publicHref(route) { return route.startsWith('/') ? route : `/${route}`; }
-function publicSetActive(path) { const links = $$('[data-public-route]'); let best = null; let score = -1; links.forEach(link => { const target = new URL(link.dataset.publicRoute || link.getAttribute('href'), location.origin).pathname.replace(/\/+$/, '') || '/'; const active = target === '/' ? path === '/' : path === target || path.startsWith(`${target}/`); if (active && target.length > score) { best = link; score = target.length; } }); links.forEach(link => link.classList.toggle('active', link === best)); }
+function publicSetActive(path) {
+  const links = $$('[data-public-route]');
+  const current = new URL(location.href);
+  let best = null;
+  let score = -1;
+
+  links.forEach(link => {
+    const targetUrl = new URL(link.dataset.publicRoute || link.getAttribute('href'), location.origin);
+    const targetPath = targetUrl.pathname.replace(/\/+$/, '') || '/';
+    const pathMatches = targetPath === '/' ? path === '/' : path === targetPath || path.startsWith(`${targetPath}/`);
+    // Query-specific links (for example Account → Payments) are only active
+    // for their exact tab. This prevents two unrelated account links looking active.
+    const queryMatches = !targetUrl.search || targetUrl.search === current.search;
+    const active = pathMatches && queryMatches;
+    const linkScore = targetPath.length + (targetUrl.search ? 10_000 : 0);
+    if (active && linkScore > score) { best = link; score = linkScore; }
+  });
+
+  links.forEach(link => link.classList.toggle('active', link === best));
+}
 function publicLoading() { return '<div class="public-public-loading"><span class="spinner"></span>Loading content…</div>'; }
 function publicErrorState(message, retry = true) { return `<div class="public-public-error"><strong>Unable to load this page</strong><p>${escapeHtml(message || 'Please try again.')}</p>${retry ? '<button class="btn btn-primary" data-public-retry>Try again</button>' : ''}</div>`; }
 function publicEmptyState(title, message, action = '') { return `<div class="public-public-empty"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(message)}</p>${action}</div>`; }
@@ -1679,26 +1698,6 @@ document.addEventListener('click', (event) => {
   // screen, which looked like the navigation button was stuck loading.
   if (link.classList.contains('side-link')) return;
 
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  navigateToSection(link.dataset.scroll);
-}, true);
-void renderPublicRoute();
-if (appConfig.liveApi) {
-  void applySiteSettings();
-  void applyPublicContent();
-  void apiRequest('/auth/me', {}, false).then(response => { updateAuthUi(response.user); const p = location.pathname.replace(/\/+$/, '') || '/'; if (response.user && (p.startsWith('/bookings') || p.startsWith('/booking/') || p.startsWith('/account'))) void renderPublicRoute(); }).catch(() => updateAuthUi(null));
-}
-const initialTourParams = new URLSearchParams(window.location.search);
-if (initialTourParams.get('type') === 'tour') {
-  activateTab('tours');
-  void searchTours({ destination: initialTourParams.get('destination') || '', tourType: initialTourParams.get('tour_type') || '', maxPrice: initialTourParams.get('max_price') || '', sort: initialTourParams.get('sort') || 'newest' }, false);
-}
-updatePassengerSummary();
- = event.target.closest('[data-scroll]');
-  if (!link) return;
-  const path = location.pathname.replace(/\/+$/, '') || '/';
-  if (path !== '/') return;
   event.preventDefault();
   event.stopImmediatePropagation();
   navigateToSection(link.dataset.scroll);
