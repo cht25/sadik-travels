@@ -5,7 +5,7 @@ import { decryptSecret, encryptSecret, maskSecret } from './secrets.js';
 
 export type Channel = 'sms' | 'email';
 export type UserRole = 'customer' | 'manager' | 'admin' | 'super_admin' | 'support' | 'content_manager' | 'finance' | 'staff';
-export type User = { id: string; phone?: string; email?: string; fullName?: string; avatarUrl?: string; avatarMediaId?: string; lastLoginAt?: string; lastLoginIp?: string; marketingEmailOptIn?: boolean; marketingSmsOptIn?: boolean; marketingInAppOptIn?: boolean; permissions?: string[]; status: 'active' | 'blocked' | 'pending' | 'suspended'; role: UserRole; createdAt: string; updatedAt: string };
+export type User = { id: string; phone?: string; email?: string; fullName?: string; avatarUrl?: string; avatarMediaId?: string; firebaseUid?: string; lastLoginAt?: string; lastLoginIp?: string; marketingEmailOptIn?: boolean; marketingSmsOptIn?: boolean; marketingInAppOptIn?: boolean; permissions?: string[]; status: 'active' | 'blocked' | 'pending' | 'suspended'; role: UserRole; createdAt: string; updatedAt: string };
 export type ServiceStatus = 'active' | 'hidden' | 'maintenance' | 'archived';
 export type ServiceKey = 'hotels' | 'homes' | 'tours';
 export type Tour = { id: string; slug: string; title: string; country: string; tourType: string; destinations: string[]; durationDays: number; durationNights: number; description: string; imageUrl: string; mediaId?: string; metadata: Record<string, unknown>; priceBdt: number; status: 'draft' | 'published' | 'archived'; featured: boolean; createdBy?: string; createdAt: string; updatedAt: string };
@@ -48,6 +48,7 @@ export type MediaAsset = { id: string; publicId: string; secureUrl: string; orig
 export type AdminNavItem = { id: string; groupName: string; parentId?: string; label: string; route: string; icon: string; permission?: string; sortOrder: number; visible: boolean; enabled: boolean; createdAt: string; updatedAt: string };
 export type CreateNavItem = Omit<AdminNavItem, 'id' | 'createdAt' | 'updatedAt'>;
 export type UpdateNavItem = Partial<Omit<CreateNavItem, 'createdBy'>>;
+export type SiteNavItem = { id: string; key: string; label: string; route: string; icon: string; group: string; sortOrder: number; enabled: boolean; createdAt: string; updatedAt: string };
 export type TravelAgentStatus = 'active' | 'hidden' | 'archived';
 export type TravelAgent = { id: string; fullName: string; agencyName?: string; photoUrl?: string; photoPublicId?: string; mediaId?: string; jobTitle?: string; department?: string; phone?: string; whatsapp?: string; email?: string; officeLocation?: string; city?: string; shortBio?: string; fullDescription?: string; languages: string[]; experienceYears?: number; specialization?: string; workingHours?: string; status: TravelAgentStatus; featured: boolean; displayOrder: number; createdBy?: string; updatedBy?: string; createdAt: string; updatedAt: string };
 export type SettingPatch = Record<string, string | undefined>;
@@ -77,7 +78,8 @@ type CreateMediaAsset = Omit<MediaAsset, 'id' | 'createdAt' | 'updatedAt'>;
 export interface Store {
   health(): Promise<boolean>; close(): void;
   listNavigation(visibleOnly?: boolean): Promise<AdminNavItem[]>; createNavigation(input: CreateNavItem): Promise<AdminNavItem>; updateNavigation(id: string, patch: UpdateNavItem): Promise<AdminNavItem | undefined>; deleteNavigation(id: string): Promise<boolean>; reorderNavigation(ids: string[]): Promise<void>;
-  findUserByIdentity(identity: string): Promise<User | undefined>; getPasswordHash(identity: string): Promise<string | undefined>; setPasswordHash(id: string, hash: string): Promise<void>; findUserById(id: string): Promise<User | undefined>; updateUserProfile(id: string, patch: { fullName?: string; email?: string; phone?: string; avatarUrl?: string; avatarMediaId?: string; marketingEmailOptIn?: boolean; marketingSmsOptIn?: boolean; marketingInAppOptIn?: boolean }): Promise<User | undefined>; updateLastLogin(id: string, ip?: string): Promise<void>; listSessions(userId: string): Promise<Session[]>; revokeOtherSessions(userId: string, keepSessionId: string): Promise<void>; listUsers(): Promise<User[]>; createUser(input: CreateUser): Promise<User>; setUserRole(id: string, role: User['role']): Promise<User | undefined>; listAdmins(): Promise<User[]>; createAdminUser(input: { email: string; phone?: string; fullName?: string; role: User['role']; permissions: string[]; status?: User['status']; avatarUrl?: string; avatarMediaId?: string }): Promise<User>; updateAdmin(id: string, patch: { fullName?: string; phone?: string; email?: string; role?: User['role']; permissions?: string[]; status?: User['status']; avatarUrl?: string; avatarMediaId?: string }): Promise<User | undefined>; deleteAdminUser(id: string): Promise<boolean>; listAdminCustomers(filters?: { q?: string; status?: User['status'] | 'all'; page?: number; pageSize?: number }): Promise<{ customers: AdminCustomer[]; total: number; page: number; pageSize: number; pageCount: number }>; findAdminCustomer(id: string): Promise<AdminCustomerDetail | undefined>; addCustomerNote(input: { userId: string; authorId: string; note: string }): Promise<CustomerNote>; listCustomerNotes(userId: string): Promise<CustomerNote[]>;
+  listSiteNavigation(enabledOnly?: boolean): Promise<SiteNavItem[]>; updateSiteNavigation(id: string, patch: { label?: string; route?: string; enabled?: boolean; sortOrder?: number }): Promise<SiteNavItem | undefined>;
+  findUserByIdentity(identity: string): Promise<User | undefined>; findUserByFirebaseUid(firebaseUid: string): Promise<User | undefined>; getPasswordHash(identity: string): Promise<string | undefined>; setPasswordHash(id: string, hash: string): Promise<void>; findUserById(id: string): Promise<User | undefined>; upsertGoogleCustomer(input: { firebaseUid: string; email?: string; fullName?: string; avatarUrl?: string }): Promise<User>; updateUserProfile(id: string, patch: { fullName?: string; email?: string; phone?: string; avatarUrl?: string; avatarMediaId?: string; marketingEmailOptIn?: boolean; marketingSmsOptIn?: boolean; marketingInAppOptIn?: boolean }): Promise<User | undefined>; updateLastLogin(id: string, ip?: string): Promise<void>; listSessions(userId: string): Promise<Session[]>; revokeOtherSessions(userId: string, keepSessionId: string): Promise<void>; listUsers(): Promise<User[]>; createUser(input: CreateUser): Promise<User>; setUserRole(id: string, role: User['role']): Promise<User | undefined>; listAdmins(): Promise<User[]>; createAdminUser(input: { email: string; phone?: string; fullName?: string; role: User['role']; permissions: string[]; status?: User['status']; avatarUrl?: string; avatarMediaId?: string }): Promise<User>; updateAdmin(id: string, patch: { fullName?: string; phone?: string; email?: string; role?: User['role']; permissions?: string[]; status?: User['status']; avatarUrl?: string; avatarMediaId?: string }): Promise<User | undefined>; deleteAdminUser(id: string): Promise<boolean>; listAdminCustomers(filters?: { q?: string; status?: User['status'] | 'all'; page?: number; pageSize?: number }): Promise<{ customers: AdminCustomer[]; total: number; page: number; pageSize: number; pageCount: number }>; findAdminCustomer(id: string): Promise<AdminCustomerDetail | undefined>; addCustomerNote(input: { userId: string; authorId: string; note: string }): Promise<CustomerNote>; listCustomerNotes(userId: string): Promise<CustomerNote[]>;
   createOtp(input: CreateOtp): Promise<OtpChallenge>; findOtp(id: string): Promise<OtpChallenge | undefined>; incrementOtpAttempts(id: string): Promise<OtpChallenge | undefined>; consumeOtp(id: string): Promise<void>; countRecentOtpRequests(identity: string, since: Date): Promise<number>;
   createSession(input: CreateSession): Promise<Session>; findSessionById(id: string): Promise<Session | undefined>; findSessionByRefreshJti(jti: string): Promise<Session | undefined>; revokeSession(id: string): Promise<void>;
   createBooking(input: CreateBooking): Promise<Booking>; updateBooking(id: string, patch: Partial<Pick<Booking, 'status' | 'providerRef' | 'response' | 'internalNote'>>): Promise<Booking | undefined>; findBooking(id: string, userId?: string): Promise<Booking | undefined>; findBookingForTracking(id: string, identity: string): Promise<Booking | undefined>; listBookings(userId: string): Promise<Booking[]>;
@@ -98,10 +100,6 @@ export interface Store {
 
 const DEFAULT_NAVIGATION: Array<Omit<CreateNavItem,'id'>> = [
   { groupName:'Dashboard', label:'Overview', route:'/admin', icon:'grid', permission:'dashboard_view', sortOrder:10, visible:true, enabled:true },
-  { groupName:'Dashboard', label:'Analytics', route:'/admin/analytics', icon:'activity', permission:'dashboard_view', sortOrder:12, visible:true, enabled:true },
-  { groupName:'Bookings', label:'All Bookings', route:'/admin/bookings', icon:'briefcase', permission:'bookings_view', sortOrder:20, visible:true, enabled:true },
-  { groupName:'Bookings', label:'Hotel Bookings', route:'/admin/hotel-bookings', icon:'hotel', permission:'bookings_view', sortOrder:21, visible:true, enabled:true },
-  { groupName:'Bookings', label:'Orders & Checkout', route:'/admin/orders', icon:'cart', permission:'bookings_view', sortOrder:22, visible:true, enabled:true },
   { groupName:'Catalogue', label:'Hotels & Rooms', route:'/admin/hotels', icon:'hotel', permission:'services_manage', sortOrder:30, visible:true, enabled:true },
   { groupName:'Catalogue', label:'Homes & Villas', route:'/admin/catalog?type=home', icon:'home', permission:'content_manage', sortOrder:31, visible:true, enabled:true },
   { groupName:'Catalogue', label:'Tours', route:'/admin/tours', icon:'map', permission:'content_manage', sortOrder:32, visible:true, enabled:true },
@@ -109,20 +107,18 @@ const DEFAULT_NAVIGATION: Array<Omit<CreateNavItem,'id'>> = [
   { groupName:'Catalogue', label:'Destinations (Explore)', route:'/admin/catalog?type=destination', icon:'pin', permission:'content_manage', sortOrder:34, visible:true, enabled:true },
   { groupName:'People', label:'Travel Agents', route:'/admin/travel-agents', icon:'users', permission:'content_manage', sortOrder:40, visible:true, enabled:true },
   { groupName:'People', label:'Customers', route:'/admin/customers', icon:'users', permission:'customers_view', sortOrder:41, visible:true, enabled:true },
+  { groupName:'Bookings', label:'Bookings', route:'/admin/bookings', icon:'briefcase', permission:'bookings_view', sortOrder:20, visible:true, enabled:true },
   { groupName:'Commerce', label:'Payments', route:'/admin/payments', icon:'card', permission:'payments_view', sortOrder:50, visible:true, enabled:true },
-  { groupName:'Commerce', label:'Coupons & Discounts', route:'/admin/coupons', icon:'tag', permission:'content_manage', sortOrder:51, visible:true, enabled:true },
-  { groupName:'Commerce', label:'Reviews', route:'/admin/reviews', icon:'star', permission:'content_manage', sortOrder:52, visible:true, enabled:true },
   { groupName:'Communication', label:'Support Tickets', route:'/admin/support', icon:'headset', permission:'support_manage', sortOrder:60, visible:true, enabled:true },
   { groupName:'Communication', label:'SMS & Notifications', route:'/admin/notifications', icon:'bell', permission:'notifications_send', sortOrder:61, visible:true, enabled:true },
   { groupName:'Website', label:'Website Content', route:'/admin/content', icon:'spark', permission:'content_manage', sortOrder:70, visible:true, enabled:true },
   { groupName:'Website', label:'Media Library', route:'/admin/media', icon:'image', permission:'content_manage', sortOrder:71, visible:true, enabled:true },
-  { groupName:'Website', label:'Service Visibility', route:'/admin/services', icon:'eye', permission:'services_manage', sortOrder:72, visible:true, enabled:true },
+  { groupName:'Website', label:'Customer Navigation', route:'/admin/navigation', icon:'menu', permission:'navigation_manage', sortOrder:72, visible:true, enabled:true },
   { groupName:'Settings', label:'Settings', route:'/admin/settings', icon:'settings', permission:'settings_manage', sortOrder:80, visible:true, enabled:true },
   { groupName:'Settings', label:'System Status', route:'/admin/system-status', icon:'activity', permission:'dashboard_view', sortOrder:81, visible:true, enabled:true },
-  { groupName:'Security', label:'Profile & Security', route:'/admin/profile', icon:'shield', permission:'dashboard_view', sortOrder:90, visible:true, enabled:true },
+  { groupName:'Security', label:'Audit Logs', route:'/admin/audit-logs', icon:'activity', permission:'audit_view', sortOrder:93, visible:true, enabled:true },
   { groupName:'Security', label:'Admin Users & Roles', route:'/admin/users', icon:'lock', permission:'users_manage', sortOrder:91, visible:true, enabled:true },
-  { groupName:'Security', label:'Navigation Manager', route:'/admin/navigation', icon:'menu', permission:'navigation_manage', sortOrder:92, visible:true, enabled:true },
-  { groupName:'Security', label:'Audit Logs', route:'/admin/audit-logs', icon:'activity', permission:'audit_view', sortOrder:93, visible:true, enabled:true }
+  { groupName:'Security', label:'Profile & Security', route:'/admin/profile', icon:'shield', permission:'dashboard_view', sortOrder:90, visible:true, enabled:true }
 ];
 
 /** Mongoose models: each persistent domain has its own collection and schema. */
@@ -135,7 +131,7 @@ const makeModel = (name: string, collection: string, fields: Record<string, any>
   indexes.forEach(([keys, options]) => schema.index(keys, options));
   return model(name, schema, collection);
 };
-const UserModel = makeModel('SadikUser', 'users', { phone: { type: String, unique: true, sparse: true, index: true }, email: { type: String, unique: true, sparse: true, lowercase: true, index: true }, fullName: String, avatarUrl: String, avatarMediaId: String, lastLoginAt: String, lastLoginIp: String, marketingEmailOptIn: { type: Boolean, default: true }, marketingSmsOptIn: { type: Boolean, default: true }, marketingInAppOptIn: { type: Boolean, default: true }, status: { type: String, enum: ['active','blocked','pending'], index: true }, role: { type: String, enum: ['customer','manager','admin','super_admin','support','content_manager','finance'], index: true }, createdAt: { type: String, index: true }, updatedAt: String });
+const UserModel = makeModel('SadikUser', 'users', { phone: { type: String, unique: true, sparse: true, index: true }, email: { type: String, unique: true, sparse: true, lowercase: true, index: true }, firebaseUid: { type: String, unique: true, sparse: true, index: true }, fullName: String, avatarUrl: String, avatarMediaId: String, lastLoginAt: String, lastLoginIp: String, marketingEmailOptIn: { type: Boolean, default: true }, marketingSmsOptIn: { type: Boolean, default: true }, marketingInAppOptIn: { type: Boolean, default: true }, status: { type: String, enum: ['active','blocked','pending','suspended'], index: true }, role: { type: String, enum: ['customer','manager','admin','super_admin','support','content_manager','finance'], index: true }, createdAt: { type: String, index: true }, updatedAt: String });
 const OtpModel = makeModel('SadikOtp', 'otp_challenges', { identity: { type: String, index: true }, channel: { type: String, enum: ['sms','email'] }, codeHash: String, attempts: Number, maxAttempts: Number, expiresAt: { type: String, index: true }, consumedAt: String, requestIp: String, purpose: String, userId: String, targetIdentity: String, createdAt: String }, [[{ identity: 1, createdAt: -1 }]]);
 const SessionModel = makeModel('SadikSession', 'sessions', { userId: { type: String, index: true }, refreshJti: { type: String, unique: true, index: true }, userAgent: String, ip: String, expiresAt: { type: String, index: true }, revokedAt: String, createdAt: String }, [[{ userId: 1, createdAt: -1 }]]);
 const BookingModel = makeModel('SadikBooking', 'bookings', { userId: { type: String, index: true }, vertical: { type: String, enum: ['flight','hotel','home','visa','esim','tour'], index: true }, status: { type: String, index: true }, providerRef: String, ownerId: { type: String, index: true }, internalNote: String, request: mixed, response: mixed, createdAt: String, updatedAt: { type: String, index: true } }, [[{ status: 1, updatedAt: -1 }]]);
@@ -151,11 +147,27 @@ const ServiceModel = makeModel('SadikService', 'service_visibility', { key: { ty
 const ContentModel = makeModel('SadikContent', 'content_items', { type: { type: String, index: true }, slug: { type: String, index: true }, title: String, subtitle: String, description: String, imageUrl: String, mediaId: String, metadata: mixed, status: { type: String, index: true }, sortOrder: Number, createdBy: String, createdAt: String, updatedAt: String }, [[{ type: 1, slug: 1 }, { unique: true }], [{ type: 1, status: 1, sortOrder: 1, updatedAt: -1 }]]);
 const MediaModel = makeModel('SadikMedia', 'media_assets', { publicId: { type: String, unique: true, index: true }, secureUrl: String, originalFilename: String, mimeType: String, format: String, width: Number, height: Number, bytes: Number, folder: { type: String, index: true }, altText: String, uploadedBy: String, status: { type: String, index: true }, createdAt: String, updatedAt: String });
 const NavigationModel = makeModel('SadikNavigation', 'admin_navigation', { groupName: String, parentId: String, label: String, route: String, icon: String, permission: String, sortOrder: Number, visible: Boolean, enabled: Boolean, createdAt: String, updatedAt: String }, [[{ groupName: 1, sortOrder: 1 }]]);
+const SiteNavigationModel = makeModel('SadikSiteNavigation', 'site_navigation', { key: { type: String, unique: true, index: true }, label: String, route: String, icon: String, group: String, sortOrder: Number, enabled: { type: Boolean, default: true }, createdAt: String, updatedAt: String }, [[{ group: 1, sortOrder: 1 }]]);
 const AgentModel = makeModel('SadikTravelAgent', 'travel_agents', { fullName: String, agencyName: String, photoUrl: String, photoPublicId: String, mediaId: String, jobTitle: String, department: String, phone: String, whatsapp: String, email: String, officeLocation: String, city: String, shortBio: String, fullDescription: String, languages: [String], experienceYears: Number, specialization: String, workingHours: String, status: { type: String, index: true }, featured: Boolean, displayOrder: Number, createdBy: String, updatedBy: String, createdAt: String, updatedAt: String }, [[{ status: 1, featured: 1, displayOrder: 1 }]]);
 const CustomerNoteModel = makeModel('SadikCustomerNote', 'customer_notes', { userId: { type: String, index: true }, authorId: String, note: String, createdAt: String });
 const AuditModel = makeModel('SadikAuditLog', 'audit_logs', { action: { type: String, index: true }, userId: { type: String, index: true }, ip: String, userAgent: String, metadata: mixed, createdAt: String }, [[{ createdAt: -1 }]]);
 const SecretModel = makeModel('SadikUserSecret', 'user_secrets', { passwordHash: String });
-const MODELS: Record<string, DocModel> = { navigation: NavigationModel, user: UserModel, 'user-secret': SecretModel, otp: OtpModel, session: SessionModel, booking: BookingModel, 'booking-event': BookingEventModel, tour: TourModel, payment: PaymentModel, 'webhook-event': WebhookEventModel, ticket: TicketModel, 'support-message': SupportMessageModel, setting: SettingModel, service: ServiceModel, notification: NotificationModel, content: ContentModel, media: MediaModel, agent: AgentModel, 'customer-note': CustomerNoteModel, audit: AuditModel };
+const MODELS: Record<string, DocModel> = { navigation: NavigationModel, 'site-navigation': SiteNavigationModel, user: UserModel, 'user-secret': SecretModel, otp: OtpModel, session: SessionModel, booking: BookingModel, 'booking-event': BookingEventModel, tour: TourModel, payment: PaymentModel, 'webhook-event': WebhookEventModel, ticket: TicketModel, 'support-message': SupportMessageModel, setting: SettingModel, service: ServiceModel, notification: NotificationModel, content: ContentModel, media: MediaModel, agent: AgentModel, 'customer-note': CustomerNoteModel, audit: AuditModel };
+
+const DEFAULT_SITE_NAVIGATION: Array<Omit<SiteNavItem,'id'|'createdAt'|'updatedAt'>> = [
+  { key:'home', label:'Home', route:'/', icon:'globe', group:'Travel', sortOrder:10, enabled:true },
+  { key:'hotels', label:'Hotels', route:'/hotels', icon:'hotel', group:'Travel', sortOrder:20, enabled:true },
+  { key:'homes-villas', label:'Homes & Villas', route:'/homes-villas', icon:'home', group:'Travel', sortOrder:30, enabled:true },
+  { key:'tours', label:'Tours', route:'/tours', icon:'map', group:'Travel', sortOrder:40, enabled:true },
+  { key:'holiday-packages', label:'Holiday Packages', route:'/holiday-packages', icon:'palm', group:'Travel', sortOrder:50, enabled:true },
+  { key:'explore', label:'Explore', route:'/explore', icon:'location', group:'Travel', sortOrder:60, enabled:true },
+  { key:'travel-agents', label:'Travel Agents', route:'/travel-agents', icon:'user', group:'Travel', sortOrder:70, enabled:true },
+  { key:'cart', label:'My Cart', route:'/cart', icon:'cart', group:'Shop', sortOrder:80, enabled:true },
+  { key:'wishlist', label:'Wishlist', route:'/wishlist', icon:'heart', group:'Shop', sortOrder:90, enabled:true },
+  { key:'track-booking', label:'Track Booking', route:'/track-booking', icon:'search', group:'Manage', sortOrder:100, enabled:true },
+  { key:'payments', label:'Payments', route:'/payments', icon:'card', group:'Manage', sortOrder:110, enabled:true },
+  { key:'support', label:'Support', route:'/support', icon:'headset', group:'Manage', sortOrder:120, enabled:true }
+];
 
 const now = () => new Date().toISOString();
 const page = (value?: number) => Math.max(1, Math.floor(value || 1));
@@ -189,8 +201,56 @@ export class MongoStore implements Store {
   async updateNavigation(id: string, patch: UpdateNavItem) { return this.patch<AdminNavItem>('navigation', id, { ...patch, updatedAt: now() }); }
   async deleteNavigation(id: string) { return this.remove('navigation', id); }
   async reorderNavigation(ids: string[]) { await Promise.all(ids.map((id, index) => this.updateNavigation(id, { sortOrder: index + 1 }))); }
+  async listSiteNavigation(enabledOnly = false) {
+    let items = await this.all<SiteNavItem>('site-navigation');
+    if (!items.length) {
+      const time = now();
+      items = await Promise.all(DEFAULT_SITE_NAVIGATION.map(input => this.insert('site-navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time })));
+    } else {
+      const known = new Set(items.map(item => item.key));
+      const missing = DEFAULT_SITE_NAVIGATION.filter(input => !known.has(input.key));
+      if (missing.length) {
+        const time = now();
+        const added = await Promise.all(missing.map(input => this.insert('site-navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time })));
+        items = [...items, ...added];
+      }
+    }
+    return items.filter(item => !enabledOnly || item.enabled).sort((a,b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
+  }
+  async updateSiteNavigation(id: string, patch: { label?: string; route?: string; enabled?: boolean; sortOrder?: number }) {
+    return this.patch<SiteNavItem>('site-navigation', id, { ...patch, updatedAt: now() });
+  }
 
   async findUserByIdentity(identity: string) { return (await this.all<User>('user')).find(user => user.phone === identity || user.email === identity); }
+  async findUserByFirebaseUid(firebaseUid: string) { return (await this.all<User>('user')).find(user => user.firebaseUid === firebaseUid); }
+  async upsertGoogleCustomer(input: { firebaseUid: string; email?: string; fullName?: string; avatarUrl?: string }) {
+    const existing = await this.findUserByFirebaseUid(input.firebaseUid)
+      || (input.email ? (await this.all<User>('user')).find(user => user.email === input.email && user.role === 'customer') : undefined);
+    if (existing) {
+      const patch: Partial<User> = { firebaseUid: input.firebaseUid, updatedAt: now() };
+      if (input.fullName && !existing.fullName) patch.fullName = input.fullName;
+      if (input.avatarUrl && !existing.avatarUrl) patch.avatarUrl = input.avatarUrl;
+      if (input.email && !existing.email) patch.email = input.email.toLowerCase();
+      const updated = await this.patch<User>('user', existing.id, patch);
+      return updated ?? existing;
+    }
+    const time = now();
+    const user: User = {
+      id: randomUUID(),
+      firebaseUid: input.firebaseUid,
+      email: input.email ? input.email.toLowerCase() : undefined,
+      fullName: input.fullName,
+      avatarUrl: input.avatarUrl,
+      status: 'active',
+      role: 'customer',
+      marketingEmailOptIn: true,
+      marketingSmsOptIn: true,
+      marketingInAppOptIn: true,
+      createdAt: time,
+      updatedAt: time
+    };
+    return this.insert('user', user);
+  }
   async getPasswordHash(identity: string) { const user = await this.findUserByIdentity(identity); return user ? (await this.one<any>('user-secret', user.id))?.passwordHash : undefined; }
   async setPasswordHash(id: string, hash: string) { const secret = await this.one<any>('user-secret', id); if (secret) await this.save('user-secret', { ...secret, passwordHash: hash }); else await this.insert('user-secret', { id, passwordHash: hash }); }
   async findUserById(id: string) { return this.one<User>('user', id); }

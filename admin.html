@@ -23,22 +23,13 @@
         <p class="auth-lead">Sign in to manage bookings, customers, catalogue, payments and customer care.</p>
 
         <form class="admin-login-step is-active" id="adminPasswordForm">
-          <div class="admin-step-label"><span>01</span><strong>Email &amp; password</strong><small>Primary login</small></div>
+          <div class="admin-step-label"><span>01</span><strong>Email &amp; password</strong><small>Authorized admins only</small></div>
           <label class="admin-field"><span>Email</span><input id="adminLoginEmail" type="email" autocomplete="username" required placeholder="admin@example.com" /></label>
           <label class="admin-field password-input"><span>Password</span><input id="adminLoginPassword" type="password" autocomplete="current-password" required placeholder="Your password" /><button type="button" class="password-toggle" id="adminPasswordToggle">Show</button></label>
           <button type="submit" class="admin-primary admin-primary-wide" id="adminPasswordSignIn">Sign in</button>
           <p class="auth-google-note" id="adminAuthMessage">Use the email and password created for your admin account.</p>
         </form>
-        <div class="admin-login-divider"><span>or</span></div>
-        <div class="admin-login-step is-active" id="googleLoginStep">
-          <div class="admin-step-label"><span>02</span><strong>Google sign-in</strong><small>Existing admins only</small></div>
-          <button type="button" class="admin-primary admin-primary-wide admin-google-button" id="googleSignInButton">
-            <svg class="google-g" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1Z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23Z"/><path fill="#FBBC05" d="M5.84 14.1A6.6 6.6 0 0 1 5.5 12c0-.73.13-1.43.34-2.1V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84Z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.16-3.16C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52Z"/></svg>
-            <span>Continue with Google</span>
-          </button>
-          <p class="auth-google-note">Google only signs in an admin that already exists. It does not create a new account.</p>
-        </div>
-        <p class="auth-security-note">Create admins from Super Admin → Admin Management. Google never auto-registers new operators.</p>
+        <p class="auth-security-note">Create admins from Super Admin → Admin Management. Admin access is protected by email, password and secure sessions — Google sign-in is reserved for customers only.</p>
       </div>
     </div>
   </section>
@@ -58,10 +49,8 @@
   </div>
   <div class="admin-modal-root" id="adminModalRoot" hidden></div>
   <script src="/assets/vendor/three.min.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="/api.js?v=3"></script>
   <script src="/admin-commerce.js?v=1"></script>
-  <script src="/admin.js?v=14"></script>
+  <script src="/admin.js?v=15"></script>
 </body>
 </html>

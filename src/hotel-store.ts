@@ -153,6 +153,15 @@ export class HotelStore {
     return Math.min(...active.map(room => room.pricePerNight));
   }
 
+  /** Lowest crossed-out original price across a hotel's active rooms (for discount display). */
+  private originalPriceFromHotel(rooms: HotelRoom[]): number | undefined {
+    const active = rooms.filter(room => room.status === 'active' && !room.deletedAt && room.pricePerNight > 0);
+    if (!active.length) return undefined;
+    const values = active
+      .map(room => (room.originalPrice && room.originalPrice > room.pricePerNight ? room.originalPrice : room.pricePerNight));
+    return Math.min(...values);
+  }
+
   /** Minimum available inventory across a date range for a room. */
   async availabilityFor(roomId: string, checkIn: string, checkOut: string, fallbackTotal: number): Promise<number> {
     const dates = eachDate(checkIn, checkOut);
@@ -188,7 +197,7 @@ export class HotelStore {
         }));
         availableCount = roomAvail.filter(Boolean).length;
       }
-      return { ...hotel, priceFrom: this.priceFromHotel(activeRooms), roomCount: activeRooms.length, availableRooms: availableCount };
+      return { ...hotel, priceFrom: this.priceFromHotel(activeRooms), originalPriceFrom: this.originalPriceFromHotel(activeRooms), roomCount: activeRooms.length, availableRooms: availableCount };
     }));
 
     let items = hotelWithPrice;
