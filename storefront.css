@@ -21,7 +21,23 @@
   --sf-ease:cubic-bezier(.4,0,.2,1);
 }
 
-.sf-page{width:100%;max-width:var(--shell-max,1440px);margin:0 auto;padding:0 var(--shell-gutter,20px) 40px;min-width:0}
+.sf-page{
+  width:100%;
+  max-width:1440px;
+  max-width:var(--shell-max,1440px);
+  margin:0 auto;
+  margin-inline:auto;
+  padding:0 32px 40px;
+  padding-inline:32px;
+  box-sizing:border-box;
+  min-width:0;
+}
+@media (max-width:1024px){
+  .sf-page{padding-inline:24px}
+}
+@media (max-width:640px){
+  .sf-page{padding-inline:16px}
+}
 .sf-page>section+section,.sf-page>div+section{margin-top:18px}
 
 /* ------------------------------------------------------- breadcrumb + head */
