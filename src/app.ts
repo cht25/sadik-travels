@@ -171,29 +171,36 @@ export function buildApp() {
   // Public (browser-safe) Firebase web config used by the admin console's Google sign-in.
   app.get('/api/v1/site/firebase-config', (_req, res) => res.json({ configured: isFirebaseConfigured(), firebase: firebasePublicConfig() }));
 
-  // Admin sign-in via Firebase Google authentication (serverless Google OAuth + server-side token verification).
-  app.post('/api/v1/auth/firebase-login', rateLimit('firebase-login', 10, 300), async (req, res) => {
+  // Customer "Continue with Google": verifies the Firebase ID token server-side
+  // and always results in a customer-role session. A Google identity can never
+  // become an admin through this path.
+  app.post('/api/v1/auth/google-login', rateLimit('google-login', 10, 300), async (req, res) => {
     const input = toInput(firebaseLoginRequest, req.body);
     const decoded = await verifyFirebaseIdToken(input.idToken);
-    const rawEmail = String(decoded.email || '').trim();
+    const rawEmail = String(decoded.email || '').trim().toLowerCase();
     assert(decoded.email_verified === true && rawEmail, 401, 'FIREBASE_EMAIL_NOT_VERIFIED', 'Your Google account email is not verified');
-    const identity = normalizeIdentity(rawEmail).identity;
-    const superEmail = config.superAdminEmail ? normalizeIdentity(config.superAdminEmail).identity : undefined;
-    let user = await store.findUserByIdentity(identity);
-    assert(user, 403, 'ADMIN_NOT_REGISTERED', 'This Google account is not an existing admin. Sign in with email and password, or ask a Super Admin to create your account.');
-    assert(ADMIN_ROLES.includes(user.role as typeof ADMIN_ROLES[number]), 403, 'ADMIN_NOT_WHITELISTED', 'This Google account is not authorized for admin access');
-    if (superEmail && identity === superEmail && user.role !== 'super_admin') {
-      user = (await store.setUserRole(user.id, 'super_admin')) ?? user;
-    }
-    assert(user.status === 'active', 403, 'ACCOUNT_UNAVAILABLE', 'This account is suspended or disabled. Contact a Super Admin.');
-    if (!user.fullName && decoded.name) user = (await store.updateUserProfile(user.id, { fullName: decoded.name })) ?? user;
+    const user = await store.upsertGoogleCustomer({
+      firebaseUid: decoded.uid,
+      email: rawEmail,
+      fullName: decoded.name ? String(decoded.name) : undefined,
+      avatarUrl: decoded.picture ? String(decoded.picture) : undefined
+    });
+    assert(user.role === 'customer' && user.status === 'active', 403, 'ACCOUNT_UNAVAILABLE', 'This account is unavailable.');
     const session = await issueSession(store, user, clientMeta(req));
     await store.updateLastLogin(user.id, req.ip);
     setAuthCookies(res, session.accessToken, session.refreshToken);
-    await store.audit('auth.firebase_login', { ...clientMeta(req), userId: user.id, metadata: { firebaseUid: decoded.uid } });
-    res.json({ accessToken: session.accessToken, expiresIn: config.accessTokenTtl, user: userView(user, true) });
+    await store.audit('auth.google_login', { ...clientMeta(req), userId: user.id, metadata: { firebaseUid: decoded.uid } });
+    res.json({ accessToken: session.accessToken, expiresIn: config.accessTokenTtl, user: userView(user) });
   });
 
+  // Public customer navigation: the admin toggles items on/off; hidden items
+  // are omitted from the storefront sidebar.
+  app.get('/api/v1/site/navigation', async (_req, res) => {
+    const items = await store.listSiteNavigation(true);
+    res.json({ navigation: items.map(item => ({ key: item.key, label: item.label, route: item.route, icon: item.icon, group: item.group, sortOrder: item.sortOrder })) });
+  });
+
+  // Admin sign-in via Firebase Google authentication (serverless Google OAuth + server-side token verification).
   app.post('/api/v1/auth/request-otp', rateLimit('otp', 5, 300), async (req, res) => {
     const input = toInput(identityRequest, req.body);
     const normalized = normalizeIdentity(input.identity);
@@ -310,6 +317,16 @@ export function buildApp() {
   app.patch('/api/v1/admin/navigation/:id', requirePermission(store, 'navigation:manage'), async (req,res)=>{ const input=toInput(navigationPatchSchema,req.body); const item=await store.updateNavigation(String(req.params.id),input); assert(item,404,'NAVIGATION_NOT_FOUND','Navigation item not found'); await store.audit('admin.navigation_updated',{...clientMeta(req),userId:req.user!.id,metadata:{navigationId:item.id,label:item.label,visible:item.visible}}); res.json({navigation:item}); });
   app.delete('/api/v1/admin/navigation/:id', requirePermission(store, 'navigation:manage'), async (req,res)=>{ const deleted=await store.deleteNavigation(String(req.params.id)); assert(deleted,404,'NAVIGATION_NOT_FOUND','Navigation item not found'); await store.audit('admin.navigation_deleted',{...clientMeta(req),userId:req.user!.id,metadata:{navigationId:req.params.id}}); res.json({deleted:true}); });
   app.post('/api/v1/admin/navigation/reorder', requirePermission(store, 'navigation:manage'), async (req,res)=>{ const input=toInput(navigationReorderSchema,req.body); await store.reorderNavigation(input.ids); await store.audit('admin.navigation_reordered',{...clientMeta(req),userId:req.user!.id,metadata:{count:input.ids.length}}); res.json({navigation:await store.listNavigation(false)}); });
+  // Customer/site navigation management (the visible storefront menu).
+  app.get('/api/v1/admin/site-navigation', requirePermission(store, 'navigation:manage'), async (_req, res) => res.json({ navigation: await store.listSiteNavigation(false) }));
+  const siteNavPatchSchema = z.object({ label: z.string().trim().min(1).max(80).optional(), route: z.string().startsWith('/').max(200).optional(), enabled: z.boolean().optional(), sortOrder: z.number().int().min(-100000).max(100000).optional() });
+  app.patch('/api/v1/admin/site-navigation/:id', requirePermission(store, 'navigation:manage'), async (req, res) => {
+    const input = toInput(siteNavPatchSchema, req.body);
+    const item = await store.updateSiteNavigation(String(req.params.id), input);
+    assert(item, 404, 'NAVIGATION_NOT_FOUND', 'Navigation item not found');
+    await store.audit('admin.site_navigation_updated', { ...clientMeta(req), userId: req.user!.id, metadata: { navigationId: item.id, label: item.label, enabled: item.enabled } });
+    res.json({ navigation: item });
+  });
 
   app.get('/api/v1/admin/profile', requireAdmin(store), async (req, res) => { const user = await store.findUserById(req.user!.id); assert(user, 404, 'USER_NOT_FOUND', 'Admin profile not found'); res.json({ user: userView(user, true) }); });
   app.patch('/api/v1/admin/profile', requireAdmin(store), async (req, res) => { const input = toInput(profilePatchRequest, req.body); const profilePatch = { ...input, ...(input.avatarMediaId === null ? { avatarMediaId: undefined } : {}) }; const user = await store.updateUserProfile(req.user!.id, profilePatch); assert(user, 404, 'USER_NOT_FOUND', 'Admin profile not found'); await store.audit('admin.profile_updated', { ...clientMeta(req), userId: req.user!.id, metadata: { keys: Object.keys(input) } }); res.json({ user: userView(user, true) }); });

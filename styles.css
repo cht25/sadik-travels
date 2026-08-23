@@ -583,11 +583,20 @@ html,body{overflow-x:clip;max-width:100%}
 .side-badge[hidden]{display:none}
 .sidebar-footer{flex:0 0 auto;border-top:1px solid var(--border);margin:0;padding:11px 16px;display:flex;justify-content:space-between;color:var(--muted);font-size:.72rem;background:#fff}
 
-/* Page content resets: containers use the full available column width. */
-.public-route-root{min-height:auto;padding:32px 0 64px;background:#f6f8fc}
-.public-page{max-width:var(--shell-max);margin:0 auto;padding:0 var(--shell-gutter);width:100%}
+/* Page content resets: the public route root supplies horizontal breathing
+   room so every dedicated page (Hotels, Tours, Travel Agents, …) is inset
+   from the viewport / sidebar edge. The storefront .sf-page shell opts out
+   of the extra padding because it manages its own gutter. */
+.public-route-root{min-height:auto;padding:32px var(--shell-gutter) 64px;background:#f6f8fc}
+.public-route-root>.sf-page{margin-left:calc(var(--shell-gutter) * -1);margin-right:calc(var(--shell-gutter) * -1);padding-left:var(--shell-gutter);padding-right:var(--shell-gutter);max-width:calc(var(--shell-max) + var(--shell-gutter) * 2)}
+/* Reusable customer page container — width min(100% - 64px, 1440px), centered.
+   Mobile/tablet breakpoints tighten the gutter. */
+.page-container{width:min(100% - 64px,1440px);margin-inline:auto}
+.public-page{max-width:var(--shell-max);margin:0 auto;padding:0;width:100%}
 .container{max-width:var(--shell-max,1440px);padding-left:var(--shell-gutter);padding-right:var(--shell-gutter)}
 .site-footer{margin-left:0;width:100%}
+@media(max-width:1023px){.page-container{width:min(100% - 48px,1440px)}}
+@media(max-width:767px){.page-container{width:min(100% - 32px,1440px)}}
 
 /* Header icon buttons (cart / wishlist). */
 .nav-icon-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--ink);transition:background .18s ease,color .18s ease,border-color .18s ease}
@@ -615,7 +624,7 @@ html,body{overflow-x:clip;max-width:100%}
 @media(max-width:1180px){:root{--shell-sidebar-w:250px}}
 @media(max-width:767px){
   :root{--shell-header-h:58px}
-  .public-route-root{padding:20px 0 48px}
+  .public-route-root{padding:20px var(--shell-gutter) 48px}
   .nav-inner{gap:8px}
 }
 
@@ -657,3 +666,48 @@ html,body{overflow-x:clip;max-width:100%}
 .pwa-popup-close{position:absolute;top:10px;right:10px;width:32px;height:32px;border:0;border-radius:8px;background:transparent;color:#68758a;font-size:15px;cursor:pointer}
 .pwa-popup-close:hover{background:#f0f3f9;color:#17253b}
 body.pwa-popup-open{overflow:hidden}
+
+/* ============== Tours marketplace page ============== */
+.tours-toolbar-card{margin-bottom:18px}
+.tours-toolbar{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;align-items:end}
+.tours-field{display:flex;flex-direction:column;gap:5px}
+.tours-field span{font-size:.68rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.tours-field input,.tours-field select{height:40px;border:1px solid var(--border);border-radius:9px;padding:0 11px;font-size:.86rem;background:#fff;color:var(--ink);width:100%}
+.tours-field-grow{grid-column:span 2}
+.tours-toolbar-actions{display:flex;gap:8px;flex-wrap:wrap}
+.tours-toolbar-actions .btn{height:40px;display:inline-flex;align-items:center}
+.result-summary{color:var(--muted);font-size:.82rem;margin:0 0 14px}
+.tours-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:18px}
+.tour-card{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius-lg);background:#fff;box-shadow:var(--shadow-1);overflow:hidden;text-decoration:none;color:inherit;transition:transform .2s,box-shadow .2s}
+.tour-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-2)}
+.tour-card-media{position:relative;aspect-ratio:16/10;background:linear-gradient(135deg,#eaf0ff,#f8f1e1);overflow:hidden}
+.tour-card-media img{width:100%;height:100%;object-fit:cover;display:block}
+.tour-card-noimg{display:grid;place-items:center;height:100%;color:var(--brand);font-weight:800}
+.tour-card-type{position:absolute;top:10px;left:10px;background:rgba(255,255,255,.94);color:var(--brand);font-size:.68rem;font-weight:800;padding:5px 10px;border-radius:99px;text-transform:uppercase;letter-spacing:.04em}
+.tour-card-body{padding:15px;display:flex;flex-direction:column;gap:8px;flex:1}
+.tour-card-body h3{margin:0;font-size:1.02rem;color:var(--ink);line-height:1.3}
+.tour-card-dest{margin:0;color:var(--muted);font-size:.78rem;display:flex;align-items:center;gap:5px}
+.tour-card-dest svg{width:14px;height:14px;color:var(--brand);flex:none}
+.tour-card-desc{margin:0;color:var(--muted);font-size:.8rem;line-height:1.5;flex:1}
+.tour-card-foot{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:4px;padding-top:10px;border-top:1px solid var(--border)}
+.tour-card-meta span{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:.74rem;font-weight:700}
+.tour-card-meta svg{width:14px;height:14px;color:var(--brand)}
+.tour-card-price{display:flex;align-items:baseline;gap:3px;color:var(--brand);font-weight:800}
+.tour-card-price small{font-size:.66rem;font-weight:700;color:var(--muted)}
+.tour-card-price strong{font-size:1.02rem}
+.tour-card-price span{font-size:.7rem;color:var(--muted);font-weight:600}
+.tour-card-cta{display:inline-flex;align-items:center;gap:5px;color:var(--brand);font-size:.8rem;font-weight:800;margin-top:2px}
+.tour-card-skeleton{min-height:340px;background:linear-gradient(90deg,#eef2f7 25%,#f7f9fc 50%,#eef2f7 75%);background-size:200% 100%;animation:sf-shimmer 1.3s infinite}
+@media(max-width:640px){.tours-field-grow{grid-column:span 1}.tours-toolbar{grid-template-columns:1fr}}
+@keyframes sf-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* ============== Hotel price / discount ============== */
+.hotel-price-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hotel-price-old{color:var(--muted);text-decoration:line-through;font-size:.82rem;font-weight:600}
+.hotel-price-badge{background:#e8f7ee;color:#15803d;font-size:.64rem;font-weight:800;padding:3px 7px;border-radius:99px}
+
+/* ============== Customer "Continue with Google" button ============== */
+.google-login-btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;background:#fff;color:#1f2937;border:1px solid #d1d5db;box-shadow:0 1px 2px rgba(16,24,40,.06);font-weight:700;margin-top:4px}
+.google-login-btn:hover{background:#f9fafb;border-color:#9ca3af;color:#111827}
+.google-login-btn .google-g{width:18px;height:18px;flex:none}
+.google-login-btn:disabled{opacity:.65;cursor:wait}

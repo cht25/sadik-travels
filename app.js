@@ -110,6 +110,30 @@ async function applyPublicContent() {
     scrollToHashFromUrl();
   } catch { /* Empty content keeps the shell available without inventing inventory. */ }
 }
+
+/* Hide customer navigation items that an admin has disabled.
+   Static markup contains the full canonical menu so the site works even if
+   the navigation request fails; the API only toggles visibility/order. */
+async function applySiteNavigation() {
+  try {
+    const response = await apiRequest('/site/navigation', {}, false);
+    const enabledKeys = new Set((response.navigation || []).map(item => item.key));
+    $$('#sidebarNav [data-nav-key]').forEach(link => {
+      const key = link.dataset.navKey;
+      link.hidden = !enabledKeys.has(key);
+    });
+    // Hide now-empty section labels in the sidebar.
+    $$('#sidebarNav .sidebar-section-label').forEach(label => {
+      let sibling = label.nextElementSibling;
+      let visible = false;
+      while (sibling && !sibling.classList.contains('sidebar-section-label')) {
+        if (sibling.matches('[data-nav-key]') && !sibling.hidden) { visible = true; break; }
+        sibling = sibling.nextElementSibling;
+      }
+      label.hidden = !visible;
+    });
+  } catch { /* keep the static menu if navigation config is unavailable */ }
+}
 function showToast(message, type = '') {
   const region = $('#toastRegion');
   const toast = document.createElement('div');
@@ -594,6 +618,72 @@ $('#loginForm')?.addEventListener('submit', async event => {
 $('#forgotPassword')?.addEventListener('click', () => showToast('Sadik Travels uses passwordless OTP login. Contact support if you cannot access your number or email.'));
 $('#createAccount')?.addEventListener('click', () => { showToast('New accounts are created automatically after OTP verification.'); $('#loginIdentity')?.focus(); });
 
+/* ------------------------------------------------------ customer Google login */
+let customerFirebaseAuth = null;
+let firebaseSdkPromise = null;
+function loadFirebaseSdk() {
+  if (firebaseSdkPromise) return firebaseSdkPromise;
+  firebaseSdkPromise = new Promise((resolve, reject) => {
+    if (window.firebase?.auth) { resolve(window.firebase); return; }
+    let loaded = 0;
+    const scripts = [
+      'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js',
+      'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js'
+    ];
+    const fail = (error) => reject(error || new Error('Google sign-in libraries failed to load.'));
+    scripts.forEach(src => {
+      const tag = document.createElement('script');
+      tag.src = src; tag.async = true;
+      tag.onload = () => { loaded += 1; if (loaded === scripts.length) resolve(window.firebase); };
+      tag.onerror = fail;
+      document.head.appendChild(tag);
+    });
+  });
+  return firebaseSdkPromise;
+}
+async function ensureCustomerFirebaseAuth() {
+  if (customerFirebaseAuth) return customerFirebaseAuth;
+  const config = await apiRequest('/site/firebase-config', {}, false);
+  if (!config || !config.configured || !config.firebase || !config.firebase.apiKey) {
+    throw Object.assign(new Error('Google sign-in is not configured for this website.'), { code: 'FIREBASE_NOT_CONFIGURED' });
+  }
+  const firebase = await loadFirebaseSdk();
+  if (!firebase || !firebase.auth) throw Object.assign(new Error('Google sign-in libraries failed to load.'), { code: 'FIREBASE_SDK_MISSING' });
+  const app = firebase.apps.length ? firebase.apps[0] : firebase.initializeApp(config.firebase);
+  customerFirebaseAuth = firebase.auth(app);
+  try { customerFirebaseAuth.useDeviceLanguage(); } catch { /* best effort */ }
+  return customerFirebaseAuth;
+}
+async function loginWithGoogle() {
+  const button = $('#googleLoginBtn');
+  const label = button?.querySelector('span');
+  const original = label ? label.textContent : '';
+  if (button) { button.disabled = true; }
+  if (label) label.textContent = 'Signing in…';
+  try {
+    const auth = await ensureCustomerFirebaseAuth();
+    const provider = new window.firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const result = await auth.signInWithPopup(provider);
+    const idToken = await result.user.getIdToken();
+    const response = await apiRequest('/auth/google-login', { method: 'POST', body: JSON.stringify({ idToken }) });
+    updateAuthUi(response.user);
+    closeModal($('#loginModal'));
+    showToast('Signed in with Google.', 'success');
+    void renderPublicRoute();
+  } catch (error) {
+    if (error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') return;
+    if (error?.code === 'auth/popup-blocked') showToast('Please allow pop-ups and try again.', 'error');
+    else if (error?.code === 'FIREBASE_NOT_CONFIGURED' || error?.code === 'FIREBASE_SDK_MISSING') showToast(error.message || 'Google sign-in is unavailable.', 'error');
+    else if (error?.code && String(error.code).startsWith('auth/')) showToast('Google sign-in failed. Please try again.', 'error');
+    else showToast(error?.message || 'Unable to sign in with Google.', 'error');
+  } finally {
+    if (button) button.disabled = false;
+    if (label) label.textContent = original || 'Continue with Google';
+  }
+}
+$('#googleLoginBtn')?.addEventListener('click', loginWithGoogle);
+
 function openChat() { openTemplateModal('chatTemplate'); }
 $('#chatBubble')?.addEventListener('click', openChat);
 $('#supportBtn')?.addEventListener('click', openChat);
@@ -846,7 +936,128 @@ async function openTourCheckoutWizard(tour) {
   });
 }
 
-async function renderPublicTours(root, id = '') { if (id) { const response = await apiRequest(`/tours/${encodeURIComponent(id)}`); const tour = response.tour; if (!tour) throw new Error('Tour not found'); trackAnalytics('tour_view', { id: tour.id, country: tour.country }); setSeo({ title: tour.title, description: `${tour.durationDays} days / ${tour.durationNights} nights in ${tour.country} — book with Sadik Travels.`, canonical: `/tours/${tour.id}`, image: tour.imageUrl, jsonLd: { '@context': 'https://schema.org', '@type': 'TouristTrip', name: tour.title, description: tour.description || undefined, touristType: tour.tourType } }); const metadata = tour.metadata || {}; root.innerHTML = publicPageHeader('Go Get Tour', tour.title, `${tour.durationDays} days / ${tour.durationNights} nights · ${tour.country}`, '') + `<section class="public-page-card"><div class="public-detail"><div>${tour.imageUrl ? `<img class="public-detail-image" src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" />` : publicEmptyState('No image published','This package does not have an image yet.')}<div class="public-detail-json"><h3>Package description</h3><p class="lead">${escapeHtml(tour.description || 'Published tour package details.')}</p></div></div><div><h2>${escapeHtml(tour.title)}</h2><p class="lead">${escapeHtml(tour.destinations.join(' · '))}</p><div class="public-detail-meta"><div><dt>Duration</dt><dd>${tour.durationDays} days / ${tour.durationNights} nights</dd></div><div><dt>Starting price</dt><dd>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</dd></div></div>${publicMetadataHtml(metadata)}<div class="public-detail-actions"><button type="button" class="btn btn-primary" data-public-tour-book="${escapeHtml(tour.id)}">Book this tour</button><a class="btn btn-outline" href="#contact">Contact Sadik Travels</a></div></div></div></section>`; $('#publicRouteRoot [data-public-tour-book]')?.addEventListener('click',()=>{ void openTourCheckoutWizard(tour); }); return; } root.innerHTML = publicPageHeader('Tours','Tour packages','Browse all published tour packages from the Sadik Travels catalogue','') + `<section class="public-page-card" id="toursListBody">${publicLoading()}</section>`; const toursBody = root.querySelector('#toursListBody'); let tours = []; try { const response = await apiRequest('/tours'); tours = response.tours || []; } catch (error) { toursBody.innerHTML = publicErrorState(error?.status === 503 ? 'Tour packages are temporarily unavailable. Please try again in a moment.' : (error.message || 'Unable to load tour packages.')); toursBody.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute()); return; } toursBody.innerHTML = `<div class="public-page-grid">${tours.length ? tours.map(tour => `<a class="public-page-item" href="/tours/${escapeHtml(tour.id)}" data-public-route="/tours/${escapeHtml(tour.id)}"><div class="public-page-item-image">${tour.imageUrl ? `<img src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" loading="lazy" />` : '<span>No image published</span>'}</div><div class="public-page-item-body"><small>${escapeHtml(tour.tourType)}</small><h2>${escapeHtml(tour.title)}</h2><p>${escapeHtml(tour.destinations.join(' · '))}</p><strong>৳${Number(tour.priceBdt).toLocaleString('en-BD')}</strong></div></a>`).join('') : publicEmptyState('No tours yet','Published tour packages will appear here after an admin creates them.','<a class="btn btn-primary" href="/#searchPanel">Open tour search</a>')}</div>`; }
+async function renderPublicTours(root, id = '') {
+  if (id) {
+    const response = await apiRequest(`/tours/${encodeURIComponent(id)}`);
+    const tour = response.tour;
+    if (!tour) throw new Error('Tour not found');
+    trackAnalytics('tour_view', { id: tour.id, country: tour.country });
+    setSeo({ title: tour.title, description: `${tour.durationDays} days / ${tour.durationNights} nights in ${tour.country} — book with Sadik Travels.`, canonical: `/tours/${tour.id}`, image: tour.imageUrl, jsonLd: { '@context': 'https://schema.org', '@type': 'TouristTrip', name: tour.title, description: tour.description || undefined, touristType: tour.tourType } });
+    const metadata = tour.metadata || {};
+    root.innerHTML = publicPageHeader('Go Get Tour', tour.title, `${tour.durationDays} days / ${tour.durationNights} nights · ${tour.country}`, '') + `<section class="public-page-card"><div class="public-detail"><div>${tour.imageUrl ? `<img class="public-detail-image" src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" />` : publicEmptyState('No image published','This package does not have an image yet.')}<div class="public-detail-json"><h3>Package description</h3><p class="lead">${escapeHtml(tour.description || 'Published tour package details.')}</p></div></div><div><h2>${escapeHtml(tour.title)}</h2><p class="lead">${escapeHtml(tour.destinations.join(' · '))}</p><div class="public-detail-meta"><div><dt>Duration</dt><dd>${tour.durationDays} days / ${tour.durationNights} nights</dd></div><div><dt>Starting price</dt><dd>From ${tourMoney(tour.priceBdt)}/person</dd></div></div>${publicMetadataHtml(metadata)}<div class="public-detail-actions"><button type="button" class="btn btn-primary" data-public-tour-book="${escapeHtml(tour.id)}">Book this tour</button><a class="btn btn-outline" href="#contact">Contact Sadik Travels</a></div></div></div></section>`;
+    $('#publicRouteRoot [data-public-tour-book]')?.addEventListener('click',()=>{ void openTourCheckoutWizard(tour); });
+    return;
+  }
+
+  const query = publicRoute().query;
+  const toursState = {
+    q: query.get('q') || '',
+    destination: query.get('destination') || '',
+    tourType: query.get('tour_type') || '',
+    minPrice: query.get('min_price') || '',
+    maxPrice: query.get('max_price') || '',
+    sort: ['price_asc','price_desc','newest'].includes(query.get('sort')) ? query.get('sort') : 'newest'
+  };
+
+  function buildQuery() {
+    const p = new URLSearchParams();
+    if (toursState.q) p.set('q', toursState.q);
+    if (toursState.destination) p.set('destination', toursState.destination);
+    if (toursState.tourType) p.set('tour_type', toursState.tourType);
+    if (toursState.minPrice) p.set('min_price', toursState.minPrice);
+    if (toursState.maxPrice) p.set('max_price', toursState.maxPrice);
+    if (toursState.sort && toursState.sort !== 'newest') p.set('sort', toursState.sort);
+    return p.toString();
+  }
+
+  function tourCardHtml(tour) {
+    return `<a class="tour-card" href="/tours/${escapeHtml(tour.id)}" data-public-route="/tours/${escapeHtml(tour.id)}">
+      <div class="tour-card-media">${tour.imageUrl ? `<img src="${escapeHtml(tour.imageUrl)}" alt="${escapeHtml(tour.title)}" loading="lazy" />` : '<span class="tour-card-noimg">Sadik Travels</span>'}<span class="tour-card-type">${escapeHtml(tour.tourType || 'Tour')}</span></div>
+      <div class="tour-card-body">
+        <h3>${escapeHtml(tour.title)}</h3>
+        <p class="tour-card-dest">${icon('i-location')} ${escapeHtml((tour.destinations || []).join(' · ') || tour.country)}</p>
+        <p class="tour-card-desc">${escapeHtml((tour.description || '').slice(0, 110))}${(tour.description || '').length > 110 ? '…' : ''}</p>
+        <div class="tour-card-foot">
+          <div class="tour-card-meta"><span>${icon('i-calendar')} ${tour.durationDays}d / ${tour.durationNights}n</span></div>
+          <div class="tour-card-price"><small>From</small><strong>${tourMoney(tour.priceBdt)}</strong><span>/person</span></div>
+        </div>
+        <span class="tour-card-cta">View package <span>→</span></span>
+      </div>
+    </a>`;
+  }
+
+  function shellMarkup() {
+    return publicPageHeader('Tours', 'Tour packages', 'Search and book curated Bangladesh and international tour packages with transparent pricing.', '') + `
+      <section class="public-page-card tours-toolbar-card">
+        <form class="tours-toolbar" id="toursSearchForm">
+          <label class="tours-field tours-field-grow"><span>Search</span><input type="search" id="toursQ" value="${escapeHtml(toursState.q)}" placeholder="Search tours, destinations…" /></label>
+          <label class="tours-field"><span>Destination</span><input type="text" id="toursDest" value="${escapeHtml(toursState.destination)}" placeholder="Country or city" /></label>
+          <label class="tours-field"><span>Tour type</span><input type="text" id="toursType" value="${escapeHtml(toursState.tourType)}" placeholder="e.g. Adventure" /></label>
+          <label class="tours-field tours-field-price"><span>Min price</span><input type="number" id="toursMin" value="${escapeHtml(toursState.minPrice)}" min="0" placeholder="0" /></label>
+          <label class="tours-field tours-field-price"><span>Max price</span><input type="number" id="toursMax" value="${escapeHtml(toursState.maxPrice)}" min="0" placeholder="200000" /></label>
+          <label class="tours-field"><span>Sort by</span><select id="toursSort"><option value="newest" ${toursState.sort==='newest'?'selected':''}>Newest</option><option value="price_asc" ${toursState.sort==='price_asc'?'selected':''}>Price: low to high</option><option value="price_desc" ${toursState.sort==='price_desc'?'selected':''}>Price: high to low</option></select></label>
+          <div class="tours-toolbar-actions"><button class="btn btn-primary" type="submit">Search</button><button class="btn btn-outline" type="button" id="toursReset">Reset</button></div>
+        </form>
+      </section>
+      <section class="public-page-card" id="toursListBody">${publicLoading()}</section>`;
+  }
+
+  root.innerHTML = shellMarkup();
+  const toursBody = root.querySelector('#toursListBody');
+
+  async function loadTours() {
+    toursBody.innerHTML = `<div class="tours-grid">${Array.from({length:6},()=>'<div class="tour-card tour-card-skeleton"></div>').join('')}</div>`;
+    let tours = [];
+    try {
+      const qs = buildQuery();
+      const response = await apiRequest(`/tours${qs ? `?${qs}` : ''}`);
+      tours = response.tours || [];
+    } catch (error) {
+      toursBody.innerHTML = publicErrorState(error?.status === 503 ? 'Tour packages are temporarily unavailable. Please try again in a moment.' : (error.message || 'Unable to load tour packages.'));
+      toursBody.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute());
+      return;
+    }
+    if (!tours.length) {
+      toursBody.innerHTML = publicEmptyState('No tours match your search', 'Try a different destination, price range or tour type.', '<button class="btn btn-outline" type="button" id="toursClearFilters">Clear filters</button>');
+      root.querySelector('#toursClearFilters')?.addEventListener('click', () => { Object.assign(toursState,{q:'',destination:'',tourType:'',minPrice:'',maxPrice:'',sort:'newest'}); publicNavigate('/tours'); });
+      return;
+    }
+    toursBody.innerHTML = `<p class="result-summary">Showing <strong>${tours.length}</strong> tour package${tours.length===1?'':'s'}</p><div class="tours-grid">${tours.map(tourCardHtml).join('')}</div>`;
+  }
+
+  function bindToolbar() {
+    const form = root.querySelector('#toursSearchForm');
+    form?.addEventListener('submit', event => {
+      event.preventDefault();
+      Object.assign(toursState, {
+        q: $('#toursQ').value.trim(),
+        destination: $('#toursDest').value.trim(),
+        tourType: $('#toursType').value.trim(),
+        minPrice: $('#toursMin').value,
+        maxPrice: $('#toursMax').value,
+        sort: $('#toursSort').value
+      });
+      const qs = buildQuery();
+      publicNavigate(`/tours${qs ? `?${qs}` : ''}`, true);
+      void loadTours();
+    });
+    root.querySelector('#toursReset')?.addEventListener('click', () => {
+      Object.assign(toursState,{q:'',destination:'',tourType:'',minPrice:'',maxPrice:'',sort:'newest'});
+      publicNavigate('/tours', true);
+      void renderPublicRoute();
+    });
+    root.querySelector('#toursSort')?.addEventListener('change', () => {
+      toursState.sort = $('#toursSort').value;
+      const qs = buildQuery();
+      publicNavigate(`/tours${qs ? `?${qs}` : ''}`, true);
+      void loadTours();
+    });
+  }
+
+  bindToolbar();
+  await loadTours();
+}
+
 let agentsPageState = { agents: [], q: '', filter: 'all', ready: false };
 const BD_PLACES = ['bangladesh','dhaka','chattogram','chittagong',"cox's bazar",'coxsbazar','sylhet','khulna','rajshahi','barishal','rangpur','mymensingh','cumilla','comilla','gazipur','narayanganj'];
 function agentInitials(agent) { return (agent.fullName || '?').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
@@ -1142,6 +1353,7 @@ const REVIEW_BUCKETS = [{ id: '4.25', label: '8.5+ Excellent', min: 4.25 }, { id
 const HOTEL_CHECKOUT_KEY = 'sadikHotelCheckout';
 const hotelSearchState = { destination: '', checkIn: '', checkOut: '', adults: 2, children: 0, rooms: 1, minPrice: '', maxPrice: '', minStarRating: '', minGuestRating: '', area: '', neighborhoods: [], propertyType: [], amenities: [], freeCancellation: false, sort: 'recommended', page: 1 };
 const hotelMoney = (value) => `৳${Number(value || 0).toLocaleString('en-BD')}`;
+const tourMoney = (value) => `BDT ${Number(value || 0).toLocaleString('en-BD')}`;
 const hotelStars = (rating) => { const n = Math.max(0, Math.min(5, Math.round(Number(rating || 0)))); return Array.from({ length: n }, () => icon('i-star')).join(''); };
 const hotelRatingLabel = (rating) => rating >= 4.5 ? 'Excellent' : rating >= 4 ? 'Very good' : rating >= 3.5 ? 'Good' : rating >= 3 ? 'Pleasant' : 'Rated';
 const hotelNightWord = (n) => `${n} night${n === 1 ? '' : 's'}`;
@@ -1225,7 +1437,8 @@ function hotelCardHtml(hotel, search) {
   const reviews = hotel.reviewCount || 0;
   const detailHref = `/hotels/${encodeURIComponent(hotel.slug)}?${hotelBuildUrl({ ...search, page: 1 })}`;
   const amenities = (hotel.amenities || []).slice(0, 4).map(a => `<span class="hotel-chip">${escapeHtml(a)}</span>`).join('');
-  const discount = hotel.priceFrom !== undefined ? null : null;
+  const hasDiscount = typeof hotel.priceFrom === 'number' && typeof hotel.originalPriceFrom === 'number' && hotel.originalPriceFrom > hotel.priceFrom;
+  const discountPct = hasDiscount ? Math.round((1 - hotel.priceFrom / hotel.originalPriceFrom) * 100) : 0;
   return `<article class="hotel-card" data-hotel-slug="${escapeHtml(hotel.slug)}">
     <a class="hotel-card-media" href="${escapeHtml(detailHref)}" data-public-route="${escapeHtml(detailHref)}" data-gallery="${escapeHtml(hotel.slug)}">
       ${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(hotel.name)}" loading="lazy" />` : `<div class="hotel-card-noimg">${icon('i-images')}</div>`}
@@ -1244,7 +1457,11 @@ function hotelCardHtml(hotel, search) {
       <div class="hotel-card-amenities">${amenities || '<span class="hotel-chip muted">Verified property</span>'}</div>
       <div class="hotel-card-foot">
         <div class="hotel-card-price">
-          ${typeof hotel.priceFrom === 'number' ? `<small>Starting from</small><strong>${hotelMoney(hotel.priceFrom)}<span>/ night</span></strong>` : '<small class="muted">Price on request</small>'}
+          ${typeof hotel.priceFrom === 'number' ? `<small>Starting from</small>
+            <div class="hotel-price-row">
+              ${hasDiscount ? `<span class="hotel-price-old">${hotelMoney(hotel.originalPriceFrom)}</span><span class="hotel-price-badge">−${discountPct}%</span>` : ''}
+              <strong>${hotelMoney(hotel.priceFrom)}<span>/ night</span></strong>
+            </div>` : '<small class="muted">Price on request</small>'}
         </div>
         <div class="hotel-card-actions">
           <a class="btn btn-outline hotel-card-btn" href="${escapeHtml(detailHref)}" data-public-route="${escapeHtml(detailHref)}">View details</a>
@@ -1577,6 +1794,7 @@ document.addEventListener('click', (event) => {
 void renderPublicRoute();
 if (appConfig.liveApi) {
   void applySiteSettings();
+  void applySiteNavigation();
   void applyPublicContent();
   void apiRequest('/auth/me', {}, false).then(response => { updateAuthUi(response.user); const p = location.pathname.replace(/\/+$/, '') || '/'; if (response.user && (p.startsWith('/bookings') || p.startsWith('/booking/') || p.startsWith('/account'))) void renderPublicRoute(); }).catch(() => updateAuthUi(null));
 }
