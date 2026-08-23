@@ -583,20 +583,21 @@ html,body{overflow-x:clip;max-width:100%}
 .side-badge[hidden]{display:none}
 .sidebar-footer{flex:0 0 auto;border-top:1px solid var(--border);margin:0;padding:11px 16px;display:flex;justify-content:space-between;color:var(--muted);font-size:.72rem;background:#fff}
 
-/* Page content resets: the public route root supplies horizontal breathing
-   room so every dedicated page (Hotels, Tours, Travel Agents, …) is inset
-   from the viewport / sidebar edge. The storefront .sf-page shell opts out
-   of the extra padding because it manages its own gutter. */
+/* Page content resets: the public route root supplies the standard shell
+   background and spacing. Hotels, Tours and Travel Agents opt into the
+   centered .page-container below; storefront .sf-page keeps its own gutter. */
 .public-route-root{min-height:auto;padding:32px var(--shell-gutter) 64px;background:#f6f8fc}
 .public-route-root>.sf-page{margin-left:calc(var(--shell-gutter) * -1);margin-right:calc(var(--shell-gutter) * -1);padding-left:var(--shell-gutter);padding-right:var(--shell-gutter);max-width:calc(var(--shell-max) + var(--shell-gutter) * 2)}
-/* Reusable customer page container — width min(100% - 64px, 1440px), centered.
-   Mobile/tablet breakpoints tighten the gutter. */
-.page-container{width:min(100% - 64px,1440px);margin-inline:auto}
+/* Reusable customer page container for the Hotels, Tours and Travel Agents
+   route layouts: centered, capped on large screens, and padded so content
+   never touches the viewport edge. */
+.page-container{width:100%;max-width:var(--shell-max,1440px);margin-inline:auto;padding-inline:32px;box-sizing:border-box}
+.public-route-root.contained-public-route{padding-inline:0}
 .public-page{max-width:var(--shell-max);margin:0 auto;padding:0;width:100%}
 .container{max-width:var(--shell-max,1440px);padding-left:var(--shell-gutter);padding-right:var(--shell-gutter)}
 .site-footer{margin-left:0;width:100%}
-@media(max-width:1023px){.page-container{width:min(100% - 48px,1440px)}}
-@media(max-width:767px){.page-container{width:min(100% - 32px,1440px)}}
+@media(max-width:1023px){.page-container{padding-inline:24px}}
+@media(max-width:767px){.page-container{padding-inline:16px}}
 
 /* Header icon buttons (cart / wishlist). */
 .nav-icon-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--ink);transition:background .18s ease,color .18s ease,border-color .18s ease}

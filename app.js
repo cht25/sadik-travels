@@ -871,6 +871,14 @@ function publicLoading() { return '<div class="public-public-loading"><span clas
 function publicErrorState(message, retry = true) { return `<div class="public-public-error"><strong>Unable to load this page</strong><p>${escapeHtml(message || 'Please try again.')}</p>${retry ? '<button class="btn btn-primary" data-public-retry>Try again</button>' : ''}</div>`; }
 function publicEmptyState(title, message, action = '') { return `<div class="public-public-empty"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(message)}</p>${action}</div>`; }
 function publicPageHeader(eyebrow, title, description, action = '') { return `<div class="public-page-header"><div><span class="public-page-eyebrow">${escapeHtml(eyebrow)}</span><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p></div><div class="public-page-actions">${action}<a class="btn btn-outline" href="/" data-public-route="/">Back home</a></div></div>`; }
+const CONTAINED_PUBLIC_ROUTES = new Set(['hotels', 'tours', 'travel-agents']);
+function wrapPublicRouteContent(root) {
+  if (!root || root.firstElementChild?.classList?.contains('page-container')) return;
+  const wrapper = document.createElement('div');
+  wrapper.className = 'page-container';
+  while (root.firstChild) wrapper.appendChild(root.firstChild);
+  root.appendChild(wrapper);
+}
 function publicContentPath(item) { return { hotel:'hotels', home:'homes', offer:'offers', holiday_package:'holiday-packages', destination:'explore', explore:'explore' }[item.type] || 'explore'; }
 function publicImage(imageUrl, alt, className = '') { return imageUrl ? `<img class="${className}" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(alt)}" loading="lazy" />` : `<div class="public-page-item-image">Sadik Travels</div>`; }
 function publicContentCard(item) { const route = `/${publicContentPath(item)}/${item.id}`; const price = item.metadata?.price || item.metadata?.priceBdt; return `<a class="public-page-item" href="${escapeHtml(route)}" data-public-route="${escapeHtml(route)}"><div class="public-page-item-image">${item.imageUrl ? `<img src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.title)}" loading="lazy" />` : '<span>Sadik Travels</span>'}</div><div class="public-page-item-body"><small>${escapeHtml(String(item.type).replace(/_/g, ' '))}</small><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.subtitle || item.description || 'View published details.')}</p>${price ? `<strong>৳${escapeHtml(Number(price).toLocaleString('en-BD'))}</strong>` : ''}</div></a>`; }
@@ -1003,6 +1011,7 @@ async function renderPublicTours(root, id = '') {
   }
 
   root.innerHTML = shellMarkup();
+  wrapPublicRouteContent(root);
   const toursBody = root.querySelector('#toursListBody');
 
   async function loadTours() {
@@ -1090,6 +1099,7 @@ function drawAgentsPage(root) {
   const filtered = filterAgents(agents, agentsPageState.q, agentsPageState.filter);
   const filters = [['all', 'All'], ['available', 'Available'], ['international', 'International'], ['domestic', 'Domestic']];
   root.innerHTML = publicPageHeader('People', 'Travel Agents', 'Meet our verified Sadik Travels travel specialists. Connect with the right expert for hotels, homes & villas, tours and holiday packages.', '') + `<section class="public-page-card"><div class="agents-toolbar"><div class="agents-search"><svg class="search-icon"><use href="#i-search"></use></svg><input id="agentsSearchInput" type="search" placeholder="Search by name, location, language or specialty" value="${escapeHtml(agentsPageState.q)}" autocomplete="off" aria-label="Search travel agents" />${agentsPageState.q ? `<button type="button" class="agents-clear" id="agentsClearSearch" aria-label="Clear search">${icon('i-close')}</button>` : ''}</div><div class="agents-filters">${filters.map(([key, label]) => `<button type="button" class="agents-filter ${agentsPageState.filter === key ? 'active' : ''}" data-agent-filter="${key}">${label}</button>`).join('')}</div></div><p class="agents-result-count">Showing <strong>${filtered.length}</strong> of ${agents.length} travel agent${agents.length === 1 ? '' : 's'}</p><div class="agents-page-grid">${filtered.length ? filtered.map(agentCardHtml).join('') : publicEmptyState('No travel agents found', 'Try another search or filter to find a specialist.', '')}</div></section>`;
+  wrapPublicRouteContent(root);
   bindAgentsPage(root);
 }
 function bindAgentsPage(root) {
@@ -1104,6 +1114,7 @@ async function renderPublicAgents(root, id = '') {
   document.title = 'Travel Agents | Sadik Travels';
   if (!agentsPageState.ready) {
     root.innerHTML = publicPageHeader('People', 'Travel Agents', 'Meet our verified Sadik Travels travel specialists.', '') + `<section class="public-page-card"><div class="agents-page-grid">${Array.from({ length: 8 }, agentSkeletonHtml).join('')}</div></section>`;
+    wrapPublicRouteContent(root);
     try { const response = await apiRequest('/site/agents'); agentsPageState.agents = response.agents || []; agentsPageState.ready = true; }
     catch (error) { const grid = root.querySelector('.agents-page-grid') || root; grid.innerHTML = publicErrorState(error?.status === 503 ? 'Travel agents are temporarily unavailable. Please try again in a moment.' : 'Travel agents are temporarily unavailable. Please try again shortly.'); root.querySelector('[data-public-retry]')?.addEventListener('click', () => { agentsPageState.ready = false; void renderPublicRoute(); }); return; }
   }
@@ -1143,6 +1154,8 @@ async function renderPublicRoute() {
   const home = document.querySelector('main');
   if (!root || !home) return;
   const route = publicRoute();
+  const usePageContainer = CONTAINED_PUBLIC_ROUTES.has(route.parts[0]);
+  root.classList.toggle('contained-public-route', usePageContainer);
   publicSetActive(route.path);
   trackAnalytics('page_view', { route: route.parts[0] || 'home' });
   if (route.path === '/' || route.path === '/') {
@@ -1164,6 +1177,7 @@ async function renderPublicRoute() {
       if (!route.parts[1]) { await renderHotelLanding(root); }
       else if (route.parts[1] === 'search') { await renderHotelSearch(root, route.query); }
       else { await renderHotelDetail(root, route.parts[1], route.query); }
+      wrapPublicRouteContent(root);
       return;
     }
     if (route.parts[0] === 'payment') { await renderPaymentReturn(root, route.query); return; }
@@ -1192,6 +1206,7 @@ async function renderPublicRoute() {
           : 'Something went wrong while loading this page. Please try again.';
     root.innerHTML = publicErrorState(detail);
   }
+  if (usePageContainer) wrapPublicRouteContent(root);
   root.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute());
 }
 function bindPublicRouter(){document.addEventListener('click',event=>{const link=event.target.closest('[data-public-route]');if(!link)return;event.preventDefault();publicNavigate(link.dataset.publicRoute||link.getAttribute('href'));});window.addEventListener('popstate',()=>void renderPublicRoute());}
@@ -1474,8 +1489,10 @@ function hotelCardHtml(hotel, search) {
 async function renderHotelLanding(root) {
   document.title = 'Hotels | Sadik Travels';
   root.innerHTML = publicPageHeader('Stays', 'Hotels', 'Search and book verified hotels, resorts and apartments with Sadik Travels.', '') + `<section class="public-page-card"><div class="hotel-landing-search">${hotelCompactSearchForm({ destination: '', checkIn: isoDateFromToday(1), checkOut: isoDateFromToday(2), adults: 2, children: 0, rooms: 1 })}</div></section>`;
+  wrapPublicRouteContent(root);
+  const page = root.querySelector('.page-container') || root;
   bindHotelModifyForm({ destination: '', checkIn: isoDateFromToday(1), checkOut: isoDateFromToday(2), adults: 2, children: 0, rooms: 1 });
-  try { const r = await apiRequest('/hotels?pageSize=6'); const featured = r.hotels || []; const grid = $('#publicRouteRoot .hotel-featured'); root.insertAdjacentHTML('beforeend', `<section class="public-page-card"><div class="section-heading"><div><span class="hs-eyebrow">${icon('i-hotel')} Featured hotels</span><h2>Popular stays</h2><p>A selection of published Sadik Travels properties.</p></div></div><div class="hotel-results-grid">${featured.length ? featured.map(h => hotelCardHtml(h, { checkIn: isoDateFromToday(1), checkOut: isoDateFromToday(2), adults: 2, children: 0, rooms: 1 })).join('') : publicEmptyState('No hotels published yet', 'Hotels will appear here after an administrator adds and publishes them.', '<a class="btn btn-primary" href="/" data-public-route="/">Back home</a>')}</div></section>`); } catch (error) { root.insertAdjacentHTML('beforeend', `<section class="public-page-card">${publicErrorState(error?.status === 503 ? 'Hotel results are temporarily unavailable. Please try again in a moment.' : 'Unable to load hotel results. Please try again.')}</section>`); root.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute()); }
+  try { const r = await apiRequest('/hotels?pageSize=6'); const featured = r.hotels || []; page.insertAdjacentHTML('beforeend', `<section class="public-page-card"><div class="section-heading"><div><span class="hs-eyebrow">${icon('i-hotel')} Featured hotels</span><h2>Popular stays</h2><p>A selection of published Sadik Travels properties.</p></div></div><div class="hotel-results-grid">${featured.length ? featured.map(h => hotelCardHtml(h, { checkIn: isoDateFromToday(1), checkOut: isoDateFromToday(2), adults: 2, children: 0, rooms: 1 })).join('') : publicEmptyState('No hotels published yet', 'Hotels will appear here after an administrator adds and publishes them.', '<a class="btn btn-primary" href="/" data-public-route="/">Back home</a>')}</div></section>`); } catch (error) { page.insertAdjacentHTML('beforeend', `<section class="public-page-card">${publicErrorState(error?.status === 503 ? 'Hotel results are temporarily unavailable. Please try again in a moment.' : 'Unable to load hotel results. Please try again.')}</section>`); root.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute()); }
 }
 async function renderHotelSearch(root, query) {
   document.title = 'Hotel search | Sadik Travels';
@@ -1507,6 +1524,7 @@ async function renderHotelSearch(root, query) {
       </div>
     </div>
     <div class="mobile-sheet" id="hotelMobileSheet"><div><small>Filters &amp; book</small><strong id="hotelSheetCount">Searching…</strong></div><div style="display:flex;gap:8px"><button type="button" class="btn btn-outline" id="hotelSheetFilters">Filters</button></div></div>`;
+  wrapPublicRouteContent(root);
   $('#hotelSort').value = search.sort;
   let facetData = { propertyTypes: [], cities: [] };
   const loadResults = async () => {
@@ -1601,6 +1619,7 @@ async function renderHotelDetail(root, slug, query) {
           <div class="hotel-results-grid" id="hotelSimilarGrid"><div class="public-public-loading"><span class="spinner"></span>Loading similar hotels…</div></div>
         </section>
       </div>`;
+    wrapPublicRouteContent(root);
     bindHotelDetail(hotel, selection, search);
     void loadSimilarHotels();
   };
