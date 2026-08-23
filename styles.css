@@ -629,3 +629,31 @@ html,body{overflow-x:clip;max-width:100%}
 /* Header is in normal flow now: heroes must not add a fixed-header offset. */
 .page-content .hero{margin-top:0}
 @media(max-width:1023.98px){.page-content .hero{margin-top:0}}
+
+/* ------------------------------------------------------------------ PWA */
+.pwa-hero{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:28px;padding:8px 0 4px}
+.pwa-benefits{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.pwa-benefits li{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600;color:#25334d}
+.pwa-benefits li svg{width:18px;height:18px;color:#1438b8;flex:none}
+.pwa-hero-actions{display:flex;flex-direction:column;align-items:center;gap:9px}
+.pwa-hero-actions .btn svg{width:17px;height:17px}
+.pwa-hero-note{font-size:12px;color:#68758a}
+#pwaPopupHost{position:fixed;inset:0;z-index:4000}
+.pwa-popup-backdrop{position:absolute;inset:0;background:rgba(10,22,48,.55);backdrop-filter:blur(2px)}
+.pwa-popup{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:min(400px,calc(100% - 28px));background:#fff;border:1px solid #e3e8f0;border-radius:18px;box-shadow:0 24px 70px rgba(16,36,80,.28);padding:26px 22px 22px;text-align:center}
+@media (min-width:768px){.pwa-popup{bottom:auto;top:50%;transform:translate(-50%,-50%)}}
+.pwa-popup-logo{width:56px;height:56px;border-radius:14px;border:1px solid #e3e8f0}
+.pwa-popup h2{font-size:19px;margin:12px 0 6px;color:#17253b}
+.pwa-popup p{font-size:13px;color:#68758a;margin:0 0 14px;line-height:1.55}
+.pwa-popup-benefits{list-style:none;margin:0 0 18px;padding:0;display:grid;gap:7px;text-align:left;justify-content:center}
+.pwa-popup-benefits li{font-size:13px;font-weight:600;color:#25334d}
+.pwa-popup-steps{text-align:left;background:#f5f7fb;border:1px solid #e3e8f0;border-radius:12px;padding:13px 15px;margin-bottom:16px;font-size:13px;color:#25334d}
+.pwa-popup-steps ol{margin:8px 0 0;padding-left:18px;display:grid;gap:5px}
+.pwa-popup-actions{display:flex;gap:10px;justify-content:center}
+.pwa-btn-primary{flex:1;max-width:180px;padding:12px 18px;border:0;border-radius:9px;background:#1438b8;color:#fff;font-size:13px;font-weight:800;cursor:pointer}
+.pwa-btn-primary:hover{background:#0f2c93}
+.pwa-btn-secondary{flex:1;max-width:180px;padding:12px 18px;border-radius:9px;border:1px solid #cbd5e4;background:#fff;color:#25334d;font-size:13px;font-weight:700;cursor:pointer}
+.pwa-btn-secondary:hover{border-color:#9fb1cc}
+.pwa-popup-close{position:absolute;top:10px;right:10px;width:32px;height:32px;border:0;border-radius:8px;background:transparent;color:#68758a;font-size:15px;cursor:pointer}
+.pwa-popup-close:hover{background:#f0f3f9;color:#17253b}
+body.pwa-popup-open{overflow:hidden}

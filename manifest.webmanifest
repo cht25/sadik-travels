@@ -1,0 +1,26 @@
+{
+  "name": "Sadik Travels — Hotels, Villas, Tours & Holiday Packages",
+  "short_name": "Sadik Travels",
+  "description": "Book hotels, homes & villas, tours and holiday packages with secure payments and 24/7 support.",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#1438b8",
+  "background_color": "#f5f7fb",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["travel", "navigation", "lifestyle"],
+  "icons": [
+    { "src": "/assets/pwa-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/pwa-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/pwa-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Hotels", "url": "/hotels", "icons": [{ "src": "/assets/pwa-icon-192.png", "sizes": "192x192" }] },
+    { "name": "Tours", "url": "/tours", "icons": [{ "src": "/assets/pwa-icon-192.png", "sizes": "192x192" }] },
+    { "name": "Track Booking", "url": "/track-booking", "icons": [{ "src": "/assets/pwa-icon-192.png", "sizes": "192x192" }] },
+    { "name": "My Cart", "url": "/cart", "icons": [{ "src": "/assets/pwa-icon-192.png", "sizes": "192x192" }] }
+  ]
+}

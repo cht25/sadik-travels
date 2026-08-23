@@ -61,3 +61,33 @@ gateway (SSLCommerz, bKash, …) stays configurable from the admin settings.
 - `admin-commerce.js` — catalogue, orders, coupons, reviews and visa
   application screens for the admin console, registered as
   `window.AdminCommerce`.
+
+## Storefront navigation (marketplace focus)
+
+The primary customer navigation is intentionally limited to the travel
+marketplace surface: Home, Hotels, Homes & Villas, Tours, Holiday Packages,
+Explore, Travel Agents, My Cart, Wishlist, Track Booking, Payments, Support
+and My Account. Legacy verticals (flights, visa, eSIM, Umrah, medical tourism,
+card/airline offers) keep their routes and admin data models so old links and
+existing content never 404, but they are no longer part of the primary
+navigation, hero search tabs or homepage sections. The default admin sidebar
+(`DEFAULT_NAVIGATION` in `src/store.ts`) is trimmed to match; existing
+deployments can hide any remaining legacy items from Admin → Navigation
+Manager without deleting data.
+
+## PWA
+
+- `manifest.webmanifest` — installable app manifest (standalone display,
+  brand icons incl. a maskable 512px icon, app shortcuts for Hotels, Tours,
+  Track Booking and My Cart).
+- `sw.js` — service worker: precached app shell, network-first navigations
+  with `offline.html` fallback, stale-while-revalidate for static assets and
+  **no caching of `/api/`** (prices, availability, auth and payments always
+  come from the server). Served with `Cache-Control: no-cache` so new
+  versions roll out immediately.
+- `pwa.js` — registers the worker and drives the custom branded install
+  popup: `beforeinstallprompt` on Chromium, step-by-step instructions on iOS
+  Safari and other browsers, 14-day dismissal cooldown persisted in
+  `localStorage`, focus-trapped and keyboard-accessible dialog. Explicit
+  "Install App" buttons (`[data-pwa-install]`) always work regardless of the
+  cooldown.

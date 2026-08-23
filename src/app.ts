@@ -615,6 +615,9 @@ export function buildApp() {
   if (!config.serveStatic) app.get('/', (_req, res) => res.json({ service: 'Sadik Travels backend', status: 'online', health: '/healthz', ready: '/readyz' }));
   if (config.serveStatic) {
     app.get(/^\/admin(?:\/.*)?$/, (_req, res) => res.sendFile(path.join(config.publicDir, 'admin.html')));
+    // The service worker must never be cached long-term or PWA updates stall.
+    app.get('/sw.js', (_req, res) => { res.setHeader('Cache-Control', 'no-cache, max-age=0'); res.sendFile(path.join(config.publicDir, 'sw.js')); });
+    app.get('/manifest.webmanifest', (_req, res) => { res.setHeader('Cache-Control', 'no-cache, max-age=0'); res.type('application/manifest+json'); res.sendFile(path.join(config.publicDir, 'manifest.webmanifest')); });
     app.use(express.static(config.publicDir, { index: 'index.html', maxAge: config.isProduction ? '1h' : 0 }));
     // Single page application fallback: any non-API GET that is not a static asset
     // renders the storefront shell, so deep links and refreshes always work.

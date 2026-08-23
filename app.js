@@ -155,13 +155,14 @@ document.addEventListener('click', (event) => {
 
 function updatePassengerSummary() {
   const total = state.adults + state.children + state.infant;
-  $('#adultCount').textContent = state.adults;
-  $('#childCount').textContent = state.children;
-  $('#infantCount').textContent = state.infant;
-  $('#passengerValue').textContent = total;
-  $('#hotelAdultCount').textContent = state.hotelAdult;
-  $('#hotelChildCount').textContent = state.hotelChild;
-  $('#guestValue').textContent = `Guests - ${state.hotelAdult + state.hotelChild}`;
+  const set = (selector, value) => { const node = $(selector); if (node) node.textContent = value; };
+  set('#adultCount', state.adults);
+  set('#childCount', state.children);
+  set('#infantCount', state.infant);
+  set('#passengerValue', total);
+  set('#hotelAdultCount', state.hotelAdult);
+  set('#hotelChildCount', state.hotelChild);
+  set('#guestValue', `Guests - ${state.hotelAdult + state.hotelChild}`);
 }
 
 $$('[data-step]').forEach(button => {
@@ -1108,17 +1109,10 @@ function bindPublicRouter(){document.addEventListener('click',event=>{const link
 function publicNavigate(route,replace=false){const href=publicHref(route);if(href===`${location.pathname}${location.search}`){void renderPublicRoute();return;}if(replace)history.replaceState({},'',href);else history.pushState({},'',href);if(window.innerWidth<=767)closeSidebar();void renderPublicRoute();}
 
 const HOME_SECTIONS = [
-  { id: 'home-hotels', eyebrow: 'Stays', title: 'Hotels', subtitle: "Find memorable stays across Bangladesh and abroad. Browse curated hotels or submit a live search to check real-time availability.", type: 'hotel', icon: 'i-hotel', limit: 4, viewAll: '/hotels' },
-  { id: 'homes', eyebrow: 'Properties', title: 'Homes', subtitle: 'Smart rent and buy property solutions from Sadik Homes for every traveller and family.', type: 'home', icon: 'i-home', limit: 4, viewAll: '/homes' },
-  { id: 'visa-services', eyebrow: 'Documents', title: 'Visa Services', subtitle: 'Visa information and application support from Sadik Travels visa experts.', type: 'visa', icon: 'i-passport', limit: 4, viewAll: '/visa' },
-  { id: 'home-tours', eyebrow: 'Go Get Tour', title: 'Go Get Tour', subtitle: 'Curated Bangladesh and international tour packages with clear pricing and Sadik Travels support.', source: 'tours', icon: 'i-map', limit: 4, viewAll: '/tours' },
-  { id: 'home-esim', eyebrow: 'Connectivity', title: 'eSIM', subtitle: 'Stay connected instantly with travel eSIMs for local and global destinations.', type: 'esim', icon: 'i-sim', limit: 4, viewAll: '/esim' },
-  { id: 'special-umrah-fare', eyebrow: 'Offers', title: 'Special Umrah Fare', subtitle: 'Exclusive Umrah fares managed and published by Sadik Travels.', type: 'umrah_fare', icon: 'i-award', limit: 4, viewAll: '/special-umrah-fare' },
-  { id: 'umrah-packages', eyebrow: 'Packages', title: 'Umrah Packages', subtitle: 'Complete Umrah packages with flights, hotels and transport.', type: 'umrah_package', icon: 'i-map', limit: 4, viewAll: '/umrah-packages' },
-  { id: 'holiday-packages', eyebrow: 'Holidays', title: 'Holiday Packages', subtitle: 'Hand-picked holiday itineraries for families, couples and groups.', type: 'holiday_package', icon: 'i-plane', limit: 4, viewAll: '/holiday-packages' },
-  { id: 'medical-tourism', eyebrow: 'Wellness', title: 'Medical Tourism', subtitle: 'Trusted medical tourism services and treatment partnerships.', type: 'medical_tourism', icon: 'i-hotel', limit: 4, viewAll: '/medical-tourism' },
-  { id: 'card-offers', eyebrow: 'Offers', title: 'Card Offers', subtitle: 'Bank and card travel offers published by Sadik Travels.', type: 'card_offer', icon: 'i-check', limit: 4, viewAll: '/card-offers' },
-  { id: 'airline-offers', eyebrow: 'Offers', title: 'Airlines Offers', subtitle: 'Published airline fares and promotional offers.', type: 'airline_offer', icon: 'i-plane', limit: 4, viewAll: '/airline-offers' },
+  { id: 'home-hotels', eyebrow: 'Stays', title: 'Featured Hotels', subtitle: "Find memorable stays across Bangladesh and abroad. Browse curated hotels or submit a live search to check real-time availability.", type: 'hotel', icon: 'i-hotel', limit: 4, viewAll: '/hotels' },
+  { id: 'homes', eyebrow: 'Properties', title: 'Homes & Villas', subtitle: 'Private homes, apartments and villas with clear nightly pricing for every traveller and family.', type: 'home', icon: 'i-home', limit: 4, viewAll: '/homes' },
+  { id: 'home-tours', eyebrow: 'Tours', title: 'Popular Tours', subtitle: 'Curated Bangladesh and international tour packages with clear pricing and Sadik Travels support.', source: 'tours', icon: 'i-map', limit: 4, viewAll: '/tours' },
+  { id: 'holiday-packages', eyebrow: 'Holidays', title: 'Holiday Packages', subtitle: 'Hand-picked holiday itineraries for families, couples and groups.', type: 'holiday_package', icon: 'i-palm', limit: 4, viewAll: '/holiday-packages' },
   { id: 'explore', eyebrow: 'Explore', title: 'Explore', subtitle: 'Destinations, travel tips and inspiration for your next journey.', type: 'explore', extraTypes: ['destination'], icon: 'i-location', limit: 5, viewAll: '/explore' }
 ];
 const sectionEmpty = (title, message) => `<div class="public-content-empty"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span></div>`;

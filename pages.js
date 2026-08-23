@@ -1750,9 +1750,7 @@
   /** Fills each homepage section with live catalogue products. Sections that
    *  already have editorial content keep it; empty ones get real products. */
   const HOME_SECTION_TYPES = {
-    homes: 'home', 'visa-services': 'visa_service', 'home-esim': 'esim', esim: 'esim', 'special-umrah-fare': 'umrah_fare',
-    'umrah-packages': 'umrah_package', 'holiday-packages': 'holiday_package', 'medical-tourism': 'medical_tourism',
-    'card-offers': 'card_offer', 'airline-offers': 'airline_offer', explore: 'destination'
+    homes: 'home', 'holiday-packages': 'holiday_package', explore: 'destination'
   };
 
   async function hydrateHomeSections() {
