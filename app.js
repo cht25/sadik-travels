@@ -1672,6 +1672,13 @@ document.addEventListener('click', (event) => {
   if (!link) return;
   const path = location.pathname.replace(/\/+$/, '') || '/';
   if (path !== '/') return;
+
+  // Sidebar navigation items also carry data-scroll so their matching home
+  // section can be highlighted. They must still open their actual page; the
+  // old handler converted them to a hash URL and left the user on the home
+  // screen, which looked like the navigation button was stuck loading.
+  if (link.classList.contains('side-link')) return;
+
   event.preventDefault();
   event.stopImmediatePropagation();
   navigateToSection(link.dataset.scroll);
