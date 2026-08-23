@@ -1818,7 +1818,7 @@
   }
 
   /** Routes that render differently once the customer is authenticated. */
-  const AUTH_ROUTES = new Set(['cart', 'wishlist', 'checkout', 'orders', 'invoice', 'account']);
+  const AUTH_ROUTES = new Set(['cart', 'wishlist', 'checkout', 'orders', 'invoice', 'account', 'payments']);
 
   /* ---------------------------------------------------------- route table */
   const routes = {
@@ -1847,6 +1847,9 @@
   routes['special-umrah-fare'] = (root, route) => (route.parts[1] ? renderProductDetail(root, COLLECTIONS['special-umrah-fare'], route.parts[1]) : renderUmrahFareBoard(root, route.query));
   // Legacy alias kept working so old links never 404.
   routes['airline-offers'] = routes['airlines-offers'];
+  // Canonical marketplace aliases: /homes-villas mirrors /homes, /payments opens payment history.
+  routes['homes-villas'] = routes.homes;
+  routes.payments = (root, route) => { const query = new URLSearchParams(route.query); query.set('tab', 'payments'); return routes.account(root, { ...route, query }); };
 
   /* --------------------------------------------------------------- events */
   function bindGlobalEvents() {

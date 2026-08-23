@@ -1,4 +1,5 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
+import mongoose from 'mongoose';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -79,7 +80,7 @@ const PRIVILEGED_ROLES = ['admin', 'super_admin'] as const;
 const CONTENT_ROLES = ['admin', 'super_admin', 'content_manager'] as const;
 const FINANCE_ROLES = ['admin', 'super_admin', 'finance'] as const;
 const SUPPORT_ROLES = ['admin', 'super_admin', 'support', 'manager'] as const;
-const SAFE_PROVIDER_ERROR_CODES = new Set(['MEDIA_NOT_CONFIGURED','MEDIA_UPLOAD_FAILED','MEDIA_DELETE_FAILED','IMAGE_TOO_LARGE','UNSUPPORTED_IMAGE_FORMAT','IMAGE_UPLOAD_INVALID','PROVIDER_NOT_CONFIGURED','PROVIDER_UNAVAILABLE','PROVIDER_ERROR','PROVIDER_TIMEOUT','SMS_NOT_CONFIGURED','SMS_PROVIDER_ERROR','EMAIL_NOT_CONFIGURED','SSLCOMMERZ_NOT_CONFIGURED','SSLCOMMERZ_ERROR','BKASH_NOT_CONFIGURED','BKASH_AUTH_ERROR','BKASH_ERROR','REFUNDS_NOT_CONFIGURED','NOTIFICATION_RETRY_FAILED']);
+const SAFE_PROVIDER_ERROR_CODES = new Set(['SERVICE_UNAVAILABLE','NOT_READY','MEDIA_NOT_CONFIGURED','MEDIA_UPLOAD_FAILED','MEDIA_DELETE_FAILED','IMAGE_TOO_LARGE','UNSUPPORTED_IMAGE_FORMAT','IMAGE_UPLOAD_INVALID','PROVIDER_NOT_CONFIGURED','PROVIDER_UNAVAILABLE','PROVIDER_ERROR','PROVIDER_TIMEOUT','SMS_NOT_CONFIGURED','SMS_PROVIDER_ERROR','EMAIL_NOT_CONFIGURED','SSLCOMMERZ_NOT_CONFIGURED','SSLCOMMERZ_ERROR','BKASH_NOT_CONFIGURED','BKASH_AUTH_ERROR','BKASH_ERROR','REFUNDS_NOT_CONFIGURED','NOTIFICATION_RETRY_FAILED']);
 /** Public storefront route prefix for each catalogue type (used by the sitemap). */
 const TYPE_ROUTE_PUBLIC: Record<string, string> = {
   esim: 'esim', umrah_package: 'umrah-packages', umrah_fare: 'special-umrah-fare', holiday_package: 'holiday-packages',
@@ -150,9 +151,16 @@ export function buildApp() {
   app.use(cookieParser());
   app.use(rateLimit('global', 300, 60));
   app.use(['/api/v1/site', '/api/v1/tours'], (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
+  // Fail fast when MongoDB is not connected: an honest 503 in milliseconds instead of a
+  // 10s mongoose buffering timeout surfacing as a generic 500. /api/health and /api/ready
+  // stay outside this guard so they keep reporting real dependency status.
+  app.use('/api/v1', (_req, _res, next) => {
+    if (mongoose.connection.readyState !== 1) return next(new AppError(503, 'SERVICE_UNAVAILABLE', 'The Sadik Travels database is temporarily unreachable. Please try again in a moment.'));
+    next();
+  });
 
-  app.get(['/healthz', '/api/health'], async (_req, res, next) => { try { await store.health(); res.json({ status: 'ok', ok: true, service: 'sadik-travels-api', database: 'connected', env: config.nodeEnv }); } catch (error) { next(new AppError(503, 'NOT_READY', 'Service dependencies are not ready', config.isProduction ? undefined : error)); } });
-  app.get(['/readyz', '/api/ready'], async (_req, res, next) => { try { await store.health(); res.json({ ok: true, database: 'mongodb' }); } catch (error) { next(new AppError(503, 'NOT_READY', 'Service dependencies are not ready', config.isProduction ? undefined : error)); } });
+  app.get(['/healthz', '/api/health'], async (_req, res, next) => { try { const healthy = await store.health(); assert(healthy, 503, 'NOT_READY', 'Database is not connected'); res.json({ status: 'ok', ok: true, service: 'sadik-travels-api', database: 'connected', env: config.nodeEnv }); } catch (error) { next(error instanceof AppError ? error : new AppError(503, 'NOT_READY', 'Service dependencies are not ready', config.isProduction ? undefined : error)); } });
+  app.get(['/readyz', '/api/ready'], async (_req, res, next) => { try { const healthy = await store.health(); assert(healthy, 503, 'NOT_READY', 'Database is not connected'); res.json({ ok: true, database: 'mongodb' }); } catch (error) { next(error instanceof AppError ? error : new AppError(503, 'NOT_READY', 'Service dependencies are not ready', config.isProduction ? undefined : error)); } });
   app.get('/api/v1/site/settings', async (_req, res) => {
     const serviceVisibility = await store.getServiceVisibility();
     const serviceStatuses = Object.fromEntries(serviceVisibility.map(item => [item.key, item.status]));

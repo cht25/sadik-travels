@@ -91,3 +91,18 @@ Manager without deleting data.
   `localStorage`, focus-trapped and keyboard-accessible dialog. Explicit
   "Install App" buttons (`[data-pwa-install]`) always work regardless of the
   cooldown.
+
+## Degraded-mode behaviour (database unreachable)
+
+- Every `/api/v1/*` request is guarded: if the MongoDB connection is not in
+  `connected` state the API answers **503 `SERVICE_UNAVAILABLE`** within
+  milliseconds with a user-safe message, instead of a 10-second mongoose
+  buffering timeout surfacing as a generic 500.
+- `/healthz`, `/readyz`, `/api/health` and `/api/ready` fail with 503 when the
+  database is down (previously they incorrectly returned 200).
+- Storefront pages render their shell (heading, search, filters) first and
+  load data into a slot with explicit loading / empty / error(+retry) states,
+  so a data failure never blanks the page: Hotels, Tours, Travel Agents,
+  content collections and all `sf-page` catalogue routes degrade locally.
+- `/homes-villas` (alias of `/homes`) and `/payments` (payment history) are
+  first-class routes.
