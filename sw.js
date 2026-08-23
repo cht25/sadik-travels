@@ -9,7 +9,7 @@
  *  - New versions activate immediately (skipWaiting + clients.claim); pwa.js
  *    listens for the controllerchange event to refresh stale tabs.
  */
-const VERSION = 'st-v3';
+const VERSION = 'st-v4';
 const SHELL_CACHE = `${VERSION}-shell`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 const OFFLINE_URL = '/offline.html';
@@ -19,8 +19,8 @@ const PRECACHE = [
   '/styles.css?v=18',
   '/storefront.css?v=4',
   '/api.js?v=3',
-  '/pages.js?v=2',
-  '/app.js?v=19',
+  '/pages.js?v=3',
+  '/app.js?v=20',
   '/pwa.js?v=1',
   '/manifest.webmanifest',
   '/assets/sadik-travels-logo.png?v=3',

@@ -20,7 +20,7 @@ import { rateLimit } from './rate-limit.js';
  */
 
 export const ANALYTICS_EVENTS = [
-  'page_view', 'search', 'hotel_view', 'flight_search', 'tour_view', 'esim_view',
+  'page_view', 'search', 'hotel_view', 'tour_view',
   'product_view', 'add_to_cart', 'wishlist', 'checkout_started', 'payment_started',
   'payment_success', 'payment_failed', 'booking_created', 'booking_confirmed',
   'support_ticket_created', 'agent_view', 'coupon_applied'
@@ -140,7 +140,7 @@ export async function analyticsReport(range: AnalyticsRange, from?: string, to?:
     const bucket = trendMap.get(day) || { pageViews: 0, visitors: new Set<string>(), conversions: 0 };
     bucket.visitors.add(session);
     if (event.event === 'page_view') { counts.pageViews += 1; bucket.pageViews += 1; }
-    if (['search', 'flight_search'].includes(event.event)) counts.searches += 1;
+    if (event.event === 'search') counts.searches += 1;
     if (event.event === 'booking_created') { counts.bookingsCreated += 1; bucket.conversions += 1; }
     if (event.event === 'booking_confirmed') counts.bookingsConfirmed += 1;
     if (event.event === 'payment_started') counts.paymentsStarted += 1;

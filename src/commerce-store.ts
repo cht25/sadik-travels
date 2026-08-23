@@ -16,10 +16,7 @@ import { AppError } from './errors.js';
  * discounts, coupons, taxes and totals sent by a browser are never trusted.
  */
 
-export const CATALOG_TYPES = [
-  'esim', 'umrah_package', 'umrah_fare', 'holiday_package', 'medical_tourism',
-  'visa_service', 'home', 'card_offer', 'airline_offer', 'destination', 'flight_offer', 'accessory'
-] as const;
+export const CATALOG_TYPES = ['holiday_package', 'home', 'destination'] as const;
 export type CatalogType = typeof CATALOG_TYPES[number];
 export type CatalogStatus = 'draft' | 'published' | 'archived';
 
@@ -31,20 +28,11 @@ export type CatalogProduct = {
   heroImage?: CatalogImage; images: CatalogImage[];
   price: number; originalPrice?: number; currency: string; serviceCharge: number; taxPct: number;
   durationDays?: number; durationNights?: number;
-  // eSIM
-  dataAmount?: string; validityDays?: number; network?: string; activation?: string; coverage: string[];
-  provider?: string; activationMethod?: string; qrCodeUrl?: string; smDpPlus?: string; activationCode?: string; instructions?: string;
-  // Visa
-  visaType?: string; processingTime?: string; validity?: string; entryType?: string; requiredDocuments: string[];
   // Packages
   itinerary: Array<{ day: number; title: string; detail?: string }>;
   inclusions: string[]; exclusions: string[]; hotelInfo?: string; transportInfo?: string; guideInfo?: string;
-  // Medical tourism
-  hospital?: string; treatmentCategory?: string; doctor?: string; estimatedCost?: string;
   // Homes
   propertyType?: string; guests?: number; bedrooms?: number; beds?: number; bathrooms?: number; amenities: string[];
-  // Offers
-  bank?: string; cardName?: string; airline?: string; route?: string; promoCode?: string; discountLabel?: string;
   startDate?: string; endDate?: string; terms?: string;
   rating?: number; reviewCount: number; tags: string[];
   availability: number; bookable: boolean; featured: boolean; status: CatalogStatus; sortOrder: number;
@@ -55,7 +43,7 @@ export type CatalogProduct = {
 export type CatalogFilters = {
   type?: CatalogType | 'all'; status?: CatalogStatus | 'all'; q?: string; country?: string; destination?: string;
   minPrice?: number; maxPrice?: number; featured?: boolean; tags?: string[];
-  dataAmount?: string; validityDays?: number; network?: string; region?: string; airline?: string;
+  region?: string;
   sort?: 'recommended' | 'price_asc' | 'price_desc' | 'rating' | 'newest' | 'popular';
   page?: number; pageSize?: number;
 };
@@ -124,15 +112,6 @@ export type Review = {
   adminReply?: string; createdAt: string; updatedAt: string;
 };
 
-export type VisaApplication = {
-  id: string; referenceNumber: string; userId: string; productId: string; productTitle: string; orderId?: string;
-  applicant: { fullName: string; email: string; phone: string; dateOfBirth?: string; nationality?: string; address?: string };
-  passport: { number: string; issueDate?: string; expiryDate?: string; issuingCountry?: string };
-  documents: Array<{ label: string; url: string; publicId?: string; mediaId?: string }>;
-  travelDate?: string; status: 'submitted' | 'document_review' | 'processing' | 'approved' | 'rejected' | 'cancelled';
-  timeline: OrderTimelineEntry[]; adminNote?: string; createdAt: string; updatedAt: string;
-};
-
 const now = () => new Date().toISOString();
 const stamp = { createdAt: { type: String, default: now }, updatedAt: { type: String, default: now } };
 const baseOptions = { versionKey: false, minimize: false } as const;
@@ -149,15 +128,11 @@ const catalogSchema = new mongoose.Schema({
   price: { type: Number, default: 0 }, originalPrice: Number, currency: { type: String, default: 'BDT' },
   serviceCharge: { type: Number, default: 0 }, taxPct: { type: Number, default: 0 },
   durationDays: Number, durationNights: Number,
-  dataAmount: String, validityDays: Number, network: String, activation: String, coverage: { type: [String], default: [] },
   provider: String, activationMethod: String, qrCodeUrl: String, smDpPlus: String, activationCode: String, instructions: String,
-  visaType: String, processingTime: String, validity: String, entryType: String, requiredDocuments: { type: [String], default: [] },
   itinerary: { type: [{ _id: false, day: Number, title: String, detail: String }], default: [] },
   inclusions: { type: [String], default: [] }, exclusions: { type: [String], default: [] },
   hotelInfo: String, transportInfo: String, guideInfo: String,
-  hospital: String, treatmentCategory: String, doctor: String, estimatedCost: String,
   propertyType: String, guests: Number, bedrooms: Number, beds: Number, bathrooms: Number, amenities: { type: [String], default: [] },
-  bank: String, cardName: String, airline: String, route: String, promoCode: String, discountLabel: String,
   startDate: String, endDate: String, terms: String,
   rating: Number, reviewCount: { type: Number, default: 0 }, tags: { type: [String], default: [] },
   availability: { type: Number, default: 100 }, bookable: { type: Boolean, default: true },
@@ -255,17 +230,6 @@ const reviewSchema = new mongoose.Schema({
   status: { type: String, default: 'pending', index: true }, adminReply: String, ...stamp
 }, baseOptions);
 
-const visaApplicationSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true, index: true },
-  referenceNumber: { type: String, required: true, unique: true, index: true },
-  userId: { type: String, required: true, index: true },
-  productId: String, productTitle: String, orderId: String,
-  applicant: { type: mongoose.Schema.Types.Mixed, default: {} },
-  passport: { type: mongoose.Schema.Types.Mixed, default: {} },
-  documents: { type: [mongoose.Schema.Types.Mixed], default: [] },
-  travelDate: String, status: { type: String, default: 'submitted', index: true },
-  timeline: { type: [mongoose.Schema.Types.Mixed], default: [] }, adminNote: String, ...stamp
-}, baseOptions);
 
 /** Models are intentionally untyped (like the hotel store) so the TypeScript
  *  compiler does not have to infer mongoose's very expensive document generics.
@@ -282,7 +246,6 @@ const OrderModel = buildModel('Order', orderSchema, 'orders');
 const InvoiceModel = buildModel('Invoice', invoiceSchema, 'invoices');
 const TravelerModel = buildModel('SavedTraveler', travelerSchema, 'saved_travelers');
 const ReviewModel = buildModel('Review', reviewSchema, 'reviews');
-const VisaApplicationModel = buildModel('VisaApplication', visaApplicationSchema, 'visa_applications');
 
 const clean = <T>(doc: any): T | undefined => {
   if (!doc) return undefined;
@@ -314,7 +277,7 @@ export function createCommerceStore() {
     await Promise.all([
       CatalogModel.createIndexes(), CartModel.createIndexes(), WishlistModel.createIndexes(),
       CouponModel.createIndexes(), OrderModel.createIndexes(), InvoiceModel.createIndexes(),
-      TravelerModel.createIndexes(), ReviewModel.createIndexes(), VisaApplicationModel.createIndexes(),
+      TravelerModel.createIndexes(), ReviewModel.createIndexes(),
       RedemptionModel.createIndexes()
     ]);
   };
@@ -330,11 +293,7 @@ export function createCommerceStore() {
     if (filters.destination) query.destination = new RegExp(escapeRegex(filters.destination), 'i');
     if (filters.featured !== undefined) query.featured = filters.featured;
     if (filters.tags?.length) query.tags = { $in: filters.tags };
-    if (filters.dataAmount) query.dataAmount = new RegExp(`^${escapeRegex(filters.dataAmount)}$`, 'i');
-    if (filters.validityDays !== undefined) query.validityDays = filters.validityDays;
-    if (filters.network) query.network = new RegExp(escapeRegex(filters.network), 'i');
     if (filters.region) query.region = new RegExp(escapeRegex(filters.region), 'i');
-    if (filters.airline) query.airline = new RegExp(escapeRegex(filters.airline), 'i');
     if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
       query.price = {
         ...(filters.minPrice !== undefined ? { $gte: filters.minPrice } : {}),
@@ -367,7 +326,7 @@ export function createCommerceStore() {
   const catalogFacets = async (type: CatalogType) => {
     const rows = await CatalogModel.aggregate([
       { $match: { type, status: 'published' } },
-      { $group: { _id: null, minPrice: { $min: '$price' }, maxPrice: { $max: '$price' }, countries: { $addToSet: '$country' }, destinations: { $addToSet: '$destination' }, tags: { $push: '$tags' }, regions: { $addToSet: '$region' }, networks: { $addToSet: '$network' }, dataAmounts: { $addToSet: '$dataAmount' }, validities: { $addToSet: '$validityDays' } } }
+      { $group: { _id: null, minPrice: { $min: '$price' }, maxPrice: { $max: '$price' }, countries: { $addToSet: '$country' }, destinations: { $addToSet: '$destination' }, tags: { $push: '$tags' }, regions: { $addToSet: '$region' } } }
     ]);
     const row = rows[0] || {};
     const countries = (row.countries || []).filter(Boolean) as string[];
@@ -384,9 +343,6 @@ export function createCommerceStore() {
       countries: countries.map(name => ({ name, count: countMap.get(name) || 0 })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
       destinations: (row.destinations || []).filter(Boolean).sort(),
       regions: (row.regions || []).filter(Boolean).sort(),
-      networks: (row.networks || []).filter(Boolean).sort(),
-      dataAmounts: (row.dataAmounts || []).filter(Boolean).sort(),
-      validities: (row.validities || []).filter(Boolean).sort((a: number, b: number) => a - b),
       tags: [...new Set(((row.tags || []) as string[][]).flat().filter(Boolean))].sort()
     };
   };
@@ -624,44 +580,14 @@ export function createCommerceStore() {
    * Without a provider the order stays FULFILLMENT_PENDING so an admin can
    * complete it manually — fulfilment is never fabricated.
    */
-  const attemptFulfillment = async (orderId: string, providerConfig?: { url?: string; apiKey?: string }) => {
+  const attemptFulfillment = async (orderId: string) => {
     const order = clean<Order>(await OrderModel.findOne({ id: orderId }).lean());
     if (!order || order.paymentStatus !== 'paid') return order;
     if (order.fulfillment?.status === 'delivered') return order;
     const existing = order.fulfillment || { status: 'none' as FulfillmentStatus };
-    const url = providerConfig?.url?.trim();
-    const apiKey = providerConfig?.apiKey?.trim();
     const updateBase = { fulfillment: { ...existing, status: 'processing' as FulfillmentStatus, updatedAt: now() } };
     await OrderModel.updateOne({ id: orderId }, { $set: { ...updateBase, updatedAt: now() } });
 
-    // Provider API fulfilment is disabled: eSIMs and packages are uploaded and dispatched from the admin panel.
-    if (false && url && apiKey) {
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 15_000);
-        const response = await fetch(new URL('/v1/esim/fulfill', url).toString(), {
-          method: 'POST', signal: controller.signal,
-          headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey! },
-          body: JSON.stringify({ orderId: order!.id, orderNumber: order!.orderNumber, userId: order!.userId, items: order!.items, customer: order!.customer, travelers: order!.travelers })
-        }).catch(() => undefined);
-        clearTimeout(timer);
-        if (response?.ok) {
-          const payload = await response!.json().catch(() => ({}));
-          if (payload && typeof payload === 'object' && (payload.qrCodeUrl || payload.smDpPlus || payload.activationCode || payload.providerReference)) {
-            const delivered: OrderFulfillment = {
-              status: 'delivered', provider: payload.provider || 'esim_provider',
-              payload: { ...payload, deliveredAt: now() }, deliveredAt: now(), note: 'Delivered by the eSIM provider', updatedBy: 'system', updatedAt: now()
-            };
-            await OrderModel.updateOne({ id: orderId }, { $set: { fulfillment: delivered, updatedAt: now() } });
-            return clean<Order>(await OrderModel.findOne({ id: orderId }).lean());
-          }
-        }
-        await OrderModel.updateOne({ id: orderId }, {
-          $set: { fulfillment: { status: 'pending', note: 'Provider responded but did not return activation details', updatedAt: now() }, updatedAt: now() }
-        });
-        return clean<Order>(await OrderModel.findOne({ id: orderId }).lean());
-      } catch { /* fall through to pending */ }
-    }
     await OrderModel.updateOne({ id: orderId }, {
       $set: { fulfillment: { status: 'pending', note: 'Awaiting fulfilment by the Sadik Travels team', updatedAt: now() }, updatedAt: now() }
     });
@@ -767,42 +693,12 @@ export function createCommerceStore() {
     await CatalogModel.updateOne({ id: productId }, { $set: { rating: row ? round(row.rating) : undefined, reviewCount: row?.count || 0, updatedAt: now() } });
   };
 
-  /* ----------------------------------------------------- visa applications */
-  const createVisaApplication = async (input: Omit<VisaApplication, 'id' | 'referenceNumber' | 'createdAt' | 'updatedAt' | 'timeline'>) =>
-    clean<VisaApplication>(await VisaApplicationModel.create({
-      ...input, id: randomUUID(), referenceNumber: reference('VA'),
-      timeline: [{ at: now(), status: 'submitted', note: 'Application submitted' }], createdAt: now(), updatedAt: now()
-    }))!;
-  const listVisaApplications = async (filters: { userId?: string; status?: string; q?: string; page?: number; pageSize?: number } = {}) => {
-    const page = Math.max(1, Number(filters.page) || 1);
-    const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 20));
-    const query: Record<string, unknown> = {};
-    if (filters.userId) query.userId = filters.userId;
-    if (filters.status && filters.status !== 'all') query.status = filters.status;
-    if (filters.q) query.referenceNumber = new RegExp(escapeRegex(filters.q), 'i');
-    const [docs, total] = await Promise.all([
-      VisaApplicationModel.find(query).sort({ createdAt: -1 }).skip((page - 1) * pageSize).limit(pageSize).lean(),
-      VisaApplicationModel.countDocuments(query)
-    ]);
-    return { applications: cleanList<VisaApplication>(docs), total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
-  };
-  const findVisaApplication = async (id: string, userId?: string) => {
-    const query: Record<string, unknown> = { $or: [{ id }, { referenceNumber: String(id).toUpperCase() }] };
-    if (userId) query.userId = userId;
-    return clean<VisaApplication>(await VisaApplicationModel.findOne(query).lean());
-  };
-  const updateVisaApplication = async (id: string, patch: Partial<VisaApplication>, event?: OrderTimelineEntry) => {
-    const update: Record<string, unknown> = { $set: { ...patch, updatedAt: now() } };
-    if (event) update.$push = { timeline: event };
-    return clean<VisaApplication>(await VisaApplicationModel.findOneAndUpdate({ id }, update, { new: true }).lean());
-  };
-
   /* ---------------------------------------------------------------- search */
   const globalSearch = async (term: string, limit = 8) => {
     const rx = new RegExp(escapeRegex(term), 'i');
     const docs = await CatalogModel.find({
       status: 'published',
-      $or: [{ title: rx }, { destination: rx }, { country: rx }, { city: rx }, { summary: rx }, { airline: rx }, { bank: rx }]
+      $or: [{ title: rx }, { destination: rx }, { country: rx }, { city: rx }, { summary: rx }]
     }).limit(limit).lean();
     return cleanList<CatalogProduct>(docs);
   };
@@ -818,7 +714,6 @@ export function createCommerceStore() {
     createInvoice, findInvoice, listInvoices, markInvoicePaid,
     listTravelers, createTraveler, updateTraveler, deleteTraveler,
     listReviews, createReview, updateReview, deleteReview, refreshProductRating,
-    createVisaApplication, listVisaApplications, findVisaApplication, updateVisaApplication,
     globalSearch
   };
 }

@@ -106,3 +106,32 @@ Manager without deleting data.
   content collections and all `sf-page` catalogue routes degrade locally.
 - `/homes-villas` (alias of `/homes`) and `/payments` (payment history) are
   first-class routes.
+
+
+## Hard feature deletion (marketplace refactor)
+
+The legacy verticals were **deleted from the architecture**, not hidden:
+
+- **Removed backend chains**: live-supplier `TravelProvider` (flight/visa/eSIM
+  search + reserve/cancel) and `/api/v1/search/:vertical`; the marketing
+  campaign module (background `CampaignWorker` polling loop, campaigns,
+  campaign recipients, templates, customer segments — models, store methods
+  and all `/api/v1/admin/campaigns*` + segment routes); the visa-application
+  module (model, store functions, customer and admin routes); the eSIM
+  fulfilment adapter; legacy content types, feature flags
+  (`feature_flights/visa/esim`) and sitemap entries.
+- **Catalogue** is reduced to `holiday_package`, `home`, `destination`
+  (plus the dedicated hotel store and tours). Bookings accept `tour` only;
+  hotels use `/api/v1/hotels/*`, everything else checks out via the cart.
+- **Frontend**: flight/visa/eSIM/Umrah/medical/card-offer/airline-offer pages,
+  renderers, search forms and event handlers were deleted from `app.js`,
+  `pages.js`, `admin.js` and `admin-commerce.js` (~60 KB of JS removed).
+  Unused SVG symbols, 29 airline logo images, 3.6 MB of scraped promo images,
+  the unused `prisma/` schema and the one-time SQLite importer are gone.
+- **Data cleanup**: `npm run cleanup:legacy` (requires
+  `CONFIRM_LEGACY_CLEANUP=yes` and a backup) drops the orphaned collections
+  (`campaigns`, `campaign_recipients`, `campaign_templates`,
+  `customer_segments`, `visa_applications`), deletes catalogue/content rows of
+  removed types and removes legacy settings/service/navigation rows. Legacy
+  `bookings` documents from removed verticals are intentionally preserved
+  (financial history) and still render in the admin.
