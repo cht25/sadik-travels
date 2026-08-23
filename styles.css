@@ -161,29 +161,38 @@ body.sidebar-open{overflow:hidden}
 @media(max-width:560px){.hs-grid{grid-template-columns:1fr}}
 
 /* Compact ID-card style travel agent card (shared by home carousel + agents page). */
-.id-card{display:flex;flex-direction:column;width:100%;max-width:300px;margin:0 auto;border:1px solid var(--border);border-radius:var(--radius-lg);background:#fff;box-shadow:var(--shadow-2);overflow:hidden;position:relative;transition:transform .2s,box-shadow .2s}
+/* Glassmorphic card body: semi-transparent + blurred instead of opaque
+   white, and NO overflow clipping — the photo sits flush to the top so
+   heads are never cut off. */
+.id-card{display:flex;flex-direction:column;width:100%;max-width:300px;margin:0 auto;border:1px solid rgba(20,36,70,.10);border-radius:var(--radius-lg);background:rgba(255,255,255,.15);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);box-shadow:var(--shadow-2);position:relative;transition:transform .2s,box-shadow .2s}
 .id-card:hover{transform:translateY(-4px);box-shadow:var(--shadow-3)}
-.id-card-photo{position:relative;height:208px;background:linear-gradient(135deg,#0a2a8f,#143fb0 60%,#1d59e0);overflow:hidden;display:grid;place-items:center}
-.id-card-photo img{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;object-position:center top;transition:transform .45s}
-.id-card:hover .id-card-photo img{transform:scale(1.04)}
-.id-card-photo .id-card-initials{color:#fff;font-size:2.6rem;font-weight:800;letter-spacing:.04em;text-shadow:0 2px 12px rgba(0,0,0,.3)}
+/* Photo frame keeps its top rounded corners (card no longer clips them)
+   and is slightly taller so more of the portrait stays visible. */
+.id-card-photo{position:relative;height:236px;background:linear-gradient(135deg,#0a2a8f,#143fb0 60%,#1d59e0);border-radius:var(--radius-lg) var(--radius-lg) 0 0;display:grid;place-items:center}
+/* Top-anchored cover: the full top of the photo (the head) is always
+   visible; only the bottom/sides are trimmed. */
+.id-card-photo img{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;object-position:center top;border-radius:inherit;z-index:1}
+.id-card-photo .id-card-initials{position:relative;z-index:1;color:#fff;font-size:2.6rem;font-weight:800;letter-spacing:.04em;text-shadow:0 2px 12px rgba(0,0,0,.3)}
 .id-card-photo .id-card-initials+svg{display:none}
-.id-badge{position:absolute;left:12px;top:12px;display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.94);color:var(--brand);font-size:.58rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;padding:4px 8px;border-radius:30px;box-shadow:var(--shadow-1)}
-.id-badge:before{content:"";width:6px;height:6px;border-radius:50%;background:#16a66e}
+/* Badge: dark semi-transparent glass pill, high z-index, legible on any
+   photo without hiding key details. */
+.id-badge{position:absolute;left:12px;top:12px;z-index:6;display:inline-flex;align-items:center;gap:5px;background:rgba(10,20,45,.58);color:#fff;font-size:.58rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;padding:5px 10px;border-radius:30px;border:1px solid rgba(255,255,255,.35);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);box-shadow:0 2px 10px rgba(5,12,30,.28)}
+.id-badge:before{content:"";width:6px;height:6px;border-radius:50%;background:#2ee27e;box-shadow:0 0 6px rgba(46,226,126,.9)}
 .id-card-body{display:flex;flex-direction:column;gap:8px;padding:15px 16px 17px;text-align:center;flex:1}
-.id-card-name{margin:0;font-size:1.12rem;font-weight:700;color:#16243d;line-height:1.2}
-.id-card-role{margin:0;color:var(--brand);font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
-.id-card-location{display:inline-flex;align-items:center;justify-content:center;gap:4px;color:var(--muted);font-size:.72rem}
-.id-card-location svg{font-size:.85rem;color:#9aa6b2}
-.id-card-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.id-card-name{margin:0;font-size:1.12rem;font-weight:800;color:#101d33;line-height:1.2}
+.id-card-role{margin:0;color:#002b9a;font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.id-card-location{display:inline-flex;align-items:center;justify-content:center;gap:4px;color:#46536e;font-size:.72rem;font-weight:600}
+.id-card-location svg{font-size:.85rem;color:#7e8ca0}
+.id-card-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 0;border-top:1px solid rgba(20,36,70,.14);border-bottom:1px solid rgba(20,36,70,.14)}
 .id-card-stat{display:flex;flex-direction:column;gap:1px;align-items:center}
-.id-card-stat small{color:#93a0ae;font-size:.58rem;text-transform:uppercase;letter-spacing:.07em;font-weight:700}
-.id-card-stat strong{color:#16243d;font-size:.78rem;font-weight:700}
+.id-card-stat small{color:#5c6a82;font-size:.58rem;text-transform:uppercase;letter-spacing:.07em;font-weight:700}
+.id-card-stat strong{color:#101d33;font-size:.78rem;font-weight:700}
 .id-card-stat .id-status{display:inline-flex;align-items:center;gap:4px;color:#0d7656;font-size:.78rem;font-weight:700}
 .id-card-stat .id-status:before{content:"";width:7px;height:7px;border-radius:50%;background:#16a66e}
 .id-card-stat .id-status.off{color:#9aa6b2}.id-card-stat .id-status.off:before{background:#bcc6d2}
-.id-card-cta{margin-top:4px;display:inline-flex;align-items:center;justify-content:center;gap:5px;width:100%;min-height:38px;border-radius:8px;border:1px solid var(--brand);background:var(--brand);color:#fff;font-size:.74rem;font-weight:700;transition:background .2s,border-color .2s}
-.id-card-cta:hover{background:var(--brand-dark);border-color:var(--brand-dark)}
+/* Fully opaque, vibrant primary-blue CTA so it stays prominent on glass. */
+.id-card-cta{margin-top:4px;display:inline-flex;align-items:center;justify-content:center;gap:5px;width:100%;min-height:38px;border-radius:8px;border:1px solid #002b9a;background:#002b9a;color:#fff;font-size:.74rem;font-weight:700;box-shadow:0 4px 12px rgba(0,43,154,.25);transition:background .2s,border-color .2s,box-shadow .2s}
+.id-card-cta:hover{background:#002280;border-color:#002280;box-shadow:0 6px 16px rgba(0,43,154,.32)}
 .id-card-cta svg{font-size:.9rem}
 
 /* Home agents carousel — the ONLY horizontally scrolling section on the page. */
@@ -222,13 +231,15 @@ body.sidebar-open{overflow:hidden}
 
 /* Agent profile detail page. */
 .agent-profile{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:24px;align-items:start}
-.agent-profile-card{border:1px solid var(--border);border-radius:var(--radius-lg);background:#fff;box-shadow:var(--shadow-2);overflow:hidden;position:sticky;top:92px}
-.agent-profile-photo{height:330px;background:linear-gradient(135deg,#0a2a8f,#143fb0 60%,#1d59e0);position:relative;display:grid;place-items:center}
-.agent-profile-photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top}
-.agent-profile-photo .id-card-initials{color:#fff;font-size:4rem;font-weight:800;text-shadow:0 2px 14px rgba(0,0,0,.3)}
+/* Same glass treatment as the ID card; no overflow clipping, photo frame
+   carries its own top rounded corners. */
+.agent-profile-card{border:1px solid rgba(20,36,70,.10);border-radius:var(--radius-lg);background:rgba(255,255,255,.15);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);box-shadow:var(--shadow-2);position:sticky;top:92px}
+.agent-profile-photo{height:360px;background:linear-gradient(135deg,#0a2a8f,#143fb0 60%,#1d59e0);position:relative;display:grid;place-items:center;border-radius:var(--radius-lg) var(--radius-lg) 0 0}
+.agent-profile-photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;border-radius:inherit;z-index:1}
+.agent-profile-photo .id-card-initials{position:relative;z-index:1;color:#fff;font-size:4rem;font-weight:800;text-shadow:0 2px 14px rgba(0,0,0,.3)}
 .agent-profile-photo .id-badge{top:14px;left:14px}
 .agent-profile-body{padding:18px;text-align:center}
-.agent-profile-body h2{margin:0 0 4px;font-size:1.4rem;color:#16243d}
+.agent-profile-body h2{margin:0 0 4px;font-size:1.4rem;color:#101d33;font-weight:800}
 .agent-profile-role{color:var(--brand);font-weight:700;font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;margin:0 0 6px}
 .agent-profile-location{display:inline-flex;align-items:center;justify-content:center;gap:5px;color:var(--muted);font-size:.78rem;margin:0}
 .agent-profile-contacts{display:flex;flex-direction:column;gap:8px;margin-top:16px}
