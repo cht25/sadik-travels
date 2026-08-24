@@ -164,6 +164,9 @@ const RETIRED_ADMIN_NAV_ROUTES = new Set([
   '/admin/segments',
   '/admin/customers/segments',
   '/admin/visa-applications',
+  '/admin/flights',
+  '/admin/visa',
+  '/admin/esim',
   '/admin/explore'
 ]);
 
@@ -172,8 +175,8 @@ const RETIRED_ADMIN_NAV_ROUTES = new Set([
  * refactor. Rather than letting those sidebar links 404, persisted rows whose
  * routes were renamed are remapped on read to their current functional target
  * (label and group are preserved). Routes of consolidated legacy verticals
- * (Flights, eSIM, Visa) stay as-is: the admin console renders an active
- * placeholder workspace for them instead of "Page not found".
+ * Retired service routes (Flights, eSIM and Visa) are excluded because they
+ * have no matching public storefront. Historical records remain preserved.
  */
 const LEGACY_ADMIN_NAV_ROUTE_REMAP = new Map<string, string>([
   ['/admin/homes', '/admin/catalog?type=home']
