@@ -402,6 +402,26 @@ function openTemplateModal(templateId, summary = '') {
   bindDynamicModalEvents();
 }
 
+const LIVE_CHAT_STORAGE_KEY = 'sadik_live_chat_session';
+let liveChatSocket = null;
+let liveChatSession = null;
+const liveChatMessageIds = new Set();
+function storedLiveChat() { try { const value = JSON.parse(sessionStorage.getItem(LIVE_CHAT_STORAGE_KEY) || 'null'); return value?.id && value?.token ? value : null; } catch { return null; } }
+function saveLiveChat(session) { liveChatSession = session; sessionStorage.setItem(LIVE_CHAT_STORAGE_KEY, JSON.stringify(session)); }
+function liveChatMessageMarkup(message) { const mine = message.authorType === 'customer'; return `<article class="visitor-chat-message ${mine ? 'is-visitor' : 'is-support'}" data-chat-message="${escapeHtml(message.id)}"><div><strong>${mine ? 'You' : 'Sadik Travels Support'}</strong><small>${escapeHtml(new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</small></div><p>${escapeHtml(message.message)}</p></article>`; }
+function appendLiveChatMessage(message) { if (!message?.id || liveChatMessageIds.has(message.id) || message.ticketId !== liveChatSession?.id) return; liveChatMessageIds.add(message.id); const stream = $('#visitorChatStream'); if (stream) { stream.insertAdjacentHTML('beforeend', liveChatMessageMarkup(message)); stream.scrollTop = stream.scrollHeight; } if ($('#genericModal')?.hidden && message.authorType === 'admin') { const badge = $('#chatBubble .chat-badge'); if (badge) { badge.hidden = false; badge.textContent = String(Math.min(9, Number(badge.textContent || 0) + 1)); } } }
+function renderLiveChatConversation(session, messages = []) { liveChatMessageIds.clear(); $('#modalContent').innerHTML = `<div class="chat-modal-content visitor-chat"><div class="chat-title-row"><div><span class="online-dot"></span> Sadik Travels Chat</div><span class="chat-status" id="visitorChatStatus">Connecting…</span></div><div class="visitor-chat-subject"><strong>${escapeHtml(session.subject || 'Travel inquiry')}</strong><small>Conversation ${escapeHtml(session.id.slice(0, 8).toUpperCase())}</small></div><div class="visitor-chat-stream" id="visitorChatStream" aria-live="polite">${messages.map(message => { liveChatMessageIds.add(message.id); return liveChatMessageMarkup(message); }).join('') || '<p class="visitor-chat-empty">You are connected. Send a message and our support team will reply here.</p>'}</div><form class="visitor-chat-reply" id="visitorChatReply"><label class="sr-only" for="visitorChatText">Message</label><textarea id="visitorChatText" rows="2" maxlength="4000" placeholder="Type your message…" required></textarea><button class="btn btn-primary" type="submit">Send</button></form><p class="visitor-chat-security">Your conversation is saved securely for support and auditing.</p></div>`; const stream = $('#visitorChatStream'); if (stream) stream.scrollTop = stream.scrollHeight; bindVisitorReply(); }
+async function connectVisitorChat(session) {
+  liveChatSession = session;
+  if (!window.io) { try { const response = await apiRequest(`/live-chat/sessions/${session.id}/messages`, { headers: { 'x-chat-token': session.token } }, false); renderLiveChatConversation(session, response.messages || []); $('#visitorChatStatus').textContent = 'Connected'; } catch (error) { $('#visitorChatStatus').textContent = 'Connection unavailable'; showToast(error.message, 'error'); } return; }
+  if (liveChatSocket) liveChatSocket.disconnect();
+  liveChatSocket = window.io({ path: '/socket.io', transports: ['websocket', 'polling'] });
+  liveChatSocket.on('connect', () => { $('#visitorChatStatus') && ($('#visitorChatStatus').textContent = 'Online'); liveChatSocket.emit('join_chat_room', { sessionId: session.id, token: session.token }, result => { if (result?.ok) renderLiveChatConversation(session, result.messages || []); else { $('#visitorChatStatus') && ($('#visitorChatStatus').textContent = 'Unable to join'); showToast(result?.error?.message || 'Unable to join this chat.', 'error'); } }); });
+  liveChatSocket.on('disconnect', () => { $('#visitorChatStatus') && ($('#visitorChatStatus').textContent = 'Reconnecting…'); });
+  liveChatSocket.on('chat_message', appendLiveChatMessage);
+}
+function bindVisitorReply() { $('#visitorChatReply')?.addEventListener('submit', async event => { event.preventDefault(); const textarea = $('#visitorChatText'); const message = textarea.value.trim(); if (!message || !liveChatSession) return; const button = event.submitter; button.disabled = true; try { if (liveChatSocket?.connected) { const result = await new Promise(resolve => liveChatSocket.emit('send_chat_message', { message }, resolve)); if (!result?.ok) throw new Error(result?.error?.message || 'Unable to send message'); } else { const response = await apiRequest(`/live-chat/sessions/${liveChatSession.id}/messages`, { method: 'POST', headers: { 'x-chat-token': liveChatSession.token }, body: JSON.stringify({ message }) }, false); appendLiveChatMessage(response.message); } textarea.value = ''; textarea.focus(); } catch (error) { showToast(error.message || 'Unable to send message.', 'error'); } finally { button.disabled = false; } }); }
+
 function bindDynamicModalEvents() {
   $('#trackForm')?.addEventListener('submit', async event => {
     event.preventDefault();
@@ -421,11 +441,13 @@ function bindDynamicModalEvents() {
     const form = $('#chatForm');
     const button = event.submitter || form.querySelector('button[type="submit"]');
     const data = Object.fromEntries(new FormData(form).entries());
+    if (!String(data.mobile || '').trim() && !String(data.email || '').trim()) { showToast('Enter a phone number or email address.', 'error'); return; }
     button.disabled = true;
     try {
-      const response = await apiRequest('/support/tickets', { method: 'POST', body: JSON.stringify(data) });
-      $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon green">${icon('i-check')}</div><h2 id="modalTitle">Support request received</h2></div><p class="modal-subtitle">Our support team will review your request.</p><div class="result-summary"><strong>Ticket ${escapeHtml(response.ticket.id)}</strong><br><span>Status: ${escapeHtml(response.ticket.status)}</span></div><button type="button" class="btn btn-primary full-btn" data-close-modal>Close</button>`;
-    } catch (error) { showToast(error.message || 'Unable to create a support request.', 'error'); } finally { button.disabled = false; }
+      const response = await apiRequest('/live-chat/sessions', { method: 'POST', body: JSON.stringify(data) }, false);
+      const session = { id: response.session.id, token: response.token, name: response.session.name, subject: response.session.subject };
+      saveLiveChat(session); renderLiveChatConversation(session); await connectVisitorChat(session);
+    } catch (error) { showToast(error.message || 'Unable to start live chat.', 'error'); } finally { button.disabled = false; }
   });
 }
 
@@ -684,7 +706,7 @@ async function loginWithGoogle() {
 }
 $('#googleLoginBtn')?.addEventListener('click', loginWithGoogle);
 
-function openChat() { openTemplateModal('chatTemplate'); }
+function openChat() { const badge = $('#chatBubble .chat-badge'); if (badge) { badge.hidden = true; badge.textContent = '0'; } const saved = storedLiveChat(); if (!saved) return openTemplateModal('chatTemplate'); liveChatSession = saved; renderLiveChatConversation(saved); openModal($('#genericModal')); void connectVisitorChat(saved); }
 $('#chatBubble')?.addEventListener('click', openChat);
 $('#supportBtn')?.addEventListener('click', openChat);
 $('#supportSideBtn')?.addEventListener('click', () => { if (window.innerWidth < 1024) closeSidebar(); openChat(); });
@@ -871,7 +893,7 @@ function publicLoading() { return '<div class="public-public-loading"><span clas
 function publicErrorState(message, retry = true) { return `<div class="public-public-error"><strong>Unable to load this page</strong><p>${escapeHtml(message || 'Please try again.')}</p>${retry ? '<button class="btn btn-primary" data-public-retry>Try again</button>' : ''}</div>`; }
 function publicEmptyState(title, message, action = '') { return `<div class="public-public-empty"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(message)}</p>${action}</div>`; }
 function publicPageHeader(eyebrow, title, description, action = '') { return `<div class="public-page-header"><div><span class="public-page-eyebrow">${escapeHtml(eyebrow)}</span><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p></div><div class="public-page-actions">${action}<a class="btn btn-outline" href="/" data-public-route="/">Back home</a></div></div>`; }
-const CONTAINED_PUBLIC_ROUTES = new Set(['hotels', 'tours', 'travel-agents']);
+const CONTAINED_PUBLIC_ROUTES = new Set(['hotels', 'tours', 'travel-agents', 'travels-agents']);
 function wrapPublicRouteContent(root) {
   if (!root || root.firstElementChild?.classList?.contains('page-container')) return;
   const wrapper = document.createElement('div');
@@ -1078,9 +1100,9 @@ function agentCardHtml(agent) {
   const location = escapeHtml(agent.city || agent.officeLocation || 'Bangladesh');
   const experience = agent.experienceYears ? `${agent.experienceYears}+ Years` : 'Verified';
   const available = agent.status !== 'hidden' && agent.status !== 'archived';
-  return `<a class="id-card" href="/travel-agents/${escapeHtml(agent.id)}" data-public-route="/travel-agents/${escapeHtml(agent.id)}"><div class="id-card-photo">${photo}<span class="id-badge">Official Member</span></div><div class="id-card-body"><h3 class="id-card-name">${escapeHtml(agent.fullName)}</h3><p class="id-card-role">${role}</p><p class="id-card-location">${icon('i-location')}${location}</p><div class="id-card-stats"><div class="id-card-stat"><small>Experience</small><strong>${escapeHtml(experience)}</strong></div><div class="id-card-stat"><small>Status</small><strong><span class="id-status${available ? '' : ' off'}">${available ? 'Available' : 'Away'}</span></strong></div></div><span class="id-card-cta">${icon('i-user')} View Profile</span></div></a>`;
+  return `<a class="id-card agent-card" href="/travel-agents/${escapeHtml(agent.id)}" data-public-route="/travel-agents/${escapeHtml(agent.id)}"><div class="id-card-photo agent-photo">${photo}<span class="id-badge agent-badge">OFFICIAL MEMBER</span></div><div class="id-card-body agent-card-body"><h3 class="id-card-name">${escapeHtml(agent.fullName)}</h3><p class="id-card-role">${role}</p><p class="id-card-location">${icon('i-location')}${location}</p><div class="id-card-stats"><div class="id-card-stat"><small>Experience</small><strong>${escapeHtml(experience)}</strong></div><div class="id-card-stat"><small>Status</small><strong><span class="id-status${available ? '' : ' off'}">${available ? 'Available' : 'Away'}</span></strong></div></div><span class="id-card-cta">${icon('i-user')} View Profile</span></div></a>`;
 }
-function agentSkeletonHtml() { return `<div class="id-card skeleton"><div class="id-card-photo"></div><div class="id-card-body"><h3 class="id-card-name">.</h3><p class="id-card-role">.</p><p class="id-card-location">.</p><div class="id-card-stats"></div></div></div>`; }
+function agentSkeletonHtml() { return `<div class="id-card agent-card skeleton"><div class="id-card-photo agent-photo"></div><div class="id-card-body agent-card-body"><h3 class="id-card-name">.</h3><p class="id-card-role">.</p><p class="id-card-location">.</p><div class="id-card-stats"></div></div></div>`; }
 function filterAgents(list, q, filter) {
   const query = q.trim().toLowerCase();
   return list.filter(agent => {
@@ -1169,7 +1191,7 @@ async function renderPublicRoute() {
   home.hidden = true; root.hidden = false;
   root.innerHTML = publicLoading();
   try {
-    const sectionTitles = { hotels: ['Hotel booking', 'Search and book verified hotels with Sadik Travels.'], homes: ['Homes & villas', 'Book homes, apartments and villas with Sadik Travels.'], 'homes-villas': ['Homes & villas', 'Book homes, apartments and villas with Sadik Travels.'], tours: ['Tours', 'Tour packages across Bangladesh and the world.'], 'holiday-packages': ['Holiday packages', 'Curated holidays bundled into one price.'], explore: ['Explore destinations', 'Discover destinations across Bangladesh and the world.'], 'travel-agents': ['Travel agents', 'Connect with verified Sadik Travels travel specialists.'], 'track-booking': ['Track booking', 'Follow your booking status in real time.'], support: ['Support', 'Sadik Travels support centre.'], orders: ['My bookings', 'Your bookings and orders with Sadik Travels.'], account: ['My account', 'Manage your profile, bookings and preferences.'], payments: ['Payments', 'Your Sadik Travels payment history and invoices.'], cart: ['My cart', 'Review items in your Sadik Travels cart.'], wishlist: ['Wishlist', 'Products you saved with Sadik Travels.'], checkout: ['Checkout', 'Secure checkout with Sadik Travels.'], offers: ['Travel offers', 'Published offers from Sadik Travels.'] };
+    const sectionTitles = { hotels: ['Hotel booking', 'Search and book verified hotels with Sadik Travels.'], homes: ['Homes & villas', 'Book homes, apartments and villas with Sadik Travels.'], 'homes-villas': ['Homes & villas', 'Book homes, apartments and villas with Sadik Travels.'], tours: ['Tours', 'Tour packages across Bangladesh and the world.'], 'holiday-packages': ['Holiday packages', 'Curated holidays bundled into one price.'], explore: ['Explore destinations', 'Discover destinations across Bangladesh and the world.'], 'travel-agents': ['Travel agents', 'Connect with verified Sadik Travels travel specialists.'], 'travels-agents': ['Travel agents', 'Connect with verified Sadik Travels travel specialists.'], 'track-booking': ['Track booking', 'Follow your booking status in real time.'], support: ['Support', 'Sadik Travels support centre.'], orders: ['My bookings', 'Your bookings and orders with Sadik Travels.'], account: ['My account', 'Manage your profile, bookings and preferences.'], payments: ['Payments', 'Your Sadik Travels payment history and invoices.'], cart: ['My cart', 'Review items in your Sadik Travels cart.'], wishlist: ['Wishlist', 'Products you saved with Sadik Travels.'], checkout: ['Checkout', 'Secure checkout with Sadik Travels.'], offers: ['Travel offers', 'Published offers from Sadik Travels.'] };
     const meta = sectionTitles[route.parts[0]];
     if (meta) setSeo({ title: meta[0], description: meta[1], canonical: route.path });
     if (window.SadikPages && window.SadikPages.routes[route.parts[0]]) { await window.SadikPages.resolve(root, route); return; }
@@ -1194,7 +1216,7 @@ async function renderPublicRoute() {
       else await renderPublicContentCollection(root, definition);
     }
     else if (route.parts[0] === 'tours') await renderPublicTours(root, route.parts[1] || '');
-    else if (route.parts[0] === 'travel-agents') await renderPublicAgents(root, route.parts[1] || '');
+    else if (['travel-agents', 'travels-agents'].includes(route.parts[0])) await renderPublicAgents(root, route.parts[1] || '');
     else { root.innerHTML = publicErrorState('This public route does not exist.'); }
   } catch (error) {
     const detail = error?.status === 503 || error?.code === 'SERVICE_UNAVAILABLE'

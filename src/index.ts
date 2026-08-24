@@ -1,9 +1,10 @@
+import { createServer } from 'node:http';
 import { validateConfig, config } from './config.js';
 import { buildApp } from './app.js';
 import { bootstrapSuperAdmin } from './admin-bootstrap.js';
 
 validateConfig();
-const { app, store, connection } = buildApp();
+const { app, store, connection, liveChat } = buildApp();
 try {
   await connection;
   const created = await bootstrapSuperAdmin(store);
@@ -13,7 +14,9 @@ try {
   store.close();
   process.exit(1);
 }
-const server = app.listen(config.port, config.host, () => console.log(`Sadik Travels listening on http://${config.host}:${config.port}`));
+const server = createServer(app);
+liveChat.attach(server);
+server.listen(config.port, config.host, () => console.log(`Sadik Travels listening on http://${config.host}:${config.port}`));
 
 const shutdown = async (signal: string) => {
   console.log(`${signal} received; shutting down gracefully`);

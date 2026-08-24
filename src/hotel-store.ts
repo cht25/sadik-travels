@@ -16,6 +16,7 @@ export type HotelBookingStatus = 'pending' | 'payment_pending' | 'confirmed' | '
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded' | 'partial';
 
 export type HotelImage = { url: string; publicId?: string; mediaId?: string; alt?: string };
+export type SeasonalDiscount = { name: string; startDate: string; endDate: string; percentage: number };
 export type CancellationPolicy = { type: 'free' | 'non_refundable'; freeUntilDays?: number; description?: string };
 
 export type Hotel = {
@@ -24,6 +25,7 @@ export type Hotel = {
   latitude?: number; longitude?: number; phone?: string; email?: string; website?: string;
   starRating: number; guestRating?: number; reviewCount?: number;
   amenities: string[]; facilities?: string[]; images: HotelImage[];
+  roomTypes?: string[]; pricePerNight?: number; seasonalDiscounts?: SeasonalDiscount[]; available?: boolean; ownerId?: string;
   checkInTime?: string; checkOutTime?: string; cancellationPolicy?: CancellationPolicy;
   status: HotelStatus; featured: boolean; sortOrder: number;
   priceFrom?: number; createdBy?: string; updatedBy?: string; deletedAt?: string;
@@ -63,7 +65,7 @@ export type HotelFilters = {
   minPrice?: number; maxPrice?: number; minStarRating?: number; minGuestRating?: number; amenities?: string[];
   area?: string; neighborhoods?: string[];
   checkIn?: string; checkOut?: string; freeCancellationOnly?: boolean; sort?: string;
-  page?: number; pageSize?: number; includeArchived?: boolean; status?: HotelStatus | 'all';
+  page?: number; pageSize?: number; includeArchived?: boolean; status?: HotelStatus | 'all'; ownerId?: string;
 };
 
 const { Schema, model, models } = mongoose;
@@ -84,6 +86,7 @@ const HotelModel = makeModel('SadikHotel', 'hotels', {
   latitude: Number, longitude: Number, phone: String, email: String, website: String,
   starRating: { type: Number, index: true }, guestRating: Number, reviewCount: { type: Number, default: 0 },
   amenities: [String], facilities: [String], images: imageSchema(),
+  roomTypes: [String], pricePerNight: Number, seasonalDiscounts: [mixed], available: { type: Boolean, default: true, index: true }, ownerId: { type: String, index: true },
   checkInTime: String, checkOutTime: String, cancellationPolicy: cancellationSchema(),
   status: { type: String, index: true }, featured: Boolean, sortOrder: Number,
   createdBy: String, updatedBy: String, deletedAt: String, createdAt: String, updatedAt: String
@@ -146,17 +149,25 @@ export class HotelStore {
   private async saveRoom(room: any) { const doc = await RoomModel.findOneAndUpdate({ id: room.id }, { $set: room }, { new: true, upsert: true }).lean(); return stripMongo(doc); }
   private async saveBooking(booking: any) { const doc = await BookingModel.findOneAndUpdate({ id: booking.id }, { $set: booking }, { new: true, upsert: true }).lean(); return stripMongo(doc); }
 
-  /** Lowest available price across a hotel's active rooms. */
-  private priceFromHotel(rooms: HotelRoom[]): number | undefined {
+  private seasonalDiscountFor(hotel: Hotel, date = new Date().toISOString().slice(0, 10)): number {
+    return Math.max(0, ...(hotel.seasonalDiscounts || [])
+      .filter(discount => discount.startDate <= date && discount.endDate >= date)
+      .map(discount => Math.min(100, Math.max(0, Number(discount.percentage) || 0))));
+  }
+
+  /** Lowest currently bookable price across active rooms, or the hotel fallback price. */
+  private priceFromHotel(rooms: HotelRoom[], hotel?: Hotel): number | undefined {
     const active = rooms.filter(room => room.status === 'active' && !room.deletedAt && room.pricePerNight > 0);
-    if (!active.length) return undefined;
-    return Math.min(...active.map(room => room.pricePerNight));
+    const base = active.length ? Math.min(...active.map(room => room.pricePerNight)) : (hotel?.pricePerNight && hotel.pricePerNight > 0 ? hotel.pricePerNight : undefined);
+    if (base === undefined) return undefined;
+    const discount = hotel ? this.seasonalDiscountFor(hotel) : 0;
+    return Math.round(base * (1 - discount / 100));
   }
 
   /** Lowest crossed-out original price across a hotel's active rooms (for discount display). */
-  private originalPriceFromHotel(rooms: HotelRoom[]): number | undefined {
+  private originalPriceFromHotel(rooms: HotelRoom[], hotel?: Hotel): number | undefined {
     const active = rooms.filter(room => room.status === 'active' && !room.deletedAt && room.pricePerNight > 0);
-    if (!active.length) return undefined;
+    if (!active.length) return hotel?.pricePerNight && hotel.pricePerNight > 0 ? hotel.pricePerNight : undefined;
     const values = active
       .map(room => (room.originalPrice && room.originalPrice > room.pricePerNight ? room.originalPrice : room.pricePerNight));
     return Math.min(...values);
@@ -178,6 +189,7 @@ export class HotelStore {
     if (filters.includeArchived) { /* keep all */ }
     else if (filters.status && filters.status !== 'all') hotels = hotels.filter(hotel => hotel.status === filters.status);
     else hotels = hotels.filter(hotel => hotel.status === 'active');
+    if (!filters.includeArchived) hotels = hotels.filter(hotel => hotel.available !== false);
 
     const rooms = (await this.allRooms()).filter(room => !room.deletedAt);
     const roomsByHotel = new Map<string, HotelRoom[]>();
@@ -197,7 +209,7 @@ export class HotelStore {
         }));
         availableCount = roomAvail.filter(Boolean).length;
       }
-      return { ...hotel, priceFrom: this.priceFromHotel(activeRooms), originalPriceFrom: this.originalPriceFromHotel(activeRooms), roomCount: activeRooms.length, availableRooms: availableCount };
+      return { ...hotel, priceFrom: this.priceFromHotel(activeRooms, hotel), originalPriceFrom: this.originalPriceFromHotel(activeRooms, hotel), roomCount: activeRooms.length, availableRooms: availableCount };
     }));
 
     let items = hotelWithPrice;
@@ -234,7 +246,7 @@ export class HotelStore {
       images: optimizeImages(hotel.images, 600),
       thumbnail: hotel.images?.[0]?.url ? optimizedMediaUrl(hotel.images[0].url, { width: 600 }) : undefined
     }));
-    const live = (await this.allHotels()).filter(h => h.status === 'active' && !h.deletedAt);
+    const live = (await this.allHotels()).filter(h => h.status === 'active' && h.available !== false && !h.deletedAt);
     const propertyTypes = [...new Set(live.map(h => h.propertyType).filter(Boolean))].sort();
     const cities = [...new Set(live.map(h => h.city).filter(Boolean))].sort();
     const areas = [...new Set(live.map(h => h.area).filter(Boolean))].sort();
@@ -245,18 +257,19 @@ export class HotelStore {
 
   async findHotel(idOrSlug: string, options: { checkIn?: string; checkOut?: string; withRooms?: boolean } = {}) {
     const hotel = await this.oneHotel(idOrSlug);
-    if (!hotel || hotel.deletedAt || hotel.status !== 'active') return undefined;
+    if (!hotel || hotel.deletedAt || hotel.status !== 'active' || hotel.available === false) return undefined;
     const rooms = (await this.allRooms()).filter(room => room.hotelId === hotel.id && !room.deletedAt && room.status === 'active');
     const roomsWithAvail = options.checkIn && options.checkOut ? await Promise.all(rooms.map(async room => ({ ...room, images: optimizeImages(room.images, 800), available: await this.availabilityFor(room.id, options.checkIn!, options.checkOut!, room.inventory), nights: nightsBetween(options.checkIn!, options.checkOut!) }))) : rooms.map(room => ({ ...room, images: optimizeImages(room.images, 800), available: room.inventory }));
-    return { ...hotel, images: optimizeImages(hotel.images, 1280), rooms: (options.withRooms === false ? [] : roomsWithAvail) };
+    return { ...hotel, priceFrom: this.priceFromHotel(rooms, hotel), originalPriceFrom: this.originalPriceFromHotel(rooms, hotel), images: optimizeImages(hotel.images, 1280), rooms: (options.withRooms === false ? [] : roomsWithAvail) };
   }
 
   async priceQuote(input: { hotelId: string; rooms: Array<{ roomId: string; quantity?: number; adults?: number; children?: number }>; checkIn: string; checkOut: string }): Promise<{ rooms: HotelBookingRoom[]; breakdown: PriceBreakdown; hotelName: string }> {
     const hotel = await this.oneHotel(input.hotelId);
-    if (!hotel || hotel.deletedAt || hotel.status !== 'active') throw new AppError(404, 'HOTEL_NOT_FOUND', 'Hotel not found');
+    if (!hotel || hotel.deletedAt || hotel.status !== 'active' || hotel.available === false) throw new AppError(404, 'HOTEL_NOT_FOUND', 'Hotel not found');
     const nights = nightsBetween(input.checkIn, input.checkOut);
     if (nights < 1) throw new AppError(400, 'INVALID_DATES', 'Check-out must be after check-in');
     const datedRooms: HotelBookingRoom[] = [];
+    const stayDates = eachDate(input.checkIn, input.checkOut);
     for (const selection of input.rooms) {
       const room = await this.oneRoom(selection.roomId);
       if (!room || room.hotelId !== input.hotelId || room.deletedAt || room.status !== 'active') throw new AppError(404, 'ROOM_NOT_FOUND', 'Room not found');
@@ -264,11 +277,13 @@ export class HotelStore {
       const adults = Math.max(1, Math.floor(selection.adults || 1));
       const children = Math.max(0, Math.floor(selection.children || 0));
       if (adults + children > room.maxGuests * quantity) throw new AppError(400, 'OCCUPANCY_EXCEEDED', `${room.name} allows up to ${room.maxGuests * quantity} guests for ${quantity} room${quantity > 1 ? 's' : ''}`);
-      const subtotal = room.pricePerNight * nights * quantity;
+      const nightly = stayDates.map(date => Math.round(room.pricePerNight * (1 - this.seasonalDiscountFor(hotel, date) / 100)));
+      const subtotal = nightly.reduce((sum, price) => sum + price, 0) * quantity;
+      const originalNightly = room.originalPrice && room.originalPrice > room.pricePerNight ? room.originalPrice : room.pricePerNight;
       const taxes = Math.round(subtotal * (room.taxesPct || 0) / 100);
       const serviceFee = (room.serviceFee || 0) * quantity;
-      const discount = (room.originalPrice && room.originalPrice > room.pricePerNight ? (room.originalPrice - room.pricePerNight) * nights * quantity : 0);
-      datedRooms.push({ roomId: room.id, roomName: room.name, quantity, adults, children, pricePerNight: room.pricePerNight, nights, subtotal, taxes, serviceFee, discount });
+      const discount = Math.max(0, originalNightly * nights * quantity - subtotal);
+      datedRooms.push({ roomId: room.id, roomName: room.name, quantity, adults, children, pricePerNight: Math.round(subtotal / nights / quantity), nights, subtotal, taxes, serviceFee, discount });
     }
     const breakdown: PriceBreakdown = {
       roomTotal: datedRooms.reduce((sum, room) => sum + room.subtotal, 0),
@@ -380,7 +395,8 @@ export class HotelStore {
 
   // ---- Admin: hotels ----
   async adminListHotels(filters: HotelFilters = {}) {
-    let hotels = (await this.allHotels()).filter(hotel => !hotel.deletedAt);
+    let hotels = await this.allHotels();
+    if (filters.ownerId) hotels = hotels.filter(hotel => hotel.ownerId === filters.ownerId);
     if (filters.status && filters.status !== 'all') hotels = hotels.filter(hotel => hotel.status === filters.status);
     if (filters.q) hotels = hotels.filter(hotel => contains(`${hotel.name} ${hotel.city} ${hotel.country} ${hotel.propertyType}`, filters.q));
     hotels.sort((a, b) => (a.featured === b.featured ? a.sortOrder - b.sortOrder : a.featured ? -1 : 1) || a.name.localeCompare(b.name));
@@ -388,13 +404,15 @@ export class HotelStore {
     const total = hotels.length; const currentPage = pageN(filters.page); const pageSize = sizeN(filters.pageSize, 20);
     const slice = hotels.slice((currentPage - 1) * pageSize, currentPage * pageSize).map(hotel => {
       const hotelRooms = rooms.filter(r => r.hotelId === hotel.id && !r.deletedAt && r.status === 'active');
-      return { ...hotel, roomCount: hotelRooms.length, priceFrom: this.priceFromHotel(hotelRooms), images: optimizeImages(hotel.images, 200) };
+      return { ...hotel, roomCount: hotelRooms.length, priceFrom: this.priceFromHotel(hotelRooms, hotel), images: optimizeImages(hotel.images, 200) };
     });
     return { hotels: slice, total, page: currentPage, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
   }
-  async adminCreateHotel(input: Partial<Hotel>, actor: string) { const time = now(); const hotel: Hotel = { id: randomUUID(), slug: input.slug!, name: input.name!, shortDescription: input.shortDescription, description: input.description, propertyType: input.propertyType || 'Hotel', address: input.address, city: input.city!, country: input.country || 'Bangladesh', area: input.area, latitude: input.latitude, longitude: input.longitude, phone: input.phone, email: input.email, website: input.website, starRating: input.starRating ?? 3, guestRating: input.guestRating, reviewCount: 0, amenities: input.amenities || [], facilities: input.facilities || [], images: input.images || [], checkInTime: input.checkInTime, checkOutTime: input.checkOutTime, cancellationPolicy: input.cancellationPolicy, status: input.status || 'draft', featured: input.featured || false, sortOrder: input.sortOrder || 0, createdBy: actor, updatedAt: time, createdAt: time } as Hotel; return this.saveHotel(hotel); }
+  async adminFindHotel(id: string) { const hotel = await this.oneHotel(id); return hotel ? hotel as Hotel : undefined; }
+  async adminFindRoom(id: string) { const room = await this.oneRoom(id); return room && !room.deletedAt ? room as HotelRoom : undefined; }
+  async adminCreateHotel(input: Partial<Hotel>, actor: string) { const time = now(); const hotel: Hotel = { id: randomUUID(), slug: input.slug!, name: input.name!, shortDescription: input.shortDescription, description: input.description, propertyType: input.propertyType || 'Hotel', address: input.address, city: input.city!, country: input.country || 'Bangladesh', area: input.area, latitude: input.latitude, longitude: input.longitude, phone: input.phone, email: input.email, website: input.website, starRating: input.starRating ?? 3, guestRating: input.guestRating, reviewCount: 0, amenities: input.amenities || [], facilities: input.facilities || [], images: input.images || [], roomTypes: input.roomTypes || [], pricePerNight: input.pricePerNight, seasonalDiscounts: input.seasonalDiscounts || [], available: input.available !== false, ownerId: input.ownerId || actor, checkInTime: input.checkInTime, checkOutTime: input.checkOutTime, cancellationPolicy: input.cancellationPolicy, status: input.status || 'draft', featured: input.featured || false, sortOrder: input.sortOrder || 0, createdBy: actor, updatedAt: time, createdAt: time } as Hotel; return this.saveHotel(hotel); }
   async adminUpdateHotel(id: string, patch: Partial<Hotel>, actor: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, ...patch, id, updatedBy: actor, updatedAt: now() }); }
-  async adminArchiveHotel(id: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, status: 'archived', deletedAt: now(), updatedAt: now() }); }
+  async adminArchiveHotel(id: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, status: 'archived', updatedAt: now() }); }
   async adminRestoreHotel(id: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, status: 'active', deletedAt: undefined as any, updatedAt: now() }); }
   async adminDeleteHotel(id: string) { const bookings = await BookingModel.findOne({ hotelId: id }).lean(); if (bookings) throw new AppError(409, 'HOTEL_IN_USE', 'Archive this hotel instead — it is referenced by existing bookings'); return (await HotelModel.deleteOne({ id })).deletedCount === 1; }
 
@@ -416,8 +434,9 @@ export class HotelStore {
   async adminSetInventory(roomId: string, date: string, available: number) { const room = await this.oneRoom(roomId); if (!room) return undefined; await this.ensureInventory(roomId, room.hotelId, [date], room.inventory); const doc = await InventoryModel.findOneAndUpdate({ roomId, date }, { $set: { available: Math.max(0, Math.min(room.inventory, Math.floor(available))), total: room.inventory } }, { new: true }).lean(); return doc ? stripMongo(doc) : undefined; }
 
   // ---- Admin: bookings ----
-  async adminListBookings(filters: { q?: string; status?: string; paymentStatus?: string; page?: number; pageSize?: number } = {}) {
+  async adminListBookings(filters: { q?: string; status?: string; paymentStatus?: string; page?: number; pageSize?: number; ownerId?: string } = {}) {
     let bookings = (await BookingModel.find({}).lean()).map(stripMongo);
+    if (filters.ownerId) { const owned = new Set((await this.allHotels()).filter(hotel => hotel.ownerId === filters.ownerId).map(hotel => hotel.id)); bookings = bookings.filter(booking => owned.has(booking.hotelId)); }
     if (filters.status && filters.status !== 'all') bookings = bookings.filter(b => b.status === filters.status);
     if (filters.paymentStatus && filters.paymentStatus !== 'all') bookings = bookings.filter(b => b.paymentStatus === filters.paymentStatus);
     if (filters.q) bookings = bookings.filter(b => contains(`${b.bookingNumber} ${b.primaryGuest?.firstName} ${b.primaryGuest?.lastName} ${b.primaryGuest?.email} ${b.hotelSnapshot?.name}`, filters.q));
@@ -425,10 +444,11 @@ export class HotelStore {
     const total = bookings.length; const currentPage = pageN(filters.page); const pageSize = sizeN(filters.pageSize, 20);
     return { bookings: bookings.slice((currentPage - 1) * pageSize, currentPage * pageSize), total, page: currentPage, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
   }
-  async adminStats() {
-    const hotels = (await this.allHotels()).filter(h => !h.deletedAt);
-    const rooms = (await this.allRooms()).filter(r => !r.deletedAt);
-    const bookings = (await BookingModel.find({}).lean()).map(stripMongo);
+  async adminStats(ownerId?: string) {
+    const hotels = (await this.allHotels()).filter(h => !h.deletedAt && (!ownerId || h.ownerId === ownerId));
+    const hotelIds = new Set(hotels.map(hotel => hotel.id));
+    const rooms = (await this.allRooms()).filter(r => !r.deletedAt && (!ownerId || hotelIds.has(r.hotelId)));
+    const bookings = (await BookingModel.find(ownerId ? { hotelId: { $in: [...hotelIds] } } : {}).lean()).map(stripMongo);
     const revenue = bookings.filter(b => b.paymentStatus === 'paid').reduce((sum, b) => sum + (b.priceBreakdown?.total || 0), 0);
     const monthKey = new Date().toISOString().slice(0, 7);
     return {

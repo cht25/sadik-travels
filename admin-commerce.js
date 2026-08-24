@@ -1,7 +1,7 @@
 /* =====================================================================
    Sadik Travels admin — commerce & catalogue module
    ---------------------------------------------------------------------
-   Adds Catalogue, Orders, Coupons, Reviews and Visa Application
+   Adds marketplace catalogue, orders, coupons and review
    management to the existing admin console. Registers itself with
    window.AdminCommerce; admin.js dispatches matching routes here.
 
@@ -38,7 +38,12 @@
     permissions.loaded = true;
     return permissions;
   }
-  const can = (key) => permissions.isSuper || permissions.fine.has(key);
+  const can = (key) => {
+    if (permissions.isSuper || permissions.fine.has(key)) return true;
+    const active = new URL(location.href).searchParams.get('type');
+    const homeKey = key.startsWith('catalog.') ? `home.${key.split('.')[1]}` : '';
+    return active === 'home' && Boolean(homeKey) && permissions.fine.has(homeKey);
+  };
 
   const route = () => {
     const url = new URL(location.href);
@@ -573,7 +578,6 @@
     }));
   }
 
-  /* ==================================================== VISA APPLICATIONS */
   /* ------------------------------------------------------------ dispatch */
   const routes = {
     catalog: renderCatalog,

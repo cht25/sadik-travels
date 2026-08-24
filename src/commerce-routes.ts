@@ -2,7 +2,7 @@ import type { Express, Request } from 'express';
 import { z, ZodError } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { AppError, assert } from './errors.js';
-import { optionalAuth, requireAuth, requireFinePermission } from './middleware.js';
+import { optionalAuth, requireAuth, requireAnyFinePermission, requireFinePermission } from './middleware.js';
 import { hasFinePermission } from './permissions.js';
 import { rateLimit } from './rate-limit.js';
 import type { Store } from './store.js';
@@ -17,7 +17,7 @@ import { config } from './config.js';
  * Split into three tiers:
  *  - public      : catalogue browsing, facets, published reviews, order tracking
  *  - customer    : wishlist, cart, checkout, orders, invoices, travellers, tickets
- *  - admin       : catalogue CRUD, coupons, orders, reviews, visa applications
+ *  - admin       : marketplace catalogue CRUD, coupons, orders and reviews
  *
  * Every admin route is guarded by a fine-grained permission and writes an audit
  * entry. Every price is recalculated on the server from persisted records.
@@ -113,6 +113,8 @@ const accountPrefill = (user: any) => ({
 
 export function registerCommerceRoutes(app: Express, deps: { store: Store; commerce: CommerceStore; payment: PaymentProvider }) {
   const { store, commerce, payment } = deps;
+  const isHomeOwner = (req: any) => req.user?.role === 'home_owner';
+  const assertHomeOwnership = (req: any, product: any) => { if (isHomeOwner(req) && (product?.type !== 'home' || product?.createdBy !== req.user.id)) throw new AppError(403, 'HOME_OWNERSHIP_REQUIRED', 'You can manage only your own home and villa listings'); };
 
   const notify = async (userId: string, title: string, message: string) => {
     try { await store.createNotification({ userId, title, message, channels: ['in_app'], status: 'sent', sentAt: new Date().toISOString() } as any); } catch { /* notifications are best-effort */ }
@@ -384,33 +386,42 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
   });
 
   /* ======================================================  ADMIN: CATALOG  */
-  app.get('/api/v1/admin/catalog', requireFinePermission(store, 'catalog.view'), async (req, res) => {
+  app.get('/api/v1/admin/catalog', requireAnyFinePermission(store, ['catalog.view', 'home.view']), async (req, res) => {
     const query = req.query as Record<string, string>;
     res.json(await commerce.listCatalog({
-      type: (query.type as CatalogType) || 'all', status: (query.status as any) || 'all', q: query.q,
+      type: isHomeOwner(req) ? 'home' : (query.type as CatalogType) || 'all', ownerId: isHomeOwner(req) ? req.user!.id : undefined, status: (query.status as any) || 'all', q: query.q,
       sort: (query.sort as any) || 'newest', page: Number(query.page) || 1, pageSize: Number(query.pageSize) || 20
     }));
   });
-  app.get('/api/v1/admin/catalog/stats', requireFinePermission(store, 'catalog.view'), async (_req, res) => res.json({ stats: await commerce.catalogStats() }));
-  app.get('/api/v1/admin/catalog/:id', requireFinePermission(store, 'catalog.view'), async (req, res) => {
+  app.get('/api/v1/admin/catalog/stats', requireAnyFinePermission(store, ['catalog.view', 'home.view']), async (req, res) => res.json({ stats: await commerce.catalogStats(isHomeOwner(req) ? { type: 'home', ownerId: req.user!.id } : {}) }));
+  app.get('/api/v1/admin/catalog/:id', requireAnyFinePermission(store, ['catalog.view', 'home.view']), async (req, res) => {
     const product = await commerce.findCatalogProduct(String(req.params.id));
     assert(product, 404, 'PRODUCT_NOT_FOUND', 'Product not found');
+    assertHomeOwnership(req, product);
     res.json({ product });
   });
-  app.post('/api/v1/admin/catalog', requireFinePermission(store, 'catalog.create'), async (req, res) => {
+  app.post('/api/v1/admin/catalog', requireAnyFinePermission(store, ['catalog.create', 'home.create']), async (req, res) => {
     const input = toInput(catalogInputSchema, req.body);
+    if (isHomeOwner(req) && input.type !== 'home') throw new AppError(403, 'HOME_TYPE_REQUIRED', 'Home Owners can create only home and villa listings');
     const product = await commerce.createCatalogProduct({ ...input, createdBy: req.user!.id } as any);
     await store.audit('catalog.created', { ...clientMeta(req), userId: req.user!.id, metadata: { productId: product.id, type: product.type, title: product.title } });
     res.status(201).json({ product });
   });
-  app.patch('/api/v1/admin/catalog/:id', requireFinePermission(store, 'catalog.update'), async (req, res) => {
+  app.patch('/api/v1/admin/catalog/:id', requireAnyFinePermission(store, ['catalog.update', 'home.update']), async (req, res) => {
+    const current = await commerce.findCatalogProduct(String(req.params.id));
+    assert(current, 404, 'PRODUCT_NOT_FOUND', 'Product not found');
+    assertHomeOwnership(req, current);
     const input = toInput(catalogPatchSchema, req.body);
+    if (isHomeOwner(req) && input.type && input.type !== 'home') throw new AppError(403, 'HOME_TYPE_REQUIRED', 'Home Owners can manage only home and villa listings');
     const product = await commerce.updateCatalogProduct(String(req.params.id), { ...input, updatedBy: req.user!.id } as any);
     assert(product, 404, 'PRODUCT_NOT_FOUND', 'Product not found');
     await store.audit('catalog.updated', { ...clientMeta(req), userId: req.user!.id, metadata: { productId: product!.id, type: product!.type } });
     res.json({ product });
   });
-  app.delete('/api/v1/admin/catalog/:id', requireFinePermission(store, 'catalog.delete'), async (req, res) => {
+  app.delete('/api/v1/admin/catalog/:id', requireAnyFinePermission(store, ['catalog.delete', 'home.delete']), async (req, res) => {
+    const current = await commerce.findCatalogProduct(String(req.params.id));
+    assert(current, 404, 'PRODUCT_NOT_FOUND', 'Product not found');
+    assertHomeOwnership(req, current);
     const permanent = String(req.query.permanent || '') === 'true';
     const product = permanent ? undefined : await commerce.archiveCatalogProduct(String(req.params.id));
     if (permanent) {

@@ -6,7 +6,7 @@ import type { Store, User, UserRole } from './store.js';
 import { hasFinePermission, hasCoarsePermission, effectiveCoarsePermissions } from './permissions.js';
 
 export type AdminPermission = 'dashboard:view' | 'bookings:view' | 'bookings:manage' | 'payments:view' | 'payments:manage' | 'customers:view' | 'content:manage' | 'services:manage' | 'notifications:send' | 'support:manage' | 'settings:manage' | 'users:manage' | 'audit:view' | 'navigation:manage';
-const ALL_ADMIN_ROLES: UserRole[] = ['admin', 'manager', 'super_admin', 'support', 'content_manager', 'finance', 'staff'];
+const ALL_ADMIN_ROLES: UserRole[] = ['admin', 'manager', 'super_admin', 'support', 'content_manager', 'finance', 'staff', 'hotel_owner', 'home_owner', 'travel_agent'];
 
 // Backward-compatible exports (now delegated to the granular permission engine).
 export const hasPermission = (user: User | undefined, permission: AdminPermission) => hasCoarsePermission(user, permission);
@@ -57,6 +57,39 @@ export function requirePermission(store: Store, permission: AdminPermission): Re
 /** Granular permission guard (e.g. hotel.create, booking.refund). SUPER_ADMIN always passes. */
 export function requireFinePermission(store: Store, key: string): RequestHandler {
   return async (req, _res, next) => { try { const user = await authenticate(store, req, true); if (!hasFinePermission(user, key)) throw new AppError(403, 'PERMISSION_DENIED', `Permission required: ${key}`); next(); } catch (error) { next(error); } };
+}
+
+export function requireAnyFinePermission(store: Store, keys: string[]): RequestHandler {
+  return async (req, _res, next) => {
+    try {
+      const user = await authenticate(store, req, true);
+      if (!keys.some(key => hasFinePermission(user, key))) throw new AppError(403, 'PERMISSION_DENIED', `One of these permissions is required: ${keys.join(', ')}`);
+      next();
+    } catch (error) { next(error); }
+  };
+}
+
+export function requireInternalOperator(store: Store, key: string): RequestHandler {
+  return async (req, _res, next) => {
+    try {
+      const user = await authenticate(store, req, true);
+      if (['hotel_owner', 'home_owner', 'travel_agent'].includes(user.role)) throw new AppError(403, 'INTERNAL_OPERATOR_REQUIRED', 'This operations module is not available to vendor accounts');
+      if (!hasFinePermission(user, key)) throw new AppError(403, 'PERMISSION_DENIED', `Permission required: ${key}`);
+      next();
+    } catch (error) { next(error); }
+  };
+}
+
+/** Hotel inventory is intentionally restricted to the two platform roles that own it. */
+export function requireHotelManager(store: Store, key: string): RequestHandler {
+  return async (req, _res, next) => {
+    try {
+      const user = await authenticate(store, req, true);
+      if (!['super_admin', 'hotel_owner'].includes(user.role)) throw new AppError(403, 'HOTEL_ROLE_REQUIRED', 'Hotel management is available only to Super Admins and Hotel Owners');
+      if (!hasFinePermission(user, key)) throw new AppError(403, 'PERMISSION_DENIED', `Permission required: ${key}`);
+      next();
+    } catch (error) { next(error); }
+  };
 }
 
 /** SUPER_ADMIN-only guard for admin management, role/permission changes and system config. */

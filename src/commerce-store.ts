@@ -43,7 +43,7 @@ export type CatalogProduct = {
 export type CatalogFilters = {
   type?: CatalogType | 'all'; status?: CatalogStatus | 'all'; q?: string; country?: string; destination?: string;
   minPrice?: number; maxPrice?: number; featured?: boolean; tags?: string[];
-  region?: string;
+  region?: string; ownerId?: string;
   sort?: 'recommended' | 'price_asc' | 'price_desc' | 'rating' | 'newest' | 'popular';
   page?: number; pageSize?: number;
 };
@@ -288,6 +288,7 @@ export function createCommerceStore() {
     const pageSize = Math.min(60, Math.max(1, Number(filters.pageSize) || 12));
     const query: Record<string, unknown> = {};
     if (filters.type && filters.type !== 'all') query.type = filters.type;
+    if (filters.ownerId) query.createdBy = filters.ownerId;
     if (filters.status && filters.status !== 'all') query.status = filters.status;
     if (filters.country) query.country = new RegExp(`^${escapeRegex(filters.country)}$`, 'i');
     if (filters.destination) query.destination = new RegExp(escapeRegex(filters.destination), 'i');
@@ -368,8 +369,11 @@ export function createCommerceStore() {
     clean<CatalogProduct>(await CatalogModel.findOneAndUpdate({ id }, { $set: { status: 'archived', updatedAt: now() } }, { new: true }).lean());
   const deleteCatalogProduct = async (id: string) => (await CatalogModel.deleteOne({ id })).deletedCount > 0;
 
-  const catalogStats = async () => {
-    const rows = await CatalogModel.aggregate([{ $group: { _id: { type: '$type', status: '$status' }, count: { $sum: 1 } } }]);
+  const catalogStats = async (filters: { type?: CatalogType; ownerId?: string } = {}) => {
+    const match: Record<string, unknown> = {};
+    if (filters.type) match.type = filters.type;
+    if (filters.ownerId) match.createdBy = filters.ownerId;
+    const rows = await CatalogModel.aggregate([...(Object.keys(match).length ? [{ $match: match }] : []), { $group: { _id: { type: '$type', status: '$status' }, count: { $sum: 1 } } }]);
     const byType: Record<string, { total: number; published: number; draft: number; archived: number }> = {};
     for (const row of rows) {
       const type = row._id.type as string;
