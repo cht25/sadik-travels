@@ -341,10 +341,10 @@ const suggestionData = {
     { code: 'US', city: 'United States', name: 'North America' }
   ],
   category: [
-    { code: 'VIS', city: 'Tourist Visa', name: 'Short stay and holiday travel' },
-    { code: 'BUS', city: 'Business Visa', name: 'Business and professional travel' },
-    { code: 'STU', city: 'Student Visa', name: 'Study abroad applications' },
-    { code: 'FAM', city: 'Family Visa', name: 'Family visit and reunion' }
+    { code: 'HTL', city: 'Hotels', name: 'City stays and resorts' },
+    { code: 'HOM', city: 'Homes & Villas', name: 'Apartments and holiday homes' },
+    { code: 'TOU', city: 'Tours', name: 'Guided tour packages' },
+    { code: 'HOL', city: 'Holiday Packages', name: 'Bundled holiday deals' }
   ]
 };
 
@@ -904,7 +904,17 @@ function wrapPublicRouteContent(root) {
 function publicContentPath(item) { return { hotel:'hotels', home:'homes', offer:'offers', holiday_package:'holiday-packages', destination:'explore', explore:'explore' }[item.type] || 'explore'; }
 function publicImage(imageUrl, alt, className = '') { return imageUrl ? `<img class="${className}" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(alt)}" loading="lazy" />` : `<div class="public-page-item-image">Sadik Travels</div>`; }
 function publicContentCard(item) { const route = `/${publicContentPath(item)}/${item.id}`; const price = item.metadata?.price || item.metadata?.priceBdt; return `<a class="public-page-item" href="${escapeHtml(route)}" data-public-route="${escapeHtml(route)}"><div class="public-page-item-image">${item.imageUrl ? `<img src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.title)}" loading="lazy" />` : '<span>Sadik Travels</span>'}</div><div class="public-page-item-body"><small>${escapeHtml(String(item.type).replace(/_/g, ' '))}</small><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.subtitle || item.description || 'View published details.')}</p>${price ? `<strong>৳${escapeHtml(Number(price).toLocaleString('en-BD'))}</strong>` : ''}</div></a>`; }
-function publicMetadataHtml(metadata = {}) { const entries = Object.entries(metadata).filter(([key, value]) => value !== undefined && value !== null && value !== '' && !['ctaUrl','external','androidUrl','iosUrl','price','priceBdt'].includes(key)); if (!entries.length) return ''; return `<div class="public-detail-json"><h3>Details</h3><dl class="public-detail-meta">${entries.map(([key,value]) => `<div><dt>${escapeHtml(key.replace(/([A-Z])/g,' $1').replace(/^./,letter=>letter.toUpperCase()))}</dt><dd>${escapeHtml(Array.isArray(value) || typeof value === 'object' ? JSON.stringify(value) : value)}</dd></div>`).join('')}</dl></div>`; }
+function publicMetadataHtml(metadata = {}) {
+  const entries = Object.entries(metadata || {}).filter(([key, value]) => value !== undefined && value !== null && value !== '' && !['ctaUrl','external','androidUrl','iosUrl','price','priceBdt','ctaLabel','buttonLabel'].includes(key));
+  if (!entries.length) return '';
+  const formatVal = (value) => {
+    if (Array.isArray(value)) return value.map(item => typeof item === 'object' && item ? (item.title || item.detail || item.name || Object.values(item).filter(Boolean).join(' — ')) : String(item)).filter(Boolean).join(', ');
+    if (value && typeof value === 'object') return Object.entries(value).map(([k, v]) => `${k}: ${v}`).join(', ');
+    return String(value);
+  };
+  const price = metadata.price || metadata.priceBdt;
+  return `<div class="public-detail-json"><h3>Details</h3>${price ? `<p class="public-detail-price"><strong>From ৳${Number(price).toLocaleString('en-BD')}</strong></p>` : ''}<dl class="public-detail-meta">${entries.map(([key,value]) => `<div><dt>${escapeHtml(key.replace(/([A-Z])/g,' $1').replace(/_/g,' ').replace(/^./,letter=>letter.toUpperCase()))}</dt><dd>${escapeHtml(formatVal(value))}</dd></div>`).join('')}</dl></div>`;
+}
 function publicDetailActions(item) { const metadata = item.metadata || {}; const actions = []; if (metadata.ctaUrl && (String(metadata.ctaUrl).startsWith('/') || /^https?:\/\//i.test(String(metadata.ctaUrl)))) actions.push(`<a class="btn btn-primary" href="${escapeHtml(metadata.ctaUrl)}" ${metadata.external ? 'target="_blank" rel="noopener"' : ''}>${escapeHtml(metadata.ctaText || 'Learn more')}</a>`); actions.push('<a class="btn btn-outline" href="#contact">Contact Sadik Travels</a>'); return actions.join(''); }
 async function renderPublicContentCollection(root, definition) { root.innerHTML = publicPageHeader(definition.eyebrow, definition.title, definition.description, '') + `<section class="public-page-card" id="publicCollectionBody">${publicLoading()}</section>`; const body = root.querySelector('#publicCollectionBody'); try { const response = await apiRequest(`/site/content?type=${encodeURIComponent(definition.type)}`); const items = response.content || []; body.innerHTML = `<div class="public-page-grid">${items.length ? items.map(publicContentCard).join('') : publicEmptyState(`No ${definition.title.toLowerCase()} yet`, 'Published content will appear here after an administrator saves and publishes it.')}</div>`; } catch (error) { body.innerHTML = publicErrorState(error?.status === 503 ? 'This catalogue is temporarily unavailable. Please try again in a moment.' : (error.message || 'Unable to load this catalogue.')); body.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute()); } }
 async function renderPublicContentDetail(root, definition, id) { const response = await apiRequest(`/site/content/${encodeURIComponent(definition.type)}/${encodeURIComponent(id)}`); const item = response.content; if (!item) throw new Error('Content not found'); root.innerHTML = publicPageHeader(definition.eyebrow, item.title, item.subtitle || definition.description, '') + `<section class="public-page-card"><div class="public-detail"><div>${item.imageUrl ? `<img class="public-detail-image" src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.title)}" />` : publicEmptyState('No image published','This item does not have an image yet.')}<div class="public-detail-json"><h3>About this service</h3><p class="lead">${escapeHtml(item.description || item.subtitle || 'Published Sadik Travels content.')}</p></div></div><div><h2>${escapeHtml(item.title)}</h2><p class="lead">${escapeHtml(item.subtitle || '')}</p>${publicMetadataHtml(item.metadata)}<div class="public-detail-actions">${publicDetailActions(item)}</div></div></div></section>`; }
@@ -924,7 +934,7 @@ async function openTourCheckoutWizard(tour) {
       <button type="button" data-ttab="no">Notes</button>
     </div>
     <div class="tour-tab-panel" data-tpanel="it">${itinerary.length ? itinerary.map((d,i)=>`<p><strong>Day ${i+1}.</strong> ${escapeHtml(typeof d==='string'?d:(d.title||d.detail||''))}</p>`).join('') : `<p>${escapeHtml(tour.description || 'Day-by-day itinerary will appear here when published.')}</p>`}</div>
-    <div class="tour-tab-panel" data-tpanel="in" hidden><p><strong>Includes</strong></p><ul>${(inclusions.length?inclusions:['Hotel stay','Breakfast','Airport transfer']).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul><p><strong>Excludes</strong></p><ul>${(exclusions.length?exclusions:['Personal expenses','Visa fees']).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>
+    <div class="tour-tab-panel" data-tpanel="in" hidden><p><strong>Includes</strong></p><ul>${(inclusions.length?inclusions:['Hotel stay','Breakfast','Airport transfer']).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul><p><strong>Excludes</strong></p><ul>${(exclusions.length?exclusions:['Personal expenses','Optional activities']).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>
     <div class="tour-tab-panel" data-tpanel="no" hidden><p>${escapeHtml(notes || 'Standard Sadik Travels booking and cancellation policies apply. VAT 15% and AIT 5% are added at checkout.')}</p></div>
     <form id="tourBookForm">
       <label class="modal-field"><span>Adults</span><input id="tourAdults" type="number" min="1" max="30" value="2" required /></label>

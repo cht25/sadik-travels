@@ -491,7 +491,7 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
     res.json({ order: updated });
   });
 
-  /* Admin-driven manual fulfilment (eSIM activation details, provider payloads,
+  /* Admin-driven manual fulfilment (delivery details, provider payloads,
      physical dispatch). Requires an order.update permission and writes an audit
      entry with the fulfilment payload reference. */
   app.post('/api/v1/admin/orders/:id/fulfill', requireFinePermission(store, 'order.update'), async (req, res) => {

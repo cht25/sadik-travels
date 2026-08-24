@@ -187,7 +187,7 @@
   const COLLECTIONS = {
     'holiday-packages': {
       type: 'holiday_package', route: 'holiday-packages', eyebrow: 'Holidays', title: 'Holiday Packages',
-      description: 'Curated holidays with flights, stays, transfers and experiences bundled into one price.',
+      description: 'Curated holidays with stays, transfers and experiences bundled into one clear price.',
       filters: ['q', 'country', 'price', 'sort'], emptyTitle: 'No holiday packages published yet'
     },
     explore: {
@@ -272,7 +272,6 @@
     </form>`;
   }
 
-  /* ------------------------------------------------------ eSIM marketplace */
   /* ------------------------------------------------------- product detail */
   async function renderProductDetail(root, definition, idOrSlug) {
     root.innerHTML = `<div class="sf-page">${loadingState('Loading product…')}</div>`;
@@ -495,7 +494,7 @@
       state.cart = { count: data.cart.items.reduce((sum, item) => sum + item.quantity, 0), items: data.cart.items };
       paintBadges();
       if (!data.cart.items.length) {
-        box.innerHTML = emptyState('Your cart is empty', 'Add a tour, package, eSIM or stay to get started.', '<a class="btn btn-primary" href="/holiday-packages" data-public-route="/holiday-packages">Browse packages</a>');
+        box.innerHTML = emptyState('Your cart is empty', 'Add a tour, package or stay to get started.', '<a class="btn btn-primary" href="/holiday-packages" data-public-route="/holiday-packages">Browse packages</a>');
         return;
       }
       box.innerHTML = `<div class="sf-cart-layout">
@@ -741,7 +740,7 @@
       status: booking.status, payment: booking.paymentStatus, href: `/booking/${esc(booking.id)}`, extra: `${booking.nights} night${booking.nights === 1 ? '' : 's'}`
     }));
     (legacy.bookings || []).forEach((booking) => rows.push({
-      key: `legacy:${booking.id}`, title: `Flight request · ${booking.vertical}`,
+      key: `legacy:${booking.id}`, title: `${String(booking.vertical || 'Travel').replace(/^./, c => c.toUpperCase())} request`,
       meta: `${booking.id.slice(0, 12).toUpperCase()} · ${dateLabel(booking.createdAt)}`,
       image: '', amount: null, currency: 'BDT', status: booking.status, payment: null,
       href: `/track-booking?ref=${encodeURIComponent(booking.id)}`, extra: 'Provider request'
@@ -761,29 +760,23 @@
       <div class="sf-order-side">${row.amount != null ? `<strong>${money(row.amount, row.currency)}</strong>` : '<strong>—</strong>'}<span>View ›</span></div>
     </a>`;
 
-  /** Delivery / activation panel for digital purchases (eSIM, packages, …).
-   *  A delivered state is only shown from a verified provider payload or an
-   *  explicit admin fulfilment — never fabricated. */
+    /** Delivery panel for fulfilled catalogue orders. Shown only from verified
+   *  admin fulfilment payloads — never fabricated. */
   const fulfillmentPanel = (order) => {
     const fulfillment = order.fulfillment || {};
     const payload = fulfillment.payload || {};
-    if (fulfillment.status === 'delivered' && (payload.qrCodeUrl || payload.smDpPlus || payload.activationCode)) {
-      return `<section class="sf-panel sf-fulfillment sf-fulfillment-delivered">
-        <div class="sf-panel-head"><h2>${icon('i-sim')} eSIM activation</h2><span class="sf-tag sf-ok">Delivered</span></div>
-        <div class="sf-activation-grid">
-          ${payload.qrCodeUrl ? `<div class="sf-activation-qr"><img src="${esc(payload.qrCodeUrl)}" alt="eSIM activation QR code" /><small>Scan with your phone camera to install</small></div>` : ''}
-          <div class="sf-activation-details">
-            ${payload.provider ? `<div><span>Provider</span><strong>${esc(payload.provider)}</strong></div>` : ''}
-            ${payload.reference ? `<div><span>Reference</span><strong>${esc(payload.reference)}</strong></div>` : ''}
-            ${payload.smDpPlus ? `<div><span>SM-DP+ address</span><strong class="sf-mono">${esc(payload.smDpPlus)}</strong></div>` : ''}
-            ${payload.activationCode ? `<div><span>Activation code</span><strong class="sf-mono">${esc(payload.activationCode)}</strong></div>` : ''}
-            ${payload.instructions ? `<div class="sf-activation-instructions"><span>Instructions</span><p>${esc(payload.instructions)}</p></div>` : ''}
-          </div>
-        </div>
-      </section>`;
-    }
     if (fulfillment.status === 'delivered') {
-      return `<section class="sf-panel sf-fulfillment sf-fulfillment-delivered"><div class="sf-panel-head"><h2>Order fulfilment</h2><span class="sf-tag sf-ok">Delivered</span></div><p>${esc(fulfillment.note || 'This order has been fulfilled.')}</p>${payload.reference ? `<p class="sf-hint">Reference: ${esc(payload.reference)}</p>` : ''}</section>`;
+      const details = Object.entries(payload || {}).filter(([, value]) => value !== undefined && value !== null && value !== '');
+      return `<section class="sf-panel sf-fulfillment sf-fulfillment-delivered">
+        <div class="sf-panel-head"><h2>${icon('i-check')} Order fulfilment</h2><span class="sf-tag sf-ok">Delivered</span></div>
+        <p>${esc(fulfillment.note || 'This order has been fulfilled by Sadik Travels.')}</p>
+        ${details.length ? `<div class="sf-activation-details">${details.map(([key, value]) => {
+          if (key === 'qrCodeUrl' || (typeof value === 'string' && /^https?:\/\//.test(value) && /qr|image|png|jpg/i.test(key + value))) {
+            return `<div class="sf-activation-qr"><img src="${esc(String(value))}" alt="Delivery QR" /><small>Scan if required</small></div>`;
+          }
+          return `<div><span>${esc(titleCase(key))}</span><strong class="sf-mono">${esc(String(value))}</strong></div>`;
+        }).join('')}</div>` : ''}
+      </section>`;
     }
     return `<section class="sf-panel sf-fulfillment sf-fulfillment-pending">
       <div class="sf-panel-head"><h2>Fulfilment</h2><span class="sf-tag">${esc(titleCase(fulfillment.status || 'pending'))}</span></div>

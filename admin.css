@@ -156,3 +156,13 @@ a.ac-stat:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(16,36,80,.
   .navmgr-actions{justify-self:stretch}
   .navmgr-actions .table-action{flex:1;text-align:center;padding:9px 8px}
 }
+
+
+/* Friendly detail panels — replace raw JSON in admin forms */
+.friendly-details{margin:0;display:grid;gap:8px}
+.friendly-details > div{display:grid;grid-template-columns:minmax(110px,160px) minmax(0,1fr);gap:8px 14px;padding:8px 0;border-bottom:1px solid var(--admin-border, #e8edf5)}
+.friendly-details dt{margin:0;color:var(--admin-muted, #6b7280);font-size:12px;font-weight:600}
+.friendly-details dd{margin:0;font-size:13px;word-break:break-word}
+.friendly-list{margin:0;padding-left:18px}
+.friendly-list li{margin:2px 0}
+.public-detail-price{margin:0 0 10px;font-size:18px;color:var(--brand, #001ea0)}
