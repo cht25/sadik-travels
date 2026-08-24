@@ -153,3 +153,13 @@ The legacy verticals were **deleted from the architecture**, not hidden:
   removed types and removes legacy settings/service/navigation rows. Legacy
   `bookings` documents from removed verticals are intentionally preserved
   (financial history) and still render in the admin.
+- **Legacy sidebar links never 404**: navigation rows persisted in MongoDB by
+  older deployments are sanitized on read in `listNavigation`
+  (`LEGACY_ADMIN_NAV_ROUTE_REMAP`, e.g. `/admin/homes` →
+  `/admin/catalog?type=home`), and rows for deleted modules (campaign
+  templates, customer segments, visa applications) are retired from the
+  sidebar. The admin router mirrors this: `admin.js` redirects renamed legacy
+  routes (`LEGACY_ADMIN_ROUTE_REDIRECTS`) and renders active placeholder
+  workspaces for the consolidated SERVICES entries — Flights, eSIM and Visa
+  (`renderLegacyServicePage`) — so every sidebar item opens a functional page
+  instead of "Page not found".

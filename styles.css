@@ -892,10 +892,11 @@ body.pwa-popup-open{overflow:hidden}
   .site-footer .container{padding-inline:16px}
 }
 
-/* Production travel-agent card: strict 65/35 portrait and content split. */
+/* Travel-agent card: the portrait photo fills 100% of the card as a background
+   and the meta block sits on a pure transparent bottom gradient so the white
+   text stays crisp over any image. */
 .id-card.agent-card{
-  display:flex;
-  flex-direction:column;
+  display:block;
   overflow:hidden;
   height:420px;
   min-height:420px;
@@ -904,12 +905,10 @@ body.pwa-popup-open{overflow:hidden}
 }
 .id-card.agent-card .id-card-photo,
 .id-card.agent-card .agent-photo{
-  position:relative;
-  inset:auto;
+  position:absolute;
+  inset:0;
   width:100%;
-  height:65%;
-  flex:0 0 65%;
-  border-radius:0;
+  height:100%;
   overflow:hidden;
 }
 .id-card.agent-card .id-card-photo img,
@@ -918,47 +917,51 @@ body.pwa-popup-open{overflow:hidden}
   inset:0;
   width:100%;
   height:100%;
+  display:block;
   object-fit:cover;
   object-position:top center;
-  border-radius:0;
 }
 .id-card.agent-card .id-card-body,
 .id-card.agent-card .agent-card-body{
-  position:relative;
+  position:absolute;
   inset:auto;
+  left:0;
+  right:0;
+  bottom:0;
   width:100%;
-  height:35%;
-  min-height:0;
-  flex:0 0 35%;
   z-index:2;
   gap:3px;
-  padding:9px 13px 10px;
+  padding:46px 15px 12px;
   text-align:left;
-  background:linear-gradient(180deg,rgba(15,23,42,.4) 0%,rgba(15,23,42,.95) 100%)!important;
-  backdrop-filter:blur(8px);
-  -webkit-backdrop-filter:blur(8px);
+  background:linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.35) 60%, transparent 100%)!important;
+  backdrop-filter:blur(2px);
+  -webkit-backdrop-filter:blur(2px);
 }
+.id-card.agent-card .agent-card-body p{min-height:0;margin:0}
 .id-card.agent-card .id-card-name,
 .id-card.agent-card .id-card-role,
 .id-card.agent-card .id-card-location,
 .id-card.agent-card .id-card-stat small,
 .id-card.agent-card .id-card-stat strong,
 .id-card.agent-card .id-status{
-  color:#fff;
-  text-shadow:0 1px 3px rgba(0,0,0,.8);
+  color:#FFFFFF;
+  text-shadow:0 1px 4px rgba(0,0,0,.65);
 }
-.id-card.agent-card .id-card-name{font-size:1rem;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.id-card.agent-card .id-card-role{font-size:.65rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.id-card.agent-card .id-card-location{justify-content:flex-start;font-size:.66rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.id-card.agent-card .id-card-name{font-size:1.05rem;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.id-card.agent-card .id-card-role{font-size:.66rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.id-card.agent-card .id-card-location{justify-content:flex-start;font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .id-card.agent-card .id-card-location svg{color:#fff;flex:none}
-.id-card.agent-card .id-card-stats{grid-template-columns:1fr 1fr;gap:5px;padding:4px 0;border-color:rgba(255,255,255,.2)}
+.id-card.agent-card .id-card-stats{grid-template-columns:1fr 1fr;gap:5px;padding:6px 0;border-color:rgba(255,255,255,.3)}
 .id-card.agent-card .id-card-stat{align-items:flex-start;gap:0}
-.id-card.agent-card .id-card-stat small{font-size:.5rem;opacity:.82}
-.id-card.agent-card .id-card-stat strong,.id-card.agent-card .id-card-stat .id-status{font-size:.65rem}
-.id-card.agent-card .id-card-stat .id-status:before{width:5px;height:5px}
+.id-card.agent-card .id-card-stat small{font-size:.52rem;opacity:.9}
+.id-card.agent-card .id-card-stat strong,.id-card.agent-card .id-card-stat .id-status{font-size:.68rem}
+.id-card.agent-card .id-card-stat .id-status:before{width:6px;height:6px;background:#34d399}
+.id-card.agent-card .id-card-stat .id-status.off{color:rgba(255,255,255,.75)}
+.id-card.agent-card .id-card-stat .id-status.off:before{background:rgba(255,255,255,.45)}
 .id-card.agent-card .id-badge,
 .id-card.agent-card .agent-badge{position:absolute;top:12px;left:12px;z-index:10}
-.id-card.agent-card .id-card-cta{margin:auto 0 0;min-height:30px;height:30px;border-radius:7px;background:#002b9a;color:#fff;opacity:1;font-size:.68rem;text-shadow:none}
+.id-card.agent-card .id-card-cta{margin:6px 0 0;min-height:30px;height:30px;border-radius:7px;background:#002b9a;color:#fff;opacity:1;font-size:.68rem;text-shadow:none}
+.id-card.skeleton.agent-card .id-card-body{background:linear-gradient(to top, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.2) 60%, transparent 100%)!important}
 
 /* Real-time visitor support conversation. */
 .chat-modal-content form label{display:grid;gap:5px;color:#3d4b5a;font-size:.72rem;font-weight:700}
