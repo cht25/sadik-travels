@@ -579,7 +579,7 @@ export function createCommerceStore() {
 
   /**
    * Automatic purchase fulfilment. Called only after payment is verified.
-   * If an eSIM/travel provider API is configured, fulfilment is requested from
+   * If an travel provider API is configured, fulfilment is requested from
    * it; the order is marked delivered ONLY with a real provider payload.
    * Without a provider the order stays FULFILLMENT_PENDING so an admin can
    * complete it manually — fulfilment is never fabricated.

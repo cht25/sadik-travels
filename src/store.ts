@@ -346,7 +346,23 @@ export class MongoStore implements Store {
   async getSetting(key: string) { const setting = await this.one<any>('setting', key); if (!setting) return undefined; return setting.isSecret ? decryptSecret(setting.value) : setting.value; }
   async getAdminSettings() { const rows = await this.all<any>('setting'); return rows.map(row => ({ key: row.id, value: row.isSecret ? undefined : row.value, configured: Boolean(row.value), masked: row.isSecret && row.value ? maskSecret(decryptSecret(row.value)) : undefined, secret: Boolean(row.isSecret), updatedBy: row.updatedBy, updatedAt: row.updatedAt })).sort((a,b) => a.key.localeCompare(b.key)); }
   async updateSettings(patch: SettingPatch, updatedBy: string) { await Promise.all(Object.entries(patch).filter(([,value]) => value !== undefined && value !== '').map(async ([key,value]) => { const existing = await this.one<any>('setting', key); const isSecret = SECRET_SETTING_KEYS.has(key); const item = { id: key, value: isSecret ? encryptSecret(value!) : value, isSecret, updatedBy, updatedAt: now() }; if (existing) await this.save('setting', item); else await this.insert('setting', item); })); }
-  async getServiceVisibility() { let items = await this.all<ServiceVisibility>('service'); if (!items.length) { const time = now(); items = await Promise.all(SERVICE_DEFAULTS.map(item => this.insert('service', { id: item.key, ...item, updatedAt: time }))); } return items.sort((a,b) => a.label.localeCompare(b.label)); }
+  async getServiceVisibility() {
+    let items = await this.all<ServiceVisibility>('service');
+    const allowed = new Set(SERVICE_DEFAULTS.map(item => item.key));
+    // Drop retired verticals (flights / visa / eSIM) if they still exist in older DBs.
+    items = items.filter(item => allowed.has(item.key as any));
+    const have = new Set(items.map(item => item.key));
+    const missing = SERVICE_DEFAULTS.filter(item => !have.has(item.key));
+    if (missing.length || !items.length) {
+      const time = now();
+      const added = await Promise.all((missing.length ? missing : SERVICE_DEFAULTS).map(item => this.insert('service', { id: item.key, ...item, updatedAt: time })));
+      items = [...items, ...added];
+      // de-dupe by key
+      const map = new Map(items.map(item => [item.key, item]));
+      items = Array.from(map.values());
+    }
+    return items.sort((a,b) => a.label.localeCompare(b.label));
+  }
   async updateServiceVisibility(key: ServiceKey, status: ServiceStatus, updatedBy: string) { const current = (await this.getServiceVisibility()).find(item => item.key === key); const value: ServiceVisibility = { ...(current || SERVICE_DEFAULTS.find(item => item.key === key)!), key, status, updatedBy, updatedAt: now() }; return current ? (await this.save('service', { ...value, id: key })) as unknown as ServiceVisibility : this.insert('service', { ...value, id: key }) as unknown as ServiceVisibility; }
 
   async createNotification(input: CreateNotification) { return this.insert('notification', { id: randomUUID(), ...input, status: input.status || 'queued', sentAt: input.sentAt, failureReason: input.failureReason, createdBy: input.createdBy, createdAt: now() }); }
