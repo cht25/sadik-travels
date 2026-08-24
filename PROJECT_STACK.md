@@ -19,9 +19,32 @@ No runtime business data relies on SQLite, local files, or a Render persistent d
 
 ## MongoDB entity model
 
-The Mongo repository stores stable UUID-based records in dedicated Mongoose collections. Schemas and indexes cover IDs, lifecycle status, ownership, update time, and slugs. Domain types include users, OTP challenges, sessions, bookings, booking events, tours, payments, tickets, ticket messages, notifications, settings, content, media metadata, admin navigation, travel agents, campaign templates, segments, campaigns, recipients, notes, and audit logs.
+The Mongo repository stores stable UUID-based records in dedicated Mongoose collections. Schemas and indexes cover IDs, lifecycle status, ownership, update time, and slugs. Domain types include users, OTP challenges, sessions, bookings, booking events, hotels, rooms, room inventory, tours, payments, support/live-chat sessions, transcript messages, notifications, settings, content, media metadata, admin navigation, travel agents, customer notes, and audit records.
 
 This preserves the existing API contract while removing all SQLite-specific SQL, filesystem initialization, and disk persistence assumptions.
+
+## Vendor RBAC and hotel ownership
+
+Canonical platform roles are `SUPER_ADMIN`, `HOTEL_OWNER`, `HOME_OWNER` and
+`TRAVEL_AGENT` (stored in MongoDB using the existing lower-case role
+convention). Vendor roles are deny-by-default: only a Super Admin can assign
+granular capabilities. Both the admin route guard and API middleware enforce
+those assignments. Hotel APIs additionally restrict management to Super Admins
+and Hotel Owners; Hotel Owners are scoped to listings they own.
+
+Hotel records support room-type labels, fallback per-night pricing, seasonal
+discount windows, gallery metadata and an explicit availability toggle. Public
+catalogue prices are calculated from active room inventory (or the fallback
+price), apply the current seasonal discount, and never trust browser totals.
+
+## Real-time support
+
+`src/live-chat.ts` attaches Socket.IO to the same HTTP server. Visitors create a
+chat session with contact metadata, receive a random room capability whose hash
+is stored in MongoDB, and join with `join_chat_room`. Admin sockets authenticate
+with the existing server-side session and require `support.view`/`support.reply`.
+Every message is persisted in `support_messages`; unread counters and transcript
+history power the dual-pane Live Support Inbox and reconnect-safe visitor UI.
 
 ## Media
 
@@ -31,23 +54,18 @@ Cloudinary is accessed only by the backend. Uploads are validated from file byte
 
 `TEST_MONGODB_URI` runs the integration suite against a dedicated disposable MongoDB database. Do not point it to a production database.
 
-## Legacy import
-
-`src/migrate-sqlite-to-mongo.ts` is a one-time, opt-in importer for a previous SQLite deployment. It is never loaded by the Render service. It reads a supplied legacy file, maps the application tables to the Mongoose collections, and uses idempotent MongoDB upserts.
-
 ## Commerce and catalogue module
 
 `commerce-store.ts` registers additional Mongoose collections on the shared
 connection: `catalog_products`, `carts`, `wishlist_items`, `coupons`,
-`coupon_redemptions`, `orders`, `invoices`, `saved_travelers`, `reviews` and
-`visa_applications`. Each has UUID keys, `createdAt`/`updatedAt` stamps and
+`coupon_redemptions`, `orders`, `invoices`, `saved_travelers` and `reviews`. Each has UUID keys, `createdAt`/`updatedAt` stamps and
 indexes for the queries the storefront and admin console run (type + status +
 sort, unique slug per type, order number, contact email/phone, review product,
 coupon code).
 
 `commerce-routes.ts` exposes the public catalogue, the authenticated customer
-surface (cart, wishlist, checkout, orders, invoices, travellers, reviews, visa
-applications) and the permission-guarded admin surface. Pricing is computed
+surface (cart, wishlist, checkout, orders, invoices, travellers and reviews)
+and the permission-guarded admin surface. Pricing is computed
 server side in `priceCart`, coupons are evaluated in `evaluateCoupon`, and
 payment intents reuse the existing `PaymentProvider` abstraction so the
 gateway (SSLCommerz, bKash, …) stays configurable from the admin settings.

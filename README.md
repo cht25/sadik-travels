@@ -10,7 +10,7 @@ The repository contains no seeded tours, customer records, bookings, offers, adm
 - **MongoDB** via Mongoose — the only runtime database
 - Cloudinary for permanent image storage
 - JWT sessions in HttpOnly cookies
-- OTP customer login plus Firebase Google sign-in for the admin console
+- OTP and Firebase Google sign-in for customers; password authentication for admin and vendor accounts
 - Render web service deployment
 - Vanilla responsive public site and routed admin application
 
@@ -18,20 +18,17 @@ The repository contains no seeded tours, customer records, bookings, offers, adm
 
 ### Public website
 
-Flights, hotels, homes, visa, eSIM, Go Get Tour, Umrah packages/fare, holiday packages, medical tourism, card/airline offers, explore, travel agents, campaigns, app links, customer login, booking tracking, support/contact flows, and notifications.
+Hotels, homes and villas, tours, holiday packages, destination discovery, verified travel-agent profiles, cart and checkout, booking tracking, secure payments, customer accounts, notifications, support tickets, and real-time live support chat.
 
 ### Admin console
 
-- Dashboard, bookings, ownership, lifecycle and booking events
-- Customers, notes, status, roles, preferences and sessions
-- Payments and transactions
-- Support tickets and conversations
-- Tours, public content, banners, offers, service visibility and navigation
-- Travel-agent CRUD and public profiles
-- Campaigns, reusable templates, customer segments, queues and delivery status
-- Cloudinary media library
-- Encrypted provider/settings workspace
-- Admin users, permissions and audit logs
+- Permission-filtered dashboard, bookings, customers, payments and catalogue operations
+- Super Admin account management with deny-by-default vendor roles (`HOTEL_OWNER`, `HOME_OWNER`, `TRAVEL_AGENT`)
+- Owner-scoped hotel CRUD, room inventory, current pricing, seasonal discounts, availability and Cloudinary galleries
+- Dual-pane Live Support Inbox with Socket.IO updates, unread badges, sound alerts and MongoDB transcripts
+- Support tickets, tours, homes, holiday packages, destinations, travel agents and website content
+- Cloudinary media library and encrypted integration settings
+- A production-only sidebar generated from each account’s assigned permissions
 
 ## Application shell and routing
 
@@ -54,12 +51,12 @@ Below 1024px the sidebar becomes an overlay drawer (hamburger, backdrop,
 Escape and click-outside close). No page applies its own header or sidebar
 offset — layout lives only in the shell rules at the end of `styles.css`.
 
-Every sidebar entry is a real route that works on refresh and direct URL
-access: `/flights`, `/hotels`, `/homes`, `/visa`, `/tours`, `/esim`,
-`/special-umrah-fare`, `/umrah-packages`, `/holiday-packages`,
-`/medical-tourism`, `/card-offers`, `/airlines-offers`, `/explore`,
-`/travel-agents`, `/app`, `/cart`, `/wishlist`, `/checkout`, `/orders`,
-`/invoice/:id`, `/account`, `/track-booking` and `/support`.
+Every production storefront route works on refresh and direct access:
+`/hotels`, `/homes-villas`, `/tours`, `/holiday-packages`, `/explore`,
+`/travel-agents`, `/cart`, `/wishlist`, `/checkout`, `/orders`,
+`/invoice/:id`, `/account`, `/payments`, `/track-booking` and `/support`.
+Admin deep links render the same console shell, then a frontend route guard and
+backend middleware independently enforce the account’s assigned permission.
 
 ## Commerce engine
 
@@ -68,19 +65,17 @@ e-commerce layer on top of the existing booking APIs:
 
 | Collection | Purpose |
 | --- | --- |
-| `catalog_products` | eSIM, Umrah, holiday, medical, visa, homes, offers, destinations |
+| `catalog_products` | Holiday packages, homes and villas, and destinations |
 | `carts`, `wishlist_items` | Persistent per-customer cart and wishlist |
 | `coupons`, `coupon_redemptions` | Server-validated discount rules and per-user limits |
 | `orders`, `invoices` | Unified order/booking engine with timeline and receipts |
 | `saved_travelers` | Reusable traveller profiles for auto-filled checkout |
 | `reviews` | Purchase-verified reviews with admin moderation |
-| `visa_applications` | Visa applications with passport data and status tracking |
 
 Prices, taxes, service fees, coupons and totals are always recalculated on
 the server from persisted records; browser values are never trusted. Every
 admin endpoint is guarded by a fine-grained permission
-(`catalog.create`, `order.refund`, `coupon.delete`, `review.moderate`,
-`visa.update`, …) and writes an audit entry. Super Admin bypasses
+(`catalog.create`, `order.refund`, `coupon.delete`, `review.moderate`, …) and writes an audit entry. Super Admin bypasses
 restrictions; an admin can never grant itself permissions.
 
 ## Local development
@@ -132,22 +127,16 @@ Set a managed MongoDB connection string:
 MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster.example.mongodb.net/sadik_travels?retryWrites=true&w=majority
 ```
 
-All application entities—users, sessions, OTP challenges, tours, bookings, payments, content, media metadata, agents, settings, navigation, campaigns, recipients, support, and audit logs—are persisted in dedicated Mongoose collections (users, bookings, tours, content, agents, media, campaigns and supporting records). Schemas enforce field types, enums, unique IDs/slugs, lifecycle status, and query indexes.
+Application entities—including users, sessions, hotels, rooms, inventory, tours, bookings, payments, catalogue content, media, travel agents, support/live-chat sessions, transcripts, settings and navigation—are persisted in dedicated Mongoose collections. Schemas enforce field types, stable IDs, lifecycle status, ownership and query indexes.
 
 The server refuses to start without `MONGODB_URI`; production also rejects localhost MongoDB URLs.
 
-### One-time legacy SQLite import
+### Legacy data cleanup
 
-If an earlier deployment contains real SQLite data, import it once before retiring the old database. This utility is not part of the web-service runtime and does not make SQLite a production dependency:
-
-```bash
-npm install --no-save better-sqlite3
-MONGODB_URI='mongodb+srv://…/sadik_travels_staging' \
-LEGACY_SQLITE_PATH=/absolute/path/to/sadik.sqlite \
-npx tsx src/migrate-sqlite-to-mongo.ts
-```
-
-The migration imports users, sessions, OTPs, bookings/events, tours, payments, support, notifications, settings, content, media metadata, navigation, agents, campaigns, recipients, templates, segments, notes, and audit logs. Run it against a staging Atlas database first, compare counts, back up both databases, then point Render at the verified MongoDB URI.
+The runtime contains no SQLite importer or legacy flight, visa, eSIM, campaign,
+Umrah, or medical-tourism modules. After a verified MongoDB backup, operators
+can run `CONFIRM_LEGACY_CLEANUP=yes npm run cleanup:legacy` to remove orphaned
+legacy collections and navigation.
 
 ## Cloudinary
 
@@ -196,39 +185,18 @@ The MongoDB end-to-end suite is intentionally skipped unless a disposable databa
 TEST_MONGODB_URI='mongodb+srv://…/sadik_travels_test' npm test
 ```
 
-## Marketplace, payments and fulfilment (2026 additions)
+## Marketplace, RBAC and real-time support (2026)
 
-- **eSIM marketplace** — a dedicated `/esim` page with a country selector, data /
-  validity / region filters, sort and premium plan cards. eSIM plans are ordinary
-  catalogue products (`type: esim`) enriched with provider, activation method,
-  QR code URL, SM-DP+, activation code and installation instructions. Plans are
-  uploaded country-wise from Admin → Catalogue.
-- **Flight booking flow** — flight search results (live provider) now flow into a
-  passenger/contact form at `/flights/booking`; the server re-quotes the fare
-  through the travel provider, creates the booking and starts gateway payment.
-- **Payment ledger** — payments now record gateway transaction id, initiated /
-  completed / failed timestamps, failure reason, refund status and an idempotency
-  key. Customers see their transaction history under Account → Payments; admins
-  can search and export CSV from Admin → Payments.
-- **Idempotent webhooks** — gateway IPNs are deduplicated by
-  `paymentId:status:reference` in `webhook_events`, so retries and mirrored IPNs
-  never double-confirm a booking or double-mark an invoice paid.
-- **Automatic fulfilment** — after a verified payment, eSIM orders request
-  activation data from the configured eSIM provider (`esim_provider_url` /
-  `esim_provider_api_key`, also editable in Admin → Settings → Travel provider).
-  Without a provider the order stays **FULFILLMENT_PENDING** and an admin
-  completes it from Admin → Orders → Fulfilment (QR code, SM-DP+, activation
-  code, instructions). Fulfilment is never fabricated.
-- **Website analytics** — meaningful events (`page_view`, `search`,
-  `hotel_view`, `flight_search`, `tour_view`, `esim_view`, `product_view`,
-  `add_to_cart`, `checkout_started`, `payment_started`, `payment_success`,
-  `payment_failed`, `booking_created`, `booking_confirmed`) are stored in
-  `analytics_events` and reported in Admin → Analytics with time ranges, traffic
-  trend, popular pages, device breakdown and conversion rates.
-- **Payment return page** — `/payment/return` verifies the stored transaction
-  server-side and shows success / failed / cancelled states with booking links.
-- **SEO** — live `/sitemap.xml` (built from published hotels, tours and
-  products), `/robots.txt`, per-page titles/descriptions/canonicals and
-  JSON-LD structured data (Hotel, Product, TouristTrip).
-- **Unified booking history** — My Bookings and Account → My Bookings merge
-  catalogue orders, hotel stays and legacy provider requests into one list.
+- **Hotel inventory** — Super Admins and explicitly permitted Hotel Owners can
+  manage owner-scoped hotels, room types, inventory, current nightly pricing,
+  seasonal discount windows, availability and Cloudinary galleries.
+- **Vendor RBAC** — `HOTEL_OWNER`, `HOME_OWNER` and `TRAVEL_AGENT` accounts are
+  deny-by-default. Navigation, frontend routes and backend APIs all enforce the
+  granular permissions assigned by a Super Admin.
+- **Live support** — visitors initialize a token-protected Socket.IO room and
+  exchange messages with the dual-pane Admin Live Support Inbox. Transcripts,
+  unread counters and assignment state are persisted in MongoDB.
+- **Payment safety** — gateway IPNs are idempotent, totals are calculated on the
+  server and customer payment history uses the persisted ledger.
+- **SEO/PWA** — live sitemap, robots policy, structured data and network-first
+  application shell with API responses excluded from service-worker caches.

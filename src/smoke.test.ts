@@ -1,5 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { io as createSocket, type Socket } from 'socket.io-client';
+import { effectiveFinePermissions, hasFinePermission } from './permissions.js';
+import { hashChatToken, verifyChatToken } from './live-chat.js';
+
+test('vendor RBAC is deny-by-default and accepts only explicitly assigned modules', () => {
+  const hotelOwner = { role: 'hotel_owner' as const };
+  assert.deepEqual(effectiveFinePermissions(hotelOwner), []);
+  assert.equal(hasFinePermission(hotelOwner, 'hotel.view'), false);
+  const assignedOwner = { role: 'hotel_owner' as const, permissions: ['hotel.view', 'hotel.update'] };
+  assert.equal(hasFinePermission(assignedOwner, 'hotel.view'), true);
+  assert.equal(hasFinePermission(assignedOwner, 'hotel.create'), false);
+  assert.deepEqual(effectiveFinePermissions({ role: 'home_owner' as const }), []);
+  assert.equal(hasFinePermission({ role: 'home_owner' as const, permissions: ['home.view'] }, 'catalog.view'), false);
+  assert.equal(hasFinePermission({ role: 'home_owner' as const, permissions: ['home.view'] }, 'home.view'), true);
+  assert.deepEqual(effectiveFinePermissions({ role: 'travel_agent' as const }), []);
+  assert.equal(hasFinePermission({ role: 'super_admin' as const }, 'hotel.delete'), true);
+});
+
+test('live-chat room tokens are hashed and timing-safe verified', () => {
+  const token = 'visitor-session-token-with-more-than-32-characters';
+  const hash = hashChatToken(token);
+  assert.notEqual(hash, token);
+  assert.equal(verifyChatToken(token, hash), true);
+  assert.equal(verifyChatToken(`${token}-wrong`, hash), false);
+  assert.equal(verifyChatToken('', hash), false);
+});
 
 /**
  * Run this only against a disposable MongoDB database:
@@ -35,16 +62,29 @@ if (!testMongoUri) {
     const built = buildApp();
     await built.connection;
     await bootstrapSuperAdmin(built.store);
-    const server = await new Promise<ReturnType<typeof built.app.listen>>(resolve => {
-      const instance = built.app.listen(0, '127.0.0.1', () => resolve(instance));
-    });
+    const server = createServer(built.app);
+    built.liveChat.attach(server);
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
     const address = server.address();
     assert(address && typeof address !== 'string');
     return { ...built, server, base: `http://127.0.0.1:${address.port}` };
   }
 
-  test('admin authentication, MongoDB catalogue, travel agents, and notifications work end to end', async () => {
+  const socketAck = <T>(socket: Socket, event: string, payload: unknown) => new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`Socket acknowledgement timed out: ${event}`)), 5000);
+    socket.emit(event, payload, (result: T) => { clearTimeout(timeout); resolve(result); });
+  });
+  const connected = (socket: Socket) => new Promise<void>((resolve, reject) => {
+    if (socket.connected) return resolve();
+    const timeout = setTimeout(() => reject(new Error('Socket connection timed out')), 5000);
+    socket.once('connect', () => { clearTimeout(timeout); resolve(); });
+    socket.once('connect_error', error => { clearTimeout(timeout); reject(error); });
+  });
+
+  test('admin authentication, MongoDB catalogue, travel agents, live chat, and notifications work end to end', async () => {
     const { store, server, base } = await runServer();
+    let visitorSocket: Socket | undefined;
+    let adminSocket: Socket | undefined;
     try {
       assert.equal((await fetch(`${base}/healthz`)).status, 200);
       const login = await fetch(`${base}/api/v1/auth/password-login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identity: 'admin@example.com', password: 'StrongAdminPassword123!' }) });
@@ -52,6 +92,23 @@ if (!testMongoUri) {
       assert.equal(login.status, 200);
       assert.equal(adminLogin.user.role, 'super_admin');
       const adminCookie = cookies(login);
+
+      const chatStart = await fetch(`${base}/api/v1/live-chat/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Live Chat Visitor', mobile: '01700000000', email: 'visitor@example.com', subject: 'Hotel availability' }) });
+      const { body: chat } = await responseJson(chatStart);
+      assert.equal(chatStart.status, 201);
+      visitorSocket = createSocket(base, { transports: ['websocket'] });
+      adminSocket = createSocket(base, { transports: ['websocket'], extraHeaders: { cookie: adminCookie } });
+      await Promise.all([connected(visitorSocket), connected(adminSocket)]);
+      const visitorJoin = await socketAck<any>(visitorSocket, 'join_chat_room', { sessionId: chat.session.id, token: chat.token });
+      assert.equal(visitorJoin.ok, true);
+      const adminInbox = await socketAck<any>(adminSocket, 'admin_join_inbox', {});
+      assert.equal(adminInbox.ok, true);
+      const adminJoin = await socketAck<any>(adminSocket, 'join_chat_room', { sessionId: chat.session.id });
+      assert.equal(adminJoin.ok, true);
+      assert.equal((await socketAck<any>(visitorSocket, 'send_chat_message', { message: 'Is a room available this weekend?' })).ok, true);
+      assert.equal((await socketAck<any>(adminSocket, 'admin_reply', { sessionId: chat.session.id, message: 'Yes, we can help with current availability.' })).ok, true);
+      const transcript = await (await fetch(`${base}/api/v1/live-chat/sessions/${chat.session.id}/messages`, { headers: { 'x-chat-token': chat.token } })).json();
+      assert.deepEqual(transcript.messages.map((message: any) => message.authorType), ['customer', 'admin']);
 
       const createdTour = await fetch(`${base}/api/v1/admin/tours`, { method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' }, body: JSON.stringify({ slug: `umrah-smoke-${Date.now()}`, title: 'Umrah Smoke Package', country: 'Saudi Arabia', tourType: 'Umrah', destinations: ['Makkah', 'Madinah'], durationDays: 10, durationNights: 9, description: 'Published package for the smoke test.', imageUrl: '', metadata: {}, priceBdt: 125000, status: 'published', featured: true }) });
       const { body: tourPayload } = await responseJson(createdTour);
@@ -82,6 +139,8 @@ if (!testMongoUri) {
       const notifications = await (await fetch(`${base}/api/v1/notifications`, { headers: { cookie: customerCookie } })).json();
       assert.equal(notifications.unread, 1);
     } finally {
+      visitorSocket?.disconnect();
+      adminSocket?.disconnect();
       await new Promise<void>(resolve => server.close(() => resolve()));
       store.close();
     }

@@ -44,6 +44,11 @@ export const PERMISSION_CATALOG: PermissionGroup[] = [
   { group: 'Dashboard & Reports', permissions: [
     { key: 'dashboard.view', label: 'View dashboard', description: 'Access the operations overview' },
     { key: 'reports.view', label: 'View reports', description: 'View analytics and reports' } ] },
+  { group: 'Home & Villa Management', permissions: [
+    { key: 'home.view', label: 'View owned homes', description: 'Browse assigned home and villa listings' },
+    { key: 'home.create', label: 'Create homes', description: 'Add home and villa listings' },
+    { key: 'home.update', label: 'Edit owned homes', description: 'Update owned home and villa listings' },
+    { key: 'home.delete', label: 'Delete owned homes', description: 'Archive owned home and villa listings' } ] },
   { group: 'Hotel Management', permissions: [
     { key: 'hotel.view', label: 'View hotels', description: 'Browse and open hotels' },
     { key: 'hotel.create', label: 'Create hotels', description: 'Add new hotels' },
@@ -70,7 +75,7 @@ export const PERMISSION_CATALOG: PermissionGroup[] = [
     { key: 'tour.create', label: 'Add tours', description: 'Create tour packages' },
     { key: 'tour.update', label: 'Edit tours', description: 'Update tour packages' },
     { key: 'tour.delete', label: 'Delete tours', description: 'Archive tours' } ] },
-  { group: 'Catalogue (eSIM, Umrah, Holiday, Medical, Visa, Homes, Offers, Destinations)', permissions: [
+  { group: 'Marketplace Catalogue', permissions: [
     { key: 'catalog.view', label: 'View catalogue', description: 'Browse every catalogue product' },
     { key: 'catalog.create', label: 'Create catalogue products', description: 'Add holiday packages, homes & villas and destinations' },
     { key: 'catalog.update', label: 'Edit catalogue products', description: 'Update catalogue content, pricing and availability' },
@@ -90,7 +95,6 @@ export const PERMISSION_CATALOG: PermissionGroup[] = [
     { key: 'review.view', label: 'View reviews', description: 'Browse customer reviews' },
     { key: 'review.moderate', label: 'Moderate reviews', description: 'Approve, reject and reply to reviews' },
     { key: 'review.delete', label: 'Delete reviews', description: 'Remove reviews' } ] },
-  { group: 'Visa Applications', permissions: [ ] },
   { group: 'Content & Offers', permissions: [
     { key: 'content.view', label: 'View content', description: 'Website, destination and holiday content' },
     { key: 'offer.view', label: 'View offers', description: 'Browse published promotional offers' },
@@ -123,8 +127,22 @@ export const ALL_FINE_PERMISSIONS = PERMISSION_CATALOG.flatMap(group => group.pe
 export const SUPER_ONLY_PERMISSIONS = ['admin.manage', 'system.settings', 'system.audit', 'system.backup'];
 export const ALL_PERMISSIONS_INCL_SUPER = [...ALL_FINE_PERMISSIONS, ...SUPER_ONLY_PERMISSIONS];
 
+export const PLATFORM_ROLES = Object.freeze({
+  SUPER_ADMIN: 'super_admin',
+  HOTEL_OWNER: 'hotel_owner',
+  HOME_OWNER: 'home_owner',
+  TRAVEL_AGENT: 'travel_agent'
+} as const);
+export const VENDOR_ROLES = [PLATFORM_ROLES.HOTEL_OWNER, PLATFORM_ROLES.HOME_OWNER, PLATFORM_ROLES.TRAVEL_AGENT] as const;
+export type VendorRole = typeof VENDOR_ROLES[number];
+
 const ROLE_DEFAULT_FINE: Record<string, string[]> = {
   super_admin: ALL_PERMISSIONS_INCL_SUPER,
+  // Vendor roles intentionally have no implicit access. A Super Admin must
+  // explicitly assign every dashboard module/capability they can use.
+  hotel_owner: [],
+  home_owner: [],
+  travel_agent: [],
   admin: ALL_FINE_PERMISSIONS,
   manager: ['catalog.view', 'order.view', 'order.update', 'order.cancel', 'coupon.view', 'review.view', 'review.moderate', 'invoice.view', 'dashboard.view', 'reports.view', 'booking.view', 'booking.create', 'booking.update', 'booking.cancel', 'customer.view', 'support.view', 'support.reply', 'notifications.send'],
   support: ['catalog.view', 'order.view', 'review.view', 'dashboard.view', 'booking.view', 'customer.view', 'support.view', 'support.reply', 'notifications.send'],
