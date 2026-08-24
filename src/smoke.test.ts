@@ -4,6 +4,32 @@ import { createServer } from 'node:http';
 import { io as createSocket, type Socket } from 'socket.io-client';
 import { effectiveFinePermissions, hasFinePermission } from './permissions.js';
 import { hashChatToken, verifyChatToken } from './live-chat.js';
+import { ACTIVE_CATALOG_TYPES, RETIRED_VERTICAL_TYPES, isRetiredAdminNavItem } from './legacy-purge.js';
+
+test('retired verticals such as the legacy Umrah fare entry are rejected everywhere', () => {
+  // The persisted row behind "Special Umrah Fair": its base path (/admin/catalog)
+  // is still live, so only the `?type=` discriminator identifies it.
+  assert.equal(isRetiredAdminNavItem({ label: 'Special Umrah Fair', route: '/admin/catalog?type=umrah_fare' }), true);
+  assert.equal(isRetiredAdminNavItem({ label: 'Umrah Fair', route: '/admin/catalog?type=umrah_package' }), true);
+  assert.equal(isRetiredAdminNavItem({ label: 'special umrah fare', route: '/admin/catalog?type=holiday_package' }), true);
+  assert.equal(isRetiredAdminNavItem({ label: 'Umrah', route: '/admin/umrah-fair' }), true);
+  assert.equal(isRetiredAdminNavItem({ label: 'eSIM', route: '/admin/esim' }), true);
+
+  // Preserved modules must keep working.
+  for (const item of [
+    { label: 'Hotels & Rooms', route: '/admin/hotels' },
+    { label: 'Homes & Villas', route: '/admin/catalog?type=home' },
+    { label: 'Tours', route: '/admin/tours' },
+    { label: 'Holiday Packages', route: '/admin/catalog?type=holiday_package' },
+    { label: 'Destinations (Explore)', route: '/admin/catalog?type=destination' },
+    { label: 'Travel Agents', route: '/admin/travel-agents' },
+    { label: 'Hotel Bookings', route: '/admin/hotel-bookings' }
+  ]) assert.equal(isRetiredAdminNavItem(item), false, `${item.label} must be preserved`);
+
+  // The retired and active catalogue type lists must never overlap.
+  assert.equal(ACTIVE_CATALOG_TYPES.some((type) => (RETIRED_VERTICAL_TYPES as readonly string[]).includes(type)), false);
+  assert.equal((RETIRED_VERTICAL_TYPES as readonly string[]).includes('umrah_fare'), true);
+});
 
 test('vendor RBAC is deny-by-default and accepts only explicitly assigned modules', () => {
   const hotelOwner = { role: 'hotel_owner' as const };

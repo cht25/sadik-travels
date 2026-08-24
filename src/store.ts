@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import { config } from './config.js';
 import { decryptSecret, encryptSecret, maskSecret } from './secrets.js';
+import { AppError } from './errors.js';
+import { ACTIVE_CONTENT_TYPES, isRetiredAdminNavItem, purgeRetiredData } from './legacy-purge.js';
 
 export type Channel = 'sms' | 'email';
 export type UserRole = 'customer' | 'manager' | 'admin' | 'super_admin' | 'support' | 'content_manager' | 'finance' | 'staff' | 'hotel_owner' | 'home_owner' | 'travel_agent';
@@ -155,20 +157,13 @@ const AuditModel = makeModel('SadikAuditLog', 'audit_logs', { action: { type: St
 const SecretModel = makeModel('SadikUserSecret', 'user_secrets', { passwordHash: String });
 const MODELS: Record<string, DocModel> = { navigation: NavigationModel, 'site-navigation': SiteNavigationModel, user: UserModel, 'user-secret': SecretModel, otp: OtpModel, session: SessionModel, booking: BookingModel, 'booking-event': BookingEventModel, tour: TourModel, payment: PaymentModel, 'webhook-event': WebhookEventModel, ticket: TicketModel, 'support-message': SupportMessageModel, setting: SettingModel, service: ServiceModel, notification: NotificationModel, content: ContentModel, media: MediaModel, agent: AgentModel, 'customer-note': CustomerNoteModel, audit: AuditModel };
 
-const RETIRED_ADMIN_NAV_ROUTES = new Set([
-  '/admin/audit-logs',
-  '/admin/users',
-  '/admin/campaigns',
-  '/admin/campaign-templates',
-  '/admin/campaigns/templates',
-  '/admin/segments',
-  '/admin/customers/segments',
-  '/admin/visa-applications',
-  '/admin/flights',
-  '/admin/visa',
-  '/admin/esim',
-  '/admin/explore'
-]);
+/**
+ * Retired admin sidebar entries are identified by `isRetiredAdminNavItem`
+ * (see `legacy-purge.ts`), which matches the base route, the `?type=`
+ * discriminator and the stored label. Matching the query string matters:
+ * removed catalogue verticals such as the Umrah fare page were persisted as
+ * `/admin/catalog?type=umrah_fare`, whose base path is still a live route.
+ */
 
 /**
  * Older deployments keep navigation rows in MongoDB from before the marketplace
@@ -224,9 +219,9 @@ export class MongoStore implements Store {
   private async remove(kind: string, id: string) { return (await this.modelFor(kind).deleteOne({ id })).deletedCount === 1; }
   private async paged<T>(items: T[], currentPage?: number, currentSize?: number) { const activePage = page(currentPage); const size = pageSize(currentSize); return { items: items.slice((activePage - 1) * size, activePage * size), total: items.length, page: activePage, pageSize: size, pageCount: Math.max(1, Math.ceil(items.length / size)) }; }
 
-  async listNavigation(visibleOnly = false) { let items = await this.all<AdminNavItem>('navigation'); if (!items.length) { const time = now(); items = await Promise.all(DEFAULT_NAVIGATION.map(input => this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }))); } else { const known = new Set(items.map(item => `${item.groupName}|${item.label}|${item.route}`)); const missing = DEFAULT_NAVIGATION.filter(input => !known.has(`${input.groupName}|${input.label}|${input.route}`)); if (missing.length) { const time = now(); const added = await Promise.all(missing.map(input => this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }))); items = [...items, ...added]; } } items = items.map(item => { const remapped = LEGACY_ADMIN_NAV_ROUTE_REMAP.get((item.route || '').split('?')[0]); return remapped && item.route !== remapped ? { ...item, route: remapped } : item; }); const canonical = new Map(DEFAULT_NAVIGATION.map(item => [item.route, item])); items = items.map(item => canonical.has(item.route) ? { ...item, permission: canonical.get(item.route)!.permission } : item); items = items.filter(item => !RETIRED_ADMIN_NAV_ROUTES.has((item.route || '').split('?')[0])); items = items.filter(item => !visibleOnly || (item.visible && item.enabled)); const dedup = new Map<string, AdminNavItem>(); for (const item of items) { const routeKey = (item.route || '').split('?')[0]; const key = `${item.groupName}|${routeKey}`; const existing = dedup.get(key); if (!existing || (item.sortOrder ?? 0) < (existing.sortOrder ?? 0) || ((item.sortOrder ?? 0) === (existing.sortOrder ?? 0) && item.label.localeCompare(existing.label) < 0)) dedup.set(key, item); } return Array.from(dedup.values()).sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label)); }
-  async createNavigation(input: CreateNavItem) { const time = now(); return this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }); }
-  async updateNavigation(id: string, patch: UpdateNavItem) { return this.patch<AdminNavItem>('navigation', id, { ...patch, updatedAt: now() }); }
+  async listNavigation(visibleOnly = false) { let items = await this.all<AdminNavItem>('navigation'); if (!items.length) { const time = now(); items = await Promise.all(DEFAULT_NAVIGATION.map(input => this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }))); } else { const known = new Set(items.map(item => `${item.groupName}|${item.label}|${item.route}`)); const missing = DEFAULT_NAVIGATION.filter(input => !known.has(`${input.groupName}|${input.label}|${input.route}`)); if (missing.length) { const time = now(); const added = await Promise.all(missing.map(input => this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }))); items = [...items, ...added]; } } items = items.map(item => { const remapped = LEGACY_ADMIN_NAV_ROUTE_REMAP.get((item.route || '').split('?')[0]); return remapped && item.route !== remapped ? { ...item, route: remapped } : item; }); const canonical = new Map(DEFAULT_NAVIGATION.map(item => [item.route, item])); items = items.map(item => canonical.has(item.route) ? { ...item, permission: canonical.get(item.route)!.permission } : item); items = items.filter(item => !isRetiredAdminNavItem(item)); items = items.filter(item => !visibleOnly || (item.visible && item.enabled)); const dedup = new Map<string, AdminNavItem>(); for (const item of items) { const routeKey = (item.route || '').split('?')[0]; const key = `${item.groupName}|${routeKey}`; const existing = dedup.get(key); if (!existing || (item.sortOrder ?? 0) < (existing.sortOrder ?? 0) || ((item.sortOrder ?? 0) === (existing.sortOrder ?? 0) && item.label.localeCompare(existing.label) < 0)) dedup.set(key, item); } return Array.from(dedup.values()).sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label)); }
+  async createNavigation(input: CreateNavItem) { if (isRetiredAdminNavItem(input)) throw new AppError(400, 'RETIRED_NAV_ITEM', 'This navigation item belongs to a removed module and can no longer be created'); const time = now(); return this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }); }
+  async updateNavigation(id: string, patch: UpdateNavItem) { const current = await this.one<AdminNavItem>('navigation', id); if (isRetiredAdminNavItem({ ...current, ...patch })) throw new AppError(400, 'RETIRED_NAV_ITEM', 'This navigation item belongs to a removed module and can no longer be saved'); return this.patch<AdminNavItem>('navigation', id, { ...patch, updatedAt: now() }); }
   async deleteNavigation(id: string) { return this.remove('navigation', id); }
   async reorderNavigation(ids: string[]) { await Promise.all(ids.map((id, index) => this.updateNavigation(id, { sortOrder: index + 1 }))); }
   async listSiteNavigation(enabledOnly = false) {
@@ -372,7 +367,7 @@ export class MongoStore implements Store {
   async markNotificationRead(id: string, userId: string) { const item = await this.one<Notification>('notification', id); return item && item.userId === userId ? this.save<Notification>('notification', { ...item, status: 'read', readAt: now() }) : undefined; }
   async listAdminNotifications(filters: { q?: string; status?: NotificationStatus | 'all'; page?: number; pageSize?: number } = {}) { let items = await this.all<Notification>('notification'); if (filters.status && filters.status !== 'all') items = items.filter(item => item.status === filters.status); if (filters.q) items = items.filter(item => contains(`${item.title} ${item.message}`, filters.q)); items.sort((a,b) => b.createdAt.localeCompare(a.createdAt)); const result = await this.paged(items, filters.page, filters.pageSize); return { notifications: await Promise.all(result.items.map(item => this.findNotification(item.id))) as AdminNotification[], ...result }; }
 
-  async listContent(filters: ContentFilters = {}) { let items = await this.all<ContentItem>('content'); if (filters.type && filters.type !== 'all') items = items.filter(item => item.type === filters.type); if (filters.status && filters.status !== 'all') items = items.filter(item => item.status === filters.status); else if (!filters.includeArchived) items = items.filter(item => item.status !== 'archived'); if (filters.q) items = items.filter(item => contains(`${item.title} ${item.subtitle} ${item.description}`, filters.q)); return items.sort((a,b) => a.sortOrder - b.sortOrder || b.updatedAt.localeCompare(a.updatedAt)); }
+  async listContent(filters: ContentFilters = {}) { let items = await this.all<ContentItem>('content'); items = items.filter(item => (ACTIVE_CONTENT_TYPES as readonly string[]).includes(item.type)); if (filters.type && filters.type !== 'all') items = items.filter(item => item.type === filters.type); if (filters.status && filters.status !== 'all') items = items.filter(item => item.status === filters.status); else if (!filters.includeArchived) items = items.filter(item => item.status !== 'archived'); if (filters.q) items = items.filter(item => contains(`${item.title} ${item.subtitle} ${item.description}`, filters.q)); return items.sort((a,b) => a.sortOrder - b.sortOrder || b.updatedAt.localeCompare(a.updatedAt)); }
   async findContent(id: string) { return this.one<ContentItem>('content', id); }
   async createContent(input: CreateContent) { const time = now(); return this.insert('content', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }); }
   async updateContent(id: string, patch: UpdateContent) { const item = await this.one<ContentItem>('content', id); return item ? this.save('content', { ...item, ...clean(patch as any), updatedAt: now() }) : undefined; }
@@ -402,4 +397,23 @@ export class MongoStore implements Store {
 }
 
 export function connectMongo() { if (!config.mongoUri) throw new Error('MONGODB_URI is required'); mongoose.set('strictQuery', true); return mongoose.connect(config.mongoUri, { serverSelectionTimeoutMS: 8_000, maxPoolSize: 20, minPoolSize: config.isProduction ? 2 : 0, autoIndex: !config.isProduction }); }
-export function createStore(): { store: Store; connection: Promise<typeof mongoose> } { const store = new MongoStore(); const connection = connectMongo().then(async mongo => { await Promise.all(Object.values(MODELS).map(model => model.createIndexes())); await store.listNavigation(); await store.getServiceVisibility(); return mongo; }); return { store, connection }; }
+export function createStore(): { store: Store; connection: Promise<typeof mongoose> } {
+  const store = new MongoStore();
+  const connection = connectMongo().then(async mongo => {
+    await Promise.all(Object.values(MODELS).map(model => model.createIndexes()));
+    // Hard-delete records of removed verticals (e.g. the legacy Umrah fare
+    // entry) BEFORE the defaults are seeded, so they cannot come back after a
+    // refresh, restart, redeploy, database reload or reseed.
+    try {
+      const removed = await purgeRetiredData();
+      const total = Object.values(removed).reduce((sum, count) => sum + count, 0);
+      if (total) console.log(`Removed ${total} retired legacy record(s):`, removed);
+    } catch (error) {
+      console.error('Retired legacy data purge failed:', error instanceof Error ? error.message : error);
+    }
+    await store.listNavigation();
+    await store.getServiceVisibility();
+    return mongo;
+  });
+  return { store, connection };
+}

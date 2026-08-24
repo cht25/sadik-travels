@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import { AppError } from './errors.js';
+import { ACTIVE_CATALOG_TYPES, RETIRED_VERTICAL_TYPES } from './legacy-purge.js';
 
 /**
  * Commerce & catalogue layer (add-on module).
@@ -16,7 +17,7 @@ import { AppError } from './errors.js';
  * discounts, coupons, taxes and totals sent by a browser are never trusted.
  */
 
-export const CATALOG_TYPES = ['holiday_package', 'home', 'destination'] as const;
+export const CATALOG_TYPES = ACTIVE_CATALOG_TYPES;
 export type CatalogType = typeof CATALOG_TYPES[number];
 export type CatalogStatus = 'draft' | 'published' | 'archived';
 
@@ -287,7 +288,9 @@ export function createCommerceStore() {
     const page = Math.max(1, Number(filters.page) || 1);
     const pageSize = Math.min(60, Math.max(1, Number(filters.pageSize) || 12));
     const query: Record<string, unknown> = {};
+    // Never surface products of removed verticals, even for `type=all`.
     if (filters.type && filters.type !== 'all') query.type = filters.type;
+    else query.type = { $nin: [...RETIRED_VERTICAL_TYPES] };
     if (filters.ownerId) query.createdBy = filters.ownerId;
     if (filters.status && filters.status !== 'all') query.status = filters.status;
     if (filters.country) query.country = new RegExp(`^${escapeRegex(filters.country)}$`, 'i');
@@ -320,7 +323,7 @@ export function createCommerceStore() {
 
   const findCatalogProduct = async (idOrSlug: string, type?: CatalogType) => {
     const query: Record<string, unknown> = { $or: [{ id: idOrSlug }, { slug: idOrSlug }] };
-    if (type) query.type = type;
+    query.type = type ?? { $nin: [...RETIRED_VERTICAL_TYPES] };
     return clean<CatalogProduct>(await CatalogModel.findOne(query).lean());
   };
 
@@ -349,6 +352,9 @@ export function createCommerceStore() {
   };
 
   const createCatalogProduct = async (input: Partial<CatalogProduct> & { type: CatalogType; slug: string; title: string; createdBy?: string }) => {
+    if ((RETIRED_VERTICAL_TYPES as readonly string[]).includes(input.type)) {
+      throw new AppError(400, 'RETIRED_PRODUCT_TYPE', 'This product type belongs to a removed module and can no longer be created');
+    }
     const exists = await CatalogModel.findOne({ type: input.type, slug: input.slug }).lean();
     if (exists) throw new AppError(409, 'SLUG_IN_USE', 'Another product of this type already uses that slug');
     const doc = await CatalogModel.create({ ...input, id: randomUUID(), createdAt: now(), updatedAt: now() });
@@ -370,7 +376,8 @@ export function createCommerceStore() {
   const deleteCatalogProduct = async (id: string) => (await CatalogModel.deleteOne({ id })).deletedCount > 0;
 
   const catalogStats = async (filters: { type?: CatalogType; ownerId?: string } = {}) => {
-    const match: Record<string, unknown> = {};
+    // Retired verticals are excluded so they cannot appear as a dashboard card.
+    const match: Record<string, unknown> = { type: { $nin: [...RETIRED_VERTICAL_TYPES] } };
     if (filters.type) match.type = filters.type;
     if (filters.ownerId) match.createdBy = filters.ownerId;
     const rows = await CatalogModel.aggregate([...(Object.keys(match).length ? [{ $match: match }] : []), { $group: { _id: { type: '$type', status: '$status' }, count: { $sum: 1 } } }]);
@@ -702,6 +709,7 @@ export function createCommerceStore() {
     const rx = new RegExp(escapeRegex(term), 'i');
     const docs = await CatalogModel.find({
       status: 'published',
+      type: { $nin: [...RETIRED_VERTICAL_TYPES] },
       $or: [{ title: rx }, { destination: rx }, { country: rx }, { city: rx }, { summary: rx }]
     }).limit(limit).lean();
     return cleanList<CatalogProduct>(docs);
