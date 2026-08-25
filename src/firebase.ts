@@ -1,10 +1,13 @@
 import { getApps, initializeApp, cert, type App } from 'firebase-admin/app';
 import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
+import { getDatabaseWithUrl, type Database as RealtimeDatabase } from 'firebase-admin/database';
 import { config } from './config.js';
 import { AppError } from './errors.js';
 
 let adminApp: App | undefined;
 let initAttempted = false;
+let chatDatabase: RealtimeDatabase | undefined;
+let chatDatabaseAttempted = false;
 
 function serverCredentials(): { projectId: string; clientEmail: string; privateKey: string } | undefined {
   return config.firebaseProjectId && config.firebaseClientEmail && config.firebasePrivateKey
@@ -39,6 +42,44 @@ export async function verifyFirebaseIdToken(idToken: string): Promise<DecodedIdT
   } catch (error) {
     if (error instanceof AppError && error.code === 'FIREBASE_NOT_CONFIGURED') throw error;
     throw new AppError(401, 'FIREBASE_TOKEN_INVALID', 'Invalid or expired Google sign-in token');
+  }
+}
+
+/**
+ * Realtime Database URL used for live chat: the explicit env override, or the
+ * default instance of the Firebase project when a project ID is known.
+ */
+export function firebaseDatabaseUrl(): string | undefined {
+  const explicit = config.firebaseDatabaseUrl?.trim();
+  if (explicit) return explicit;
+  if (config.firebaseProjectId) return `https://${config.firebaseProjectId}-default-rtdb.firebaseio.com`;
+  return undefined;
+}
+
+/** Whether the server can read and write the Firebase Realtime Database used for live chat. */
+export function isFirebaseDatabaseConfigured(): boolean {
+  return Boolean(serverCredentials() && firebaseDatabaseUrl());
+}
+
+/**
+ * Admin-SDK handle to the live chat Realtime Database. The Admin SDK writes
+ * bypass security rules; browsers never talk to this database directly.
+ */
+export function firebaseRealtimeDatabase(): RealtimeDatabase {
+  if (chatDatabase) return chatDatabase;
+  if (chatDatabaseAttempted) throw new AppError(503, 'CHAT_STORAGE_NOT_CONFIGURED', 'Live chat storage is not configured');
+  const url = firebaseDatabaseUrl();
+  if (!url) throw new AppError(503, 'CHAT_STORAGE_NOT_CONFIGURED', 'Live chat storage is not configured');
+  try {
+    chatDatabase = getDatabaseWithUrl(url, app());
+    chatDatabaseAttempted = true;
+    return chatDatabase;
+  } catch (error) {
+    // Keep the app alive with a clean 503 on chat endpoints instead of an
+    // unhandled credential error; a later request may retry initialization.
+    if (error instanceof AppError) throw new AppError(503, 'CHAT_STORAGE_NOT_CONFIGURED', 'Live chat storage is not configured');
+    console.error('Firebase Realtime Database initialization failed', error);
+    throw new AppError(503, 'CHAT_STORAGE_UNAVAILABLE', 'Live chat storage is temporarily unavailable');
   }
 }
 

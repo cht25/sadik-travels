@@ -11,6 +11,7 @@
 | Concern | Production service |
 | --- | --- |
 | Application data | Managed MongoDB / MongoDB Atlas via `MONGODB_URI` |
+| Live chat (conversations + transcripts) | Firebase Realtime Database via the Admin SDK; MongoDB fallback when Firebase is not configured |
 | Images | Cloudinary |
 | Session state | Signed HttpOnly JWT cookies, with server-side session records in MongoDB |
 | Delivery | Configured SMS, SMTP, travel, and payment providers |
@@ -41,10 +42,26 @@ price), apply the current seasonal discount, and never trust browser totals.
 
 `src/live-chat.ts` attaches Socket.IO to the same HTTP server. Visitors create a
 chat session with contact metadata, receive a random room capability whose hash
-is stored in MongoDB, and join with `join_chat_room`. Admin sockets authenticate
-with the existing server-side session and require `support.view`/`support.reply`.
-Every message is persisted in `support_messages`; unread counters and transcript
-history power the dual-pane Live Support Inbox and reconnect-safe visitor UI.
+is stored with the session, and join with `join_chat_room`. Admin sockets
+authenticate with the existing server-side session and require
+`support.view`/`support.reply`.
+
+Live chat storage is abstracted behind `LiveChatDb` (`src/live-chat-db.ts`).
+When Firebase is configured, conversations (`live-chat/sessions/{id}`) and
+transcripts (`live-chat/messages/{id}`) live in **Firebase Realtime Database**
+and are read/written through the Admin SDK. The server subscribes to those
+nodes and relays changes into the Socket.IO rooms, so Realtime Database is the
+real-time event source: messages or session updates written by any process —
+or in the Firebase console — reach connected visitors and admins, and the
+inbox reflects unread/status/assignment changes as they happen. Unread
+counters use RTDB transactions; visitor presence is tracked per conversation
+and persisted on the session node. The REST endpoints and Socket.IO protocol
+are unchanged, and client de-duplication by message id keeps the explicit and
+database-driven deliveries in sync. Without Firebase credentials the adapter
+falls back to the MongoDB `support_tickets`/`support_messages` collections
+(`source: 'live_chat'`), so local development and the integration suite run
+without Firebase. Browsers never talk to the Realtime Database directly; the
+recommended rules deny all client access (the Admin SDK bypasses rules).
 
 ## Media
 

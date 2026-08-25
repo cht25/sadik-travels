@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Server as HttpServer } from 'node:http';
 import type { Express, Request } from 'express';
 import { Server as SocketServer, type Socket } from 'socket.io';
@@ -9,6 +9,7 @@ import { optionalAuth, requireFinePermission } from './middleware.js';
 import { hasFinePermission } from './permissions.js';
 import { rateLimit } from './rate-limit.js';
 import { ACCESS_COOKIE, verifyToken } from './security.js';
+import type { LiveChatDb } from './live-chat-db.js';
 import type { Store, SupportMessage, SupportTicket, User } from './store.js';
 
 const CHAT_ADMIN_ROOM = 'support:admins';
@@ -72,8 +73,12 @@ function acknowledge(callback: unknown, payload: unknown) {
 
 export class LiveChatHub {
   private io?: SocketServer;
+  private sessionWatcher?: () => void;
+  private sessionWatchActive = false;
+  private messageWatches = new Map<string, { stop: () => void; refs: number }>();
+  private visitorCounts = new Map<string, number>();
 
-  constructor(private readonly store: Store) {}
+  constructor(private readonly store: Store, private readonly db: LiveChatDb) {}
 
   attach(server: HttpServer) {
     if (this.io) return this.io;
@@ -93,15 +98,99 @@ export class LiveChatHub {
       }
     });
     this.io.on('connection', socket => this.bindSocket(socket));
+    if (this.db.backend === 'firebase-realtime-db') {
+      // Realtime Database is the event source: every conversation change made
+      // anywhere (this process, another instance, the Firebase console) is
+      // relayed to connected admin sockets. If the database cannot be reached
+      // yet, the app keeps serving and the explicit broadcasts below take over.
+      try {
+        this.sessionWatcher = this.db.watchSessions((session, event, previous) => {
+          if (!this.io) return;
+          if (event === 'created') {
+            this.io.to(CHAT_ADMIN_ROOM).emit('conversation_created', publicTicket(session));
+            return;
+          }
+          if (event === 'removed') {
+            this.io.to(CHAT_ADMIN_ROOM).emit('conversation_updated', { id: session.id, deleted: true });
+            return;
+          }
+          // The explicit emit paths only fire on unread/status/assignment changes, so
+          // mirror those and skip cosmetic updates (e.g. visitor read receipts).
+          const meaningful = (previous?.adminUnread ?? 0) !== (session.adminUnread ?? 0)
+            || (previous?.status ?? 'open') !== session.status
+            || (previous?.assignedTo ?? null) !== (session.assignedTo ?? null);
+          if (meaningful) this.io.to(CHAT_ADMIN_ROOM).emit('conversation_updated', publicTicket(session));
+        });
+        this.sessionWatchActive = true;
+        console.log('Live chat storage: Firebase Realtime Database');
+      } catch (error) {
+        console.error('live-chat Realtime Database subscription failed; inbox updates fall back to explicit broadcasts', error);
+      }
+    } else {
+      console.log('Live chat storage: MongoDB (Firebase Realtime Database not configured)');
+    }
     return this.io;
   }
 
+  /**
+   * Explicit inbox broadcast. While the Realtime Database session watcher is
+   * live it already relays every conversation change, so this is a no-op to
+   * avoid duplicate toasts/sounds; otherwise (MongoDB mode, or a database that
+   * is temporarily unreachable) the explicit broadcast is the inbox's source.
+   */
   emitInbox(ticket: SupportTicket, event: 'conversation_created' | 'conversation_updated' = 'conversation_updated') {
+    if (this.sessionWatchActive) return;
     this.io?.to(CHAT_ADMIN_ROOM).emit(event, publicTicket(ticket));
   }
 
   emitMessage(ticketId: string, message: SupportMessage) {
     this.io?.to(roomName(ticketId)).emit('chat_message', message);
+  }
+
+  /** Reference-counted per-conversation Realtime Database subscriptions. */
+  private ensureMessageWatch(ticketId: string) {
+    const existing = this.messageWatches.get(ticketId);
+    if (existing) {
+      existing.refs += 1;
+      return;
+    }
+    const stop = this.db.watchMessages(ticketId, message => this.io?.to(roomName(ticketId)).emit('chat_message', message));
+    this.messageWatches.set(ticketId, { stop, refs: 1 });
+  }
+
+  private releaseMessageWatch(ticketId: string) {
+    const entry = this.messageWatches.get(ticketId);
+    if (!entry) return;
+    entry.refs -= 1;
+    if (entry.refs <= 0) {
+      entry.stop();
+      this.messageWatches.delete(ticketId);
+    }
+  }
+
+  private trackChatRoom(socket: Socket, ticketId: string) {
+    const rooms = new Set(socket.data.chatRooms as Set<string> | undefined);
+    rooms.add(ticketId);
+    socket.data.chatRooms = rooms;
+    this.ensureMessageWatch(ticketId);
+  }
+
+  /** Visitor presence counts per conversation; persisted to Realtime Database in Firebase mode. */
+  private async noteVisitorPresence(sessionId: string, online: boolean) {
+    const next = Math.max(0, (this.visitorCounts.get(sessionId) || 0) + (online ? 1 : -1));
+    if (next === 0) this.visitorCounts.delete(sessionId);
+    else this.visitorCounts.set(sessionId, next);
+    try {
+      await this.db.setPresence(sessionId, next > 0);
+    } catch (error) {
+      console.error('live-chat presence update failed', error instanceof Error ? error : undefined);
+    }
+  }
+
+  private async withAssigneeName(ticket: SupportTicket): Promise<SupportTicket> {
+    if (!ticket.assignedTo || ticket.assignedToName) return ticket;
+    const user = await this.store.findUserById(ticket.assignedTo);
+    return user ? { ...ticket, assignedToName: user.fullName } : ticket;
   }
 
   private async authenticateAdmin(socket: Socket, permission: 'support.view' | 'support.reply'): Promise<User> {
@@ -125,7 +214,7 @@ export class LiveChatHub {
   }
 
   private async verifyVisitorRoom(sessionId: string, token: string | undefined) {
-    const ticket = await this.store.findSupportTicket(sessionId);
+    const ticket = await this.db.findSession(sessionId);
     if (!ticket || ticket.source !== 'live_chat' || !verifyChatToken(token || '', ticket.chatAccessHash)) throw new AppError(403, 'CHAT_ACCESS_DENIED', 'This chat session is not available');
     return ticket;
   }
@@ -135,7 +224,7 @@ export class LiveChatHub {
       try {
         await this.authenticateAdmin(socket, 'support.view');
         await socket.join(CHAT_ADMIN_ROOM);
-        const conversations = await this.store.listSupportTickets({ source: 'live_chat' });
+        const conversations = await this.db.listSessions();
         acknowledge(callback, { ok: true, conversations: conversations.map(publicTicket) });
       } catch (error) { acknowledge(callback, { ok: false, error: socketError(error) }); }
     });
@@ -146,18 +235,22 @@ export class LiveChatHub {
         let ticket: SupportTicket;
         if (socket.data.admin) {
           await this.authenticateAdmin(socket, 'support.view');
-          const found = await this.store.findSupportTicket(input.sessionId);
-          if (!found || found.source !== 'live_chat') throw new AppError(404, 'CHAT_NOT_FOUND', 'Chat session not found');
-          ticket = (await this.store.markSupportRead(found.id, 'admin')) || found;
+          const found = await this.db.findSession(input.sessionId);
+          if (!found) throw new AppError(404, 'CHAT_NOT_FOUND', 'Chat session not found');
+          ticket = (await this.db.markRead(found.id, 'admin')) || found;
         } else {
           ticket = await this.verifyVisitorRoom(input.sessionId, input.token);
           socket.data.visitor = { sessionId: ticket.id, token: input.token };
-          ticket = (await this.store.markSupportRead(ticket.id, 'customer')) || ticket;
+          ticket = (await this.db.markRead(ticket.id, 'customer')) || ticket;
         }
         await socket.join(roomName(ticket.id));
-        const messages = await this.store.listSupportMessages(ticket.id);
-        acknowledge(callback, { ok: true, ticket: publicTicket(ticket), messages });
-        if (!socket.data.admin) this.io?.to(CHAT_ADMIN_ROOM).emit('chat_presence', { sessionId: ticket.id, online: true });
+        const messages = await this.db.listMessages(ticket.id);
+        this.trackChatRoom(socket, ticket.id);
+        acknowledge(callback, { ok: true, ticket: publicTicket(await this.withAssigneeName(ticket)), messages });
+        if (!socket.data.admin) {
+          void this.noteVisitorPresence(ticket.id, true);
+          this.io?.to(CHAT_ADMIN_ROOM).emit('chat_presence', { sessionId: ticket.id, online: true });
+        }
       } catch (error) { acknowledge(callback, { ok: false, error: socketError(error) }); }
     });
 
@@ -167,9 +260,9 @@ export class LiveChatHub {
         if (!visitor?.sessionId) throw new AppError(403, 'CHAT_JOIN_REQUIRED', 'Join the chat before sending a message');
         const ticket = await this.verifyVisitorRoom(visitor.sessionId, visitor.token);
         const input = parse(messageInput, raw);
-        const message = await this.store.createSupportMessage({ ticketId: ticket.id, authorId: ticket.userId, authorType: 'customer', message: input.message, internal: false });
-        const updated = (await this.store.incrementSupportUnread(ticket.id, 'admin')) || ticket;
-        await this.store.updateSupportTicket(ticket.id, { status: 'pending', lastMessageAt: message.createdAt });
+        const message = await this.db.createMessage({ ticketId: ticket.id, authorId: ticket.userId, authorType: 'customer', message: input.message, internal: false });
+        const updated = (await this.db.incrementUnread(ticket.id, 'admin')) || ticket;
+        await this.db.updateSession(ticket.id, { status: 'pending', lastMessageAt: message.createdAt });
         this.emitMessage(ticket.id, message);
         this.emitInbox({ ...updated, status: 'pending', lastMessageAt: message.createdAt });
         acknowledge(callback, { ok: true, message });
@@ -181,11 +274,11 @@ export class LiveChatHub {
         const admin = await this.authenticateAdmin(socket, 'support.reply');
         const joined = parse(roomInput.pick({ sessionId: true }), raw);
         const input = parse(messageInput, raw);
-        const ticket = await this.store.findSupportTicket(joined.sessionId);
-        if (!ticket || ticket.source !== 'live_chat') throw new AppError(404, 'CHAT_NOT_FOUND', 'Chat session not found');
-        const message = await this.store.createSupportMessage({ ticketId: ticket.id, authorId: admin.id, authorType: 'admin', message: input.message, internal: false });
-        const updated = (await this.store.incrementSupportUnread(ticket.id, 'customer')) || ticket;
-        await this.store.updateSupportTicket(ticket.id, { status: 'waiting_customer', assignedTo: ticket.assignedTo || admin.id, lastMessageAt: message.createdAt });
+        const ticket = await this.db.findSession(joined.sessionId);
+        if (!ticket) throw new AppError(404, 'CHAT_NOT_FOUND', 'Chat session not found');
+        const message = await this.db.createMessage({ ticketId: ticket.id, authorId: admin.id, authorType: 'admin', message: input.message, internal: false });
+        const updated = (await this.db.incrementUnread(ticket.id, 'customer')) || ticket;
+        await this.db.updateSession(ticket.id, { status: 'waiting_customer', assignedTo: ticket.assignedTo || admin.id, lastMessageAt: message.createdAt });
         this.emitMessage(ticket.id, message);
         this.emitInbox({ ...updated, status: 'waiting_customer', assignedTo: ticket.assignedTo || admin.id, lastMessageAt: message.createdAt });
         acknowledge(callback, { ok: true, message });
@@ -193,32 +286,43 @@ export class LiveChatHub {
     });
 
     socket.on('disconnect', () => {
+      const rooms = socket.data.chatRooms as Set<string> | undefined;
+      if (rooms) for (const ticketId of rooms) this.releaseMessageWatch(ticketId);
       const visitor = socket.data.visitor as { sessionId?: string } | undefined;
-      if (visitor?.sessionId) this.io?.to(CHAT_ADMIN_ROOM).emit('chat_presence', { sessionId: visitor.sessionId, online: false });
+      if (visitor?.sessionId) {
+        void this.noteVisitorPresence(visitor.sessionId, false);
+        this.io?.to(CHAT_ADMIN_ROOM).emit('chat_presence', { sessionId: visitor.sessionId, online: false });
+      }
     });
   }
 }
 
-export function registerLiveChatRoutes(app: Express, deps: { store: Store; hub: LiveChatHub }) {
-  const { store, hub } = deps;
+export function registerLiveChatRoutes(app: Express, deps: { store: Store; db: LiveChatDb; hub: LiveChatHub }) {
+  const { store, db, hub } = deps;
 
   app.post('/api/v1/live-chat/sessions', optionalAuth(store), rateLimit('live-chat-session', 8, 300), async (req, res, next) => {
     try {
       const input = parse(sessionInput, req.body);
       const token = randomBytes(32).toString('base64url');
-      const ticket = await store.createSupportTicket({
-        ...input,
+      const time = now();
+      const ticket: SupportTicket = {
+        id: randomUUID(),
+        name: input.name,
         mobile: input.mobile || '',
         email: input.email || '',
+        subject: input.subject,
         userId: req.user?.id,
         source: 'live_chat',
         chatAccessHash: hashChatToken(token),
+        status: 'open',
+        priority: 'normal',
         adminUnread: 1,
         customerUnread: 0,
-        lastMessageAt: now(),
-        status: 'open',
-        priority: 'normal'
-      });
+        lastMessageAt: time,
+        createdAt: time,
+        updatedAt: time
+      };
+      await db.createSession(ticket);
       await store.audit('live_chat.session_created', { userId: req.user?.id, ip: req.ip, userAgent: req.get('user-agent')?.slice(0, 500), metadata: { ticketId: ticket.id } });
       hub.emitInbox(ticket, 'conversation_created');
       res.status(201).json({ session: publicTicket(ticket), token });
@@ -227,21 +331,21 @@ export function registerLiveChatRoutes(app: Express, deps: { store: Store; hub: 
 
   app.get('/api/v1/live-chat/sessions/:id/messages', rateLimit('live-chat-history', 60, 60), async (req, res, next) => {
     try {
-      const ticket = await store.findSupportTicket(String(req.params.id));
+      const ticket = await db.findSession(String(req.params.id));
       if (!ticket || ticket.source !== 'live_chat' || !verifyChatToken(chatTokenFromRequest(req), ticket.chatAccessHash)) throw new AppError(403, 'CHAT_ACCESS_DENIED', 'This chat session is not available');
-      await store.markSupportRead(ticket.id, 'customer');
-      res.json({ session: publicTicket(ticket), messages: await store.listSupportMessages(ticket.id) });
+      await db.markRead(ticket.id, 'customer');
+      res.json({ session: publicTicket(ticket), messages: await db.listMessages(ticket.id) });
     } catch (error) { next(error); }
   });
 
   app.post('/api/v1/live-chat/sessions/:id/messages', rateLimit('live-chat-message', 30, 60), async (req, res, next) => {
     try {
-      const ticket = await store.findSupportTicket(String(req.params.id));
+      const ticket = await db.findSession(String(req.params.id));
       if (!ticket || ticket.source !== 'live_chat' || !verifyChatToken(chatTokenFromRequest(req), ticket.chatAccessHash)) throw new AppError(403, 'CHAT_ACCESS_DENIED', 'This chat session is not available');
       const input = parse(messageInput, req.body);
-      const message = await store.createSupportMessage({ ticketId: ticket.id, authorId: ticket.userId, authorType: 'customer', message: input.message, internal: false });
-      const updated = (await store.incrementSupportUnread(ticket.id, 'admin')) || ticket;
-      await store.updateSupportTicket(ticket.id, { status: 'pending', lastMessageAt: message.createdAt });
+      const message = await db.createMessage({ ticketId: ticket.id, authorId: ticket.userId, authorType: 'customer', message: input.message, internal: false });
+      const updated = (await db.incrementUnread(ticket.id, 'admin')) || ticket;
+      await db.updateSession(ticket.id, { status: 'pending', lastMessageAt: message.createdAt });
       hub.emitMessage(ticket.id, message);
       hub.emitInbox({ ...updated, status: 'pending', lastMessageAt: message.createdAt });
       res.status(201).json({ message });
@@ -249,27 +353,30 @@ export function registerLiveChatRoutes(app: Express, deps: { store: Store; hub: 
   });
 
   app.get('/api/v1/admin/live-chat', requireFinePermission(store, 'support.view'), async (_req, res) => {
-    const conversations = await store.listSupportTickets({ source: 'live_chat' });
+    const conversations = await db.listSessions();
     res.json({ conversations: conversations.map(publicTicket), unread: conversations.reduce((sum, ticket) => sum + Number(ticket.adminUnread || 0), 0) });
   });
 
   app.get('/api/v1/admin/live-chat/:id', requireFinePermission(store, 'support.view'), async (req, res, next) => {
     try {
-      const ticket = await store.findSupportTicket(String(req.params.id));
-      if (!ticket || ticket.source !== 'live_chat') throw new AppError(404, 'CHAT_NOT_FOUND', 'Chat session not found');
-      const updated = (await store.markSupportRead(ticket.id, 'admin')) || ticket;
-      res.json({ conversation: publicTicket(updated), messages: await store.listSupportMessages(ticket.id) });
+      const ticket = await db.findSession(String(req.params.id));
+      if (!ticket) throw new AppError(404, 'CHAT_NOT_FOUND', 'Chat session not found');
+      const updated = (await db.markRead(ticket.id, 'admin')) || ticket;
+      const named = updated.assignedTo && !updated.assignedToName
+        ? { ...updated, assignedToName: (await store.findUserById(updated.assignedTo))?.fullName }
+        : updated;
+      res.json({ conversation: publicTicket(named), messages: await db.listMessages(ticket.id) });
     } catch (error) { next(error); }
   });
 
   app.post('/api/v1/admin/live-chat/:id/messages', requireFinePermission(store, 'support.reply'), async (req, res, next) => {
     try {
-      const ticket = await store.findSupportTicket(String(req.params.id));
-      if (!ticket || ticket.source !== 'live_chat') throw new AppError(404, 'CHAT_NOT_FOUND', 'Chat session not found');
+      const ticket = await db.findSession(String(req.params.id));
+      if (!ticket) throw new AppError(404, 'CHAT_NOT_FOUND', 'Chat session not found');
       const input = parse(messageInput, req.body);
-      const message = await store.createSupportMessage({ ticketId: ticket.id, authorId: req.user!.id, authorType: 'admin', message: input.message, internal: false });
-      const updated = (await store.incrementSupportUnread(ticket.id, 'customer')) || ticket;
-      await store.updateSupportTicket(ticket.id, { status: 'waiting_customer', assignedTo: ticket.assignedTo || req.user!.id, lastMessageAt: message.createdAt });
+      const message = await db.createMessage({ ticketId: ticket.id, authorId: req.user!.id, authorType: 'admin', message: input.message, internal: false });
+      const updated = (await db.incrementUnread(ticket.id, 'customer')) || ticket;
+      await db.updateSession(ticket.id, { status: 'waiting_customer', assignedTo: ticket.assignedTo || req.user!.id, lastMessageAt: message.createdAt });
       hub.emitMessage(ticket.id, message);
       hub.emitInbox({ ...updated, status: 'waiting_customer', assignedTo: ticket.assignedTo || req.user!.id, lastMessageAt: message.createdAt });
       await store.audit('live_chat.admin_replied', { userId: req.user!.id, ip: req.ip, userAgent: req.get('user-agent')?.slice(0, 500), metadata: { ticketId: ticket.id, messageId: message.id } });
