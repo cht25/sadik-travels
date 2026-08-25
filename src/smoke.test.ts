@@ -139,7 +139,9 @@ if (!testMongoUri) {
       const createdTour = await fetch(`${base}/api/v1/admin/tours`, { method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' }, body: JSON.stringify({ slug: `umrah-smoke-${Date.now()}`, title: 'Umrah Smoke Package', country: 'Saudi Arabia', tourType: 'Umrah', destinations: ['Makkah', 'Madinah'], durationDays: 10, durationNights: 9, description: 'Published package for the smoke test.', imageUrl: '', metadata: {}, priceBdt: 125000, status: 'published', featured: true }) });
       const { body: tourPayload } = await responseJson(createdTour);
       assert.equal(createdTour.status, 201);
-      assert.equal((await fetch(`${base}/api/v1/tours`)).status, 200);
+      const publicTours = await fetch(`${base}/api/v1/tours`);
+      assert.equal(publicTours.status, 200);
+      assert.equal((await publicTours.json()).tours.some((tour: any) => tour.id === tourPayload.tour.id), true, 'a published admin tour must be visible in the public tour catalogue');
 
       const createdAgent = await fetch(`${base}/api/v1/admin/travel-agents`, { method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' }, body: JSON.stringify({ fullName: 'Sadik Travels Agent', jobTitle: 'Umrah Specialist', phone: '+8801700000000', email: `agent-${Date.now()}@example.com`, officeLocation: 'Dhaka', shortBio: 'Experienced travel consultant.', fullDescription: 'Full public agent profile.', languages: ['Bangla', 'English'], experienceYears: 8, status: 'active', featured: true, displayOrder: 0 }) });
       const { body: agentPayload } = await responseJson(createdAgent);
