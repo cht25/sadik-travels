@@ -415,7 +415,10 @@ async function connectVisitorChat(session) {
   liveChatSession = session;
   if (!window.io) { try { const response = await apiRequest(`/live-chat/sessions/${session.id}/messages`, { headers: { 'x-chat-token': session.token } }, false); renderLiveChatConversation(session, response.messages || []); $('#visitorChatStatus').textContent = 'Connected'; } catch (error) { $('#visitorChatStatus').textContent = 'Connection unavailable'; showToast(error.message, 'error'); } return; }
   if (liveChatSocket) liveChatSocket.disconnect();
-  liveChatSocket = window.io({ path: '/socket.io', transports: ['websocket', 'polling'] });
+  liveChatSocket = window.io({ path: '/socket.io', transports: ['websocket', 'polling'], reconnectionAttempts: 5, timeout: 10000 });
+  let visitorSocketErrorLogged = false;
+  liveChatSocket.on('connect_error', error => { if (!visitorSocketErrorLogged) { visitorSocketErrorLogged = true; console.warn('Live chat socket unavailable — falling back to REST messaging.', error?.message || error); } });
+  liveChatSocket.on('connect_timeout', () => { if (!visitorSocketErrorLogged) { visitorSocketErrorLogged = true; console.warn('Live chat socket connection timed out — falling back to REST messaging.'); } });
   liveChatSocket.on('connect', () => { $('#visitorChatStatus') && ($('#visitorChatStatus').textContent = 'Online'); liveChatSocket.emit('join_chat_room', { sessionId: session.id, token: session.token }, result => { if (result?.ok) renderLiveChatConversation(session, result.messages || []); else { $('#visitorChatStatus') && ($('#visitorChatStatus').textContent = 'Unable to join'); showToast(result?.error?.message || 'Unable to join this chat.', 'error'); } }); });
   liveChatSocket.on('disconnect', () => { $('#visitorChatStatus') && ($('#visitorChatStatus').textContent = 'Reconnecting…'); });
   liveChatSocket.on('chat_message', appendLiveChatMessage);
