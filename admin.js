@@ -13,6 +13,23 @@ const MOBILE_BREAKPOINT = 760;
 const state = { currentAdmin: null, permissions: new Set(), finePermissions: new Set(), isSuperAdmin: false, liveUnread: 0, chatSocket: null, services: [], unsaved: false, routeRequest: 0, otpChallengeId: '', otpTimer: null, adminOtpTimer: null, pendingHref: '', lastUrl: '', previousBodyOverflow: null, previousBodyPaddingRight: null, mobileDrawerOpen: false };
 const ALL_ADMIN_ROLES = ['admin', 'manager', 'super_admin', 'support', 'content_manager', 'finance', 'staff', 'hotel_owner', 'home_owner', 'travel_agent'];
 const CONTENT_TYPES = ['homepage','destination','hotel','home','offer','banner','faq','company','holiday_package','explore'];
+/* Product/content types of removed verticals (Umrah fare/package, eSIM, visa,
+   flights, medical tourism, card & airline offers). The server purges and
+   filters these already; this mirror stops a stale cached API response from
+   rendering one in the sidebar. Kept in sync with src/legacy-purge.ts. */
+const RETIRED_VERTICAL_TYPES = ['umrah_fare','umrah_package','umrah','esim','medical_tourism','visa','visa_service','card_offer','airline_offer','airline','flight_offer','flight','accessory','app'];
+const RETIRED_NAV_ROUTES = new Set(['/admin/audit-logs','/admin/users','/admin/campaigns','/admin/campaign-templates','/admin/campaigns/templates','/admin/segments','/admin/customers/segments','/admin/visa-applications','/admin/flights','/admin/visa','/admin/esim','/admin/explore','/admin/umrah','/admin/umrah-fair','/admin/umrah-fare','/admin/umrah-packages']);
+const RETIRED_NAV_LABEL_PATTERN = /umrah|medical\s*tourism|e-?sim|visa|flight|card\s*offer|airline\s*offer/i;
+function isRetiredNavItem(item) {
+  if (!item) return false;
+  const route = String(item.route || '');
+  const [basePath, queryString = ''] = route.split('?');
+  if (RETIRED_NAV_ROUTES.has(basePath)) return true;
+  const type = new URLSearchParams(queryString).get('type');
+  if (type && RETIRED_VERTICAL_TYPES.includes(type)) return true;
+  if (/(^|\/)umrah([/_-]|$)/i.test(basePath)) return true;
+  return RETIRED_NAV_LABEL_PATTERN.test(String(item.label || ''));
+}
 const $admin = (path, options = {}, canRefresh = true) => window.SadikApi.request(path, options, canRefresh);
 
 function escapeAttr(value) { return escapeHtml(value).replace(/`/g, '&#96;'); }
@@ -91,6 +108,7 @@ function bindAuth() {
 
 function hasFineNav(value){ return value && state.finePermissions && state.finePermissions.has(String(value).replace(/_/g,'.')); }
 async function loadNavigation() { const response = await safeRequest('/admin/navigation'); if (isError(response)) return false; const items = response.navigation || []; const grouped = new Map(); items.filter(item => {
+      if (isRetiredNavItem(item)) return false;
       if (!item.visible || !item.enabled) return false;
       if (state.isSuperAdmin) return true;
       if (!item.permission || hasPermission(item.permission) || hasFineNav(item.permission) || hasFineNav(item.route)) return true;
