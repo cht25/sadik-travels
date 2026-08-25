@@ -26,6 +26,7 @@ import { registerCommerceRoutes } from './commerce-routes.js';
 import { registerAnalyticsRoutes, trackEvent } from './analytics.js';
 import { registerPaymentGatewayRoutes } from './payment-gateway-routes.js';
 import { LiveChatHub, registerLiveChatRoutes } from './live-chat.js';
+import { createLiveChatDb } from './live-chat-db.js';
 
 const verticalSchema = z.enum(['tour']);
 const tourStatusSchema = z.enum(['draft', 'published', 'archived']);
@@ -123,7 +124,10 @@ export function buildApp() {
   const media = new MediaService();
   const hotelStore = createHotelStore();
   const commerce = createCommerceStore();
-  const liveChat = new LiveChatHub(store);
+  // Live chat conversations and transcripts live in Firebase Realtime Database
+  // when configured; otherwise they fall back to the MongoDB support collections.
+  const liveChatDb = createLiveChatDb(store);
+  const liveChat = new LiveChatHub(store, liveChatDb);
   connection.then(async () => {
     try { await hotelStore.ensureIndexes(); } catch { /* index creation is best-effort */ }
     try { await commerce.ensureIndexes(); } catch { /* index creation is best-effort */ }
@@ -150,7 +154,7 @@ export function buildApp() {
     next();
   });
 
-  registerLiveChatRoutes(app, { store, hub: liveChat });
+  registerLiveChatRoutes(app, { store, db: liveChatDb, hub: liveChat });
 
   app.get(['/healthz', '/api/health'], async (_req, res, next) => { try { const healthy = await store.health(); assert(healthy, 503, 'NOT_READY', 'Database is not connected'); res.json({ status: 'ok', ok: true, service: 'sadik-travels-api', database: 'connected', env: config.nodeEnv }); } catch (error) { next(error instanceof AppError ? error : new AppError(503, 'NOT_READY', 'Service dependencies are not ready', config.isProduction ? undefined : error)); } });
   app.get(['/readyz', '/api/ready'], async (_req, res, next) => { try { const healthy = await store.health(); assert(healthy, 503, 'NOT_READY', 'Database is not connected'); res.json({ ok: true, database: 'mongodb' }); } catch (error) { next(error instanceof AppError ? error : new AppError(503, 'NOT_READY', 'Service dependencies are not ready', config.isProduction ? undefined : error)); } });

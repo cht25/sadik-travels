@@ -62,6 +62,11 @@ export const config = {
   firebaseAuthDomain: env('FIREBASE_AUTH_DOMAIN'),
   firebaseAppId: env('FIREBASE_APP_ID'),
   firebaseMeasurementId: env('FIREBASE_MEASUREMENT_ID'),
+  // Firebase Realtime Database — live chat conversations and transcripts.
+  // When set (together with the service account above), live chat is stored in
+  // and served from Realtime Database. Blank falls back to the project default
+  // (https://<FIREBASE_PROJECT_ID>-default-rtdb.firebaseio.com) or MongoDB.
+  firebaseDatabaseUrl: env('FIREBASE_DATABASE_URL'),
   devOtpEcho: isTrue(process.env.DEV_OTP_ECHO, false),
   logLevel: env('LOG_LEVEL', 'info'),
   publicDir: process.cwd()
@@ -76,6 +81,11 @@ export function validateConfig() {
   if (firebaseServer.some(Boolean) && !firebaseServer.every(Boolean)) throw new Error('FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY must be provided together');
   const firebaseWeb = [config.firebaseApiKey, config.firebaseAuthDomain];
   if (firebaseWeb.some(Boolean) && !firebaseWeb.every(Boolean)) throw new Error('FIREBASE_API_KEY and FIREBASE_AUTH_DOMAIN must be provided together');
+  if (config.firebaseDatabaseUrl) {
+    let firebaseDbUrl: URL;
+    try { firebaseDbUrl = new URL(config.firebaseDatabaseUrl); } catch { throw new Error('FIREBASE_DATABASE_URL must be a valid URL, e.g. https://<project>-default-rtdb.firebaseio.com'); }
+    if (firebaseDbUrl.protocol !== 'https:') throw new Error('FIREBASE_DATABASE_URL must use HTTPS');
+  }
   if (!Number.isInteger(config.smtpPort) || config.smtpPort < 1 || config.smtpPort > 65535) throw new Error('SMTP_PORT must be a valid TCP port');
   if (!Number.isInteger(config.mediaMaxUploadBytes) || config.mediaMaxUploadBytes < 1_000_000 || config.mediaMaxUploadBytes > 25_000_000) throw new Error('MEDIA_MAX_UPLOAD_BYTES must be between 1MB and 25MB');
   if (!Number.isInteger(config.mediaTimeoutMs) || config.mediaTimeoutMs < 1000 || config.mediaTimeoutMs > 120000) throw new Error('MEDIA_TIMEOUT_MS must be between 1000 and 120000');

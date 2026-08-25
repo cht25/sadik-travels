@@ -25,7 +25,7 @@ Hotels, homes and villas, tours, holiday packages, destination discovery, verifi
 - Permission-filtered dashboard, bookings, customers, payments and catalogue operations
 - Super Admin account management with deny-by-default vendor roles (`HOTEL_OWNER`, `HOME_OWNER`, `TRAVEL_AGENT`)
 - Owner-scoped hotel CRUD, room inventory, current pricing, seasonal discounts, availability and Cloudinary galleries
-- Dual-pane Live Support Inbox with Socket.IO updates, unread badges, sound alerts and MongoDB transcripts
+- Dual-pane Live Support Inbox with Socket.IO updates, unread badges, sound alerts and Firebase Realtime Database transcripts (MongoDB fallback)
 - Support tickets, tours, homes, holiday packages, destinations, travel agents and website content
 - Cloudinary media library and encrypted integration settings
 - A production-only sidebar generated from each account’s assigned permissions
@@ -119,6 +119,15 @@ Authorization rules for the Google account that signs in:
 - Otherwise, if the email is listed in `ADMIN_IDENTITIES` (comma-separated), the account is granted `admin`.
 - An existing admin account with a matching email is signed in regardless of the whitelist.
 
+### Live chat (Firebase Realtime Database)
+
+Live chat conversations and transcripts are stored in **Firebase Realtime Database** when the Firebase service account is configured. The server writes through the Firebase Admin SDK and subscribes to the chat nodes (`live-chat/sessions`, `live-chat/messages`), relaying every change to the Socket.IO rooms — so Realtime Database is the real-time event source and updates made from any server instance (or the Firebase console) reach connected visitors and admins immediately. Visitors still authenticate with the existing per-session chat token; the browser never talks to the Realtime Database directly.
+
+- Set `FIREBASE_DATABASE_URL` to your database's web API URL, or leave it blank to use the project default (`https://<FIREBASE_PROJECT_ID>-default-rtdb.firebaseio.com`).
+- Enable Realtime Database in the Firebase console (the default instance is created automatically for new projects).
+- Lock the security rules so no browser/client can read or write the chat data directly — the Admin SDK bypasses rules, which is all the app needs: `{ "rules": { ".read": false, ".write": false } }`.
+- Without Firebase credentials the app falls back to the MongoDB `support_tickets`/`support_messages` collections automatically, so local development works without any Firebase setup.
+
 ## MongoDB
 
 Set a managed MongoDB connection string:
@@ -165,6 +174,7 @@ Use `render.yaml` as a starting point. Configure these values in Render's secret
 - Travel provider and payment gateway credentials
 - `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` for the super-admin bootstrap (also repairs a broken/missing password hash at startup)
 - `FIREBASE_*` credentials for Google admin sign-in
+- `FIREBASE_DATABASE_URL` (optional) — live chat Realtime Database URL; the project default is used when blank
 
 The Render service is stateless: MongoDB stores application data, and Cloudinary stores images. No Render disk is required.
 
@@ -195,7 +205,9 @@ TEST_MONGODB_URI='mongodb+srv://…/sadik_travels_test' npm test
   granular permissions assigned by a Super Admin.
 - **Live support** — visitors initialize a token-protected Socket.IO room and
   exchange messages with the dual-pane Admin Live Support Inbox. Transcripts,
-  unread counters and assignment state are persisted in MongoDB.
+  unread counters and assignment state are persisted in Firebase Realtime
+  Database (MongoDB fallback) and fanned out to sockets from the database
+  subscription.
 - **Payment safety** — gateway IPNs are idempotent, totals are calculated on the
   server and customer payment history uses the persisted ledger.
 - **SEO/PWA** — live sitemap, robots policy, structured data and network-first
