@@ -24,7 +24,7 @@ const hotelInputSchema = z.object({
   amenities: z.array(z.string().max(80)).default([]), facilities: z.array(z.string().max(80)).default([]), images: z.array(imageSchema).default([]),
   roomTypes: z.array(z.string().trim().min(1).max(120)).max(50).default([]), pricePerNight: z.number().nonnegative().max(1000000).optional(), seasonalDiscounts: z.array(seasonalDiscountSchema).max(30).default([]), available: z.boolean().default(true), ownerId: z.string().uuid().optional(),
   checkInTime: z.string().max(20).optional(), checkOutTime: z.string().max(20).optional(), cancellationPolicy: cancellationSchema.optional(),
-  status: z.enum(['draft', 'active', 'hidden', 'archived']).default('draft'), featured: z.boolean().default(false), sortOrder: z.number().int().min(-100000).max(100000).default(0)
+  status: z.enum(['draft', 'active', 'hidden', 'archived']).default('active'), featured: z.boolean().default(false), sortOrder: z.number().int().min(-100000).max(100000).default(0)
 });
 const roomInputSchema = z.object({
   name: z.string().trim().min(2).max(160), slug: z.string().trim().min(2).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9-]+)*$/), description: z.string().max(3000).optional(),

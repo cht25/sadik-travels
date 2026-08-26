@@ -81,18 +81,30 @@ export function registerPaymentGatewayRoutes(app: Express, deps: { store: Store;
       const booking = await store.findBooking(input.bookingId, userId);
       if (!booking) throw new AppError(404, 'BOOKING_NOT_FOUND', 'Booking not found');
       const request = (booking.request && typeof booking.request === 'object') ? booking.request as Record<string, any> : {};
-      let amount = Number(request.quotedTotal || 0);
-      if (!amount && booking.vertical === 'tour') {
+      // Always recompute the payable amount from the persisted tour record.
+      // The browser's quotedTotal / priceBdt is never trusted as the payment
+      // amount; it is only used for a consistent customer preview.
+      let amount = 0;
+      if (booking.vertical === 'tour') {
         const tour = request.tourId ? await store.findTour(String(request.tourId)) : undefined;
-        const adults = Number(request.adults || request.travellers || 1);
+        if (!tour || tour.status !== 'published') throw new AppError(409, 'TOUR_NOT_AVAILABLE', 'This tour package is no longer available');
+        const meta = (tour.metadata || {}) as Record<string, any>;
+        const adults = Math.max(1, Math.min(60, Number(request.adults || request.travellers || 1)));
+        const children = Math.max(0, Math.min(30, Number(request.children || 0)));
+        const infants = Math.max(0, Math.min(15, Number(request.infants || 0)));
         const quote = computeTourQuote({
-          adultPrice: Number(tour?.priceBdt || request.priceBdt || 0),
-          childPrice: Number(request.childPrice || 0) || undefined,
-          infantPrice: Number(request.infantPrice || 0) || undefined,
-          seasonSurchargePct: Number((tour?.metadata as any)?.seasonSurchargePct || 0) || undefined,
+          adultPrice: Number(tour.priceBdt || 0),
+          childPrice: Number(meta.childPrice) || undefined,
+          infantPrice: Number(meta.infantPrice) || undefined,
+          seasonSurchargePct: Number(meta.seasonSurchargePct) || undefined,
           vatPct: BD_VAT_PCT, aitPct: BD_AIT_PCT
-        }, { adults, children: Number(request.children || 0), infants: Number(request.infants || 0) });
-        amount = quote.total;
+        }, { adults, children, infants });
+        let discount = 0;
+        const promoCode = String(request.promoCode || '').trim();
+        if (promoCode && String(meta.promoCode || '').toUpperCase() === promoCode.toUpperCase()) {
+          discount = Math.round(quote.baseFare * (Number(meta.promoPct || 10) / 100));
+        }
+        amount = Math.max(0, quote.total - discount);
       }
       if (!amount || amount <= 0) throw new AppError(409, 'BOOKING_NOT_QUOTED', 'This booking has no verified quote yet');
       const paymentRecord = await store.createPayment({

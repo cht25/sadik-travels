@@ -13,6 +13,7 @@ import { verifyFirebaseIdToken, firebasePublicConfig, isFirebaseConfigured } fro
 import { AppError, assert } from './errors.js';
 import { createStore, type Store, type TourFilters, type CreateTour, type UpdateTour, type BookingStatus, type Booking, type ContentType, type ContentStatus } from './store.js';
 import { hashOtp, hashPassword, issueSession, normalizeIdentity, setAuthCookies, clearAuthCookies, verifyOtpHash, verifyPassword, verifyToken, REFRESH_COOKIE } from './security.js';
+import { computeTourQuote, BD_VAT_PCT, BD_AIT_PCT } from './booking-schema.js';
 import { MessagingProvider, PaymentProvider } from './providers.js';
 import { optionalAuth, requireAuth, requireAdmin, requireFinePermission, requireInternalOperator, requireSuperAdmin, permissionsFor, notFound, requestContext } from './middleware.js';
 import { effectiveFinePermissions, sanitizePermissions, PERMISSION_CATALOG, ALL_FINE_PERMISSIONS } from './permissions.js';
@@ -37,8 +38,17 @@ const tourInputSchema = z.object({ slug: z.string().trim().min(3).max(160).regex
 const tourPatchSchema = tourInputSchema.partial();
 const identityRequest = z.object({ identity: z.string().min(3).max(160), fullName: z.string().trim().min(2).max(100).optional(), adminOnly: z.boolean().default(false) });
 const verifyOtpRequest = z.object({ challengeId: z.string().uuid(), code: z.string().regex(/^\d{6}$/, 'OTP must be a 6 digit code') });
+const isValidIsoDate = (value: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const [, year, month, day] = match.map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+};
 const bookingRequest = z.object({ vertical: verticalSchema, payload: z.unknown() });
-const tourBookingPayload = z.object({ tourId: z.string().uuid(), travellers: z.number().int().min(1).max(30), travelDate: z.string().min(8).max(30) }).passthrough();
+const isoDateSchema = z.string().refine(isValidIsoDate, 'Travel date must be a valid date')
+  .refine(value => Date.parse(`${value}T00:00:00Z`) >= Date.parse(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`), 'Travel date cannot be in the past');
+const tourBookingPayload = z.object({ tourId: z.string().uuid(), travellers: z.number().int().min(1).max(30), travelDate: isoDateSchema }).passthrough();
 const paymentRequest = z.object({ bookingId: z.string().uuid() });
 const supportRequest = z.object({ name: z.string().trim().min(2).max(120), mobile: z.string().trim().min(7).max(30), email: z.string().email(), subject: z.string().trim().min(2).max(180) });
 const supportPatchRequest = z.object({ status: z.enum(['open', 'pending', 'in_progress', 'waiting_customer', 'resolved', 'closed']).optional(), priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(), assignedTo: z.string().uuid().nullable().optional() }).strict();
@@ -87,11 +97,29 @@ const clientMeta = (req: Request) => ({ ip: req.ip, userAgent: req.get('user-age
 const sanitizeEmailHtml = (value?: string) => value?.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<iframe[\s\S]*?<\/iframe>/gi,'').replace(/<object[\s\S]*?<\/object>/gi,'').replace(/<embed[^>]*>/gi,'').replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi,'').replace(/javascript:/gi,'') || undefined;
 const errorPageHtml = (status: number) => { const copy: Record<number, [string, string]> = { 403: ['Access restricted', 'You do not have permission to view this page.'], 404: ['Page not found', 'The page you are looking for does not exist or has moved.'], 503: ['Temporarily unavailable', 'We are having trouble reaching a required service. Please try again shortly.'], 500: ['Something went wrong', 'We are having trouble loading this page. Please try again.'] }; const [title, message] = copy[status] || copy[500]; return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Sadik Travels</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f7fb;color:#17253b;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}.card{width:min(460px,calc(100% - 36px));padding:38px 30px;text-align:center;background:#fff;border:1px solid #e3e8f0;border-radius:18px;box-shadow:0 24px 70px rgba(16,36,80,.12)}.code{font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:#1438b8;font-weight:800}.logo{width:72px;height:55px;object-fit:contain}.card h1{font-size:28px;line-height:1.2;margin:14px 0 8px}.card p{color:#68758a;font-size:13px;line-height:1.6;margin:0 auto 24px}.actions{display:flex;justify-content:center;gap:9px;flex-wrap:wrap}.actions a{display:inline-flex;padding:10px 16px;border-radius:8px;text-decoration:none;font-size:12px;font-weight:800;border:1px solid #cbd5e4;color:#17253b}.actions a.primary{background:#1438b8;border-color:#1438b8;color:#fff}</style></head><body><main class="card"><img class="logo" src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels"><div class="code">Error ${status}</div><h1>${title}</h1><p>${message}</p><div class="actions"><a class="primary" href="/">Go home</a><a href="/">Try again</a></div></main></body></html>`; };
 const isPublicContentLive = (item: any) => { const startsAt=item.metadata?.startsAt; const expiresAt=item.metadata?.expiresAt; const nowMs=Date.now(); return (!startsAt || Number.isNaN(Date.parse(String(startsAt))) || Date.parse(String(startsAt))<=nowMs) && (!expiresAt || Number.isNaN(Date.parse(String(expiresAt))) || Date.parse(String(expiresAt))>nowMs); };
-const trustedBookingQuote = (booking: Booking): { amount: number; currency: string } | undefined => {
+const trustedBookingQuote = async (store: Store, booking: Booking): Promise<{ amount: number; currency: string } | undefined> => {
   const request = booking.request && typeof booking.request === 'object' ? booking.request as Record<string, unknown> : {};
   if (booking.vertical === 'tour') {
-    const price = Number(request.priceBdt); const travellers = Number(request.travellers || 1);
-    if (Number.isFinite(price) && price > 0 && Number.isInteger(travellers) && travellers > 0) return { amount: price * travellers, currency: 'BDT' };
+    const tour = request.tourId ? await store.findTour(String(request.tourId)) : undefined;
+    if (!tour || tour.status !== 'published') return undefined;
+    const meta = (tour.metadata || {}) as Record<string, any>;
+    const adults = Math.max(1, Math.min(60, Number(request.adults || request.travellers || 1)));
+    const children = Math.max(0, Math.min(30, Number(request.children || 0)));
+    const infants = Math.max(0, Math.min(15, Number(request.infants || 0)));
+    const quote = computeTourQuote({
+      adultPrice: Number(tour.priceBdt || 0),
+      childPrice: Number(meta.childPrice) || undefined,
+      infantPrice: Number(meta.infantPrice) || undefined,
+      seasonSurchargePct: Number(meta.seasonSurchargePct) || undefined,
+      vatPct: BD_VAT_PCT, aitPct: BD_AIT_PCT
+    }, { adults, children, infants });
+    let discount = 0;
+    const promoCode = String(request.promoCode || '').trim();
+    if (promoCode && String(meta.promoCode || '').toUpperCase() === promoCode.toUpperCase()) {
+      discount = Math.round(quote.baseFare * (Number(meta.promoPct || 10) / 100));
+    }
+    const amount = Math.max(0, quote.total - discount);
+    return Number.isFinite(amount) && amount > 0 ? { amount, currency: 'BDT' } : undefined;
   }
   const response = booking.response && typeof booking.response === 'object' ? booking.response as Record<string, any> : {};
   const total = response.total && typeof response.total === 'object' ? response.total as Record<string, unknown> : {};
@@ -409,13 +437,13 @@ export function buildApp() {
   app.post('/api/v1/admin/tickets/:id/messages', requireFinePermission(store, 'support.reply'), async (req, res) => { const input = toInput(supportMessageRequest, req.body); const ticket = await store.findSupportTicket(String(req.params.id)); assert(ticket, 404, 'TICKET_NOT_FOUND', 'Support ticket not found'); const message = await store.createSupportMessage({ ticketId: ticket.id, authorId: req.user!.id, authorType: 'admin', message: input.message, internal: input.internal }); await store.audit('admin.ticket_message_added', { ...clientMeta(req), userId: req.user!.id, metadata: { ticketId: ticket.id, internal: input.internal } }); res.status(201).json({ message }); });
 
   app.get('/api/v1/admin/content', requireFinePermission(store, 'content.view'), async (req, res) => { const type = contentTypeSchema.safeParse(String(req.query.type || '')); const status = contentStatusSchema.safeParse(String(req.query.status || '')); res.json({ content: await store.listContent({ type: type.success ? type.data : 'all', status: status.success ? status.data : 'all', q: req.query.q ? String(req.query.q) : undefined, includeArchived: true }) }); });
-  app.post('/api/v1/admin/content', requireFinePermission(store, 'offer.create'), async (req, res) => { assertPrivileged(req); const input = toInput(contentInputSchema, req.body); const item = await store.createContent({ ...input, createdBy: req.user!.id }); await store.audit('admin.content_created', { ...clientMeta(req), userId: req.user!.id, metadata: { contentId: item.id, type: item.type } }); res.status(201).json({ content: item }); });
-  app.patch('/api/v1/admin/content/:id', requireFinePermission(store, 'offer.update'), async (req, res) => { assertPrivileged(req); const input = toInput(contentPatchSchema, req.body); const item = await store.updateContent(String(req.params.id), input); assert(item, 404, 'CONTENT_NOT_FOUND', 'Content item not found'); await store.audit('admin.content_updated', { ...clientMeta(req), userId: req.user!.id, metadata: { contentId: item.id, type: item.type } }); res.json({ content: item }); });
-  app.delete('/api/v1/admin/content/:id', requireFinePermission(store, 'offer.delete'), async (req, res) => { assertPrivileged(req); const item = await store.archiveContent(String(req.params.id)); assert(item, 404, 'CONTENT_NOT_FOUND', 'Content item not found'); await store.audit('admin.content_archived', { ...clientMeta(req), userId: req.user!.id, metadata: { contentId: item.id } }); res.json({ content: item }); });
-  app.post('/api/v1/admin/content/:id/publish', requireFinePermission(store, 'offer.update'), async (req,res)=>{ assertPrivileged(req); const content=await store.updateContent(String(req.params.id),{status:'published'}); assert(content,404,'CONTENT_NOT_FOUND','Content item not found'); await store.audit('admin.content_published',{...clientMeta(req),userId:req.user!.id,metadata:{contentId:content.id}}); res.json({content}); });
-  app.post('/api/v1/admin/content/:id/unpublish', requireFinePermission(store, 'offer.update'), async (req,res)=>{ assertPrivileged(req); const content=await store.updateContent(String(req.params.id),{status:'draft'}); assert(content,404,'CONTENT_NOT_FOUND','Content item not found'); await store.audit('admin.content_unpublished',{...clientMeta(req),userId:req.user!.id,metadata:{contentId:content.id}}); res.json({content}); });
-  app.post('/api/v1/admin/content/:id/restore', requireFinePermission(store, 'offer.update'), async (req,res)=>{ assertPrivileged(req); const content=await store.updateContent(String(req.params.id),{status:'draft'}); assert(content,404,'CONTENT_NOT_FOUND','Content item not found'); await store.audit('admin.content_restored',{...clientMeta(req),userId:req.user!.id,metadata:{contentId:content.id}}); res.json({content}); });
-  app.delete('/api/v1/admin/content/:id/permanent', requireFinePermission(store, 'offer.delete'), async (req,res)=>{ assertPrivileged(req); const current=await store.findContent(String(req.params.id)); assert(current?.status==='archived',409,'CONTENT_NOT_ARCHIVED','Archive content before permanent deletion'); const deleted=await store.deleteContent(String(req.params.id)); assert(deleted,404,'CONTENT_NOT_FOUND','Content item not found'); await store.audit('admin.content_deleted',{...clientMeta(req),userId:req.user!.id,metadata:{contentId:String(req.params.id)}}); res.status(204).send(); });
+  app.post('/api/v1/admin/content', requireFinePermission(store, 'offer.create'), async (req, res) => { const input = toInput(contentInputSchema, req.body); const item = await store.createContent({ ...input, createdBy: req.user!.id }); await store.audit('admin.content_created', { ...clientMeta(req), userId: req.user!.id, metadata: { contentId: item.id, type: item.type } }); res.status(201).json({ content: item }); });
+  app.patch('/api/v1/admin/content/:id', requireFinePermission(store, 'offer.update'), async (req, res) => { const input = toInput(contentPatchSchema, req.body); const item = await store.updateContent(String(req.params.id), input); assert(item, 404, 'CONTENT_NOT_FOUND', 'Content item not found'); await store.audit('admin.content_updated', { ...clientMeta(req), userId: req.user!.id, metadata: { contentId: item.id, type: item.type } }); res.json({ content: item }); });
+  app.delete('/api/v1/admin/content/:id', requireFinePermission(store, 'offer.delete'), async (req, res) => { const item = await store.archiveContent(String(req.params.id)); assert(item, 404, 'CONTENT_NOT_FOUND', 'Content item not found'); await store.audit('admin.content_archived', { ...clientMeta(req), userId: req.user!.id, metadata: { contentId: item.id } }); res.json({ content: item }); });
+  app.post('/api/v1/admin/content/:id/publish', requireFinePermission(store, 'offer.update'), async (req,res)=>{ const content=await store.updateContent(String(req.params.id),{status:'published'}); assert(content,404,'CONTENT_NOT_FOUND','Content item not found'); await store.audit('admin.content_published',{...clientMeta(req),userId:req.user!.id,metadata:{contentId:content.id}}); res.json({content}); });
+  app.post('/api/v1/admin/content/:id/unpublish', requireFinePermission(store, 'offer.update'), async (req,res)=>{ const content=await store.updateContent(String(req.params.id),{status:'draft'}); assert(content,404,'CONTENT_NOT_FOUND','Content item not found'); await store.audit('admin.content_unpublished',{...clientMeta(req),userId:req.user!.id,metadata:{contentId:content.id}}); res.json({content}); });
+  app.post('/api/v1/admin/content/:id/restore', requireFinePermission(store, 'offer.update'), async (req,res)=>{ const content=await store.updateContent(String(req.params.id),{status:'draft'}); assert(content,404,'CONTENT_NOT_FOUND','Content item not found'); await store.audit('admin.content_restored',{...clientMeta(req),userId:req.user!.id,metadata:{contentId:content.id}}); res.json({content}); });
+  app.delete('/api/v1/admin/content/:id/permanent', requireFinePermission(store, 'offer.delete'), async (req,res)=>{ const current=await store.findContent(String(req.params.id)); assert(current?.status==='archived',409,'CONTENT_NOT_ARCHIVED','Archive content before permanent deletion'); const deleted=await store.deleteContent(String(req.params.id)); assert(deleted,404,'CONTENT_NOT_FOUND','Content item not found'); await store.audit('admin.content_deleted',{...clientMeta(req),userId:req.user!.id,metadata:{contentId:String(req.params.id)}}); res.status(204).send(); });
 
   app.get('/api/v1/admin/media', requireFinePermission(store, 'media.view'), async (req, res) => res.json(await store.listMediaAssets({ q: req.query.q ? String(req.query.q) : undefined, folder: req.query.folder ? String(req.query.folder) : undefined, status: req.query.status === 'active' || req.query.status === 'archived' || req.query.status === 'failed' ? req.query.status : 'all', page: Number(req.query.page) || 1, pageSize: Number(req.query.pageSize) || 24 })));
   app.post('/api/v1/admin/media', requireFinePermission(store, 'media.upload'), rateLimit('media-upload', 20, 60), mediaUpload.single('file'), async (req, res) => { assert(req.file, 400, 'IMAGE_REQUIRED', 'Choose an image to upload'); const folder = toInput(mediaFolderSchema, String(req.body.folder || 'general')); const altText = typeof req.body.altText === 'string' ? req.body.altText : undefined; const uploaded = await media.upload(req.file.buffer, { folder, originalFilename: req.file.originalname, declaredMime: req.file.mimetype, altText }); let asset; try { asset = await store.createMediaAsset({ ...uploaded, status: 'active', uploadedBy: req.user!.id }); } catch (error) { await media.delete(uploaded.publicId).catch(() => undefined); throw error; } await store.audit('admin.media_uploaded', { ...clientMeta(req), userId: req.user!.id, metadata: { mediaId: asset.id, publicId: asset.publicId, folder: asset.folder } }); res.status(201).json({ media: asset }); });
@@ -430,7 +458,7 @@ export function buildApp() {
   app.patch('/api/v1/admin/travel-agents/:id', requireFinePermission(store, 'agent.update'), async (req,res)=>{const input=toInput(agentPatchSchema,req.body);const previous=await store.findTravelAgent(String(req.params.id));const agent=await store.updateTravelAgent(String(req.params.id),{...input,updatedBy:req.user!.id});assert(agent,404,'AGENT_NOT_FOUND','Travel agent not found');if(previous?.mediaId && input.mediaId && previous.mediaId!==input.mediaId && (await store.mediaReferenceCount(previous.mediaId))===0){const asset=await store.findMediaAsset(previous.mediaId);if(asset){await store.updateMediaAsset(asset.id,{status:'archived'});await media.delete(asset.publicId).catch(()=>undefined);}}await store.audit('admin.travel_agent_updated',{...clientMeta(req),userId:req.user!.id,metadata:{agentId:agent.id,keys:Object.keys(input)}});res.json({agent});});
   app.delete('/api/v1/admin/travel-agents/:id', requireFinePermission(store, 'agent.delete'), async (req,res)=>{const id=String(req.params.id);const current=await store.findTravelAgent(id);assert(current,404,'AGENT_NOT_FOUND','Travel agent not found');if(req.query.hard==='true'){assert(current.status==='archived',409,'AGENT_NOT_ARCHIVED','Archive the agent before permanent deletion');const deleted=await store.deleteTravelAgent(id);assert(deleted,409,'AGENT_DELETE_FAILED','Unable to delete travel agent');if(current.mediaId && (await store.mediaReferenceCount(current.mediaId))===0){const asset=await store.findMediaAsset(current.mediaId);if(asset){await store.updateMediaAsset(asset.id,{status:'archived'});await media.delete(asset.publicId).catch(()=>undefined);}}await store.audit('admin.travel_agent_deleted',{...clientMeta(req),userId:req.user!.id,metadata:{agentId:id}});return res.json({deleted:true});}const agent=await store.archiveTravelAgent(id);assert(agent,404,'AGENT_NOT_FOUND','Travel agent not found');await store.audit('admin.travel_agent_archived',{...clientMeta(req),userId:req.user!.id,metadata:{agentId:agent.id}});res.json({agent});});
 
-  app.get('/api/v1/admin/tours', requireFinePermission(store, 'tour.view'), async (req, res) => { const filters: TourFilters = { q: req.query.q ? String(req.query.q) : undefined, country: req.query.country ? String(req.query.country) : undefined, tourType: req.query.tourType ? String(req.query.tourType) : undefined, status: req.query.status === 'draft' || req.query.status === 'published' || req.query.status === 'archived' ? req.query.status : undefined, sort: req.query.sort === 'price_asc' || req.query.sort === 'price_desc' ? req.query.sort : 'newest' }; res.json({ tours: await store.listTours(filters) }); });
+  app.get('/api/v1/admin/tours', requireFinePermission(store, 'tour.view'), async (req, res) => { const filters: TourFilters = { q: req.query.q ? String(req.query.q) : undefined, country: req.query.country ? String(req.query.country) : undefined, tourType: req.query.tourType ? String(req.query.tourType) : undefined, status: req.query.status === 'draft' || req.query.status === 'published' || req.query.status === 'archived' ? req.query.status : 'all', sort: req.query.sort === 'price_asc' || req.query.sort === 'price_desc' ? req.query.sort : 'newest' }; res.json({ tours: await store.listTours(filters) }); });
   app.post('/api/v1/admin/tours', requireFinePermission(store, 'tour.create'), async (req, res) => { const input = toInput(tourInputSchema, req.body) as CreateTour; const tour = await store.createTour({ ...input, createdBy: req.user!.id }); await store.audit('admin.tour_created', { ...clientMeta(req), userId: req.user!.id, metadata: { tourId: tour.id } }); res.status(201).json({ tour }); });
   app.post('/api/v1/admin/tours/:id/duplicate', requireFinePermission(store, 'tour.create'), async (req,res)=>{const original=await store.findTour(String(req.params.id));assert(original,404,'TOUR_NOT_FOUND','Tour package not found');const slug=`${original.slug}-copy-${Date.now().toString(36)}`.slice(0,160);const {id:_sourceId,createdAt:_createdAt,updatedAt:_updatedAt,...payload}=original;const tour=await store.createTour({...payload,slug,title:`${original.title} Copy`,status:'draft',createdBy:req.user!.id});await store.audit('admin.tour_duplicated',{...clientMeta(req),userId:req.user!.id,metadata:{sourceTourId:original.id,tourId:tour.id}});res.status(201).json({tour});});
   app.patch('/api/v1/admin/tours/:id', requireFinePermission(store, 'tour.update'), async (req, res) => { const input = toInput(tourPatchSchema, req.body) as UpdateTour; const tour = await store.updateTour(String(req.params.id), input); assert(tour, 404, 'TOUR_NOT_FOUND', 'Tour package not found'); await store.audit('admin.tour_updated', { ...clientMeta(req), userId: req.user!.id, metadata: { tourId: tour.id } }); res.json({ tour }); });
@@ -462,7 +490,27 @@ export function buildApp() {
       const tourPayload = toInput(tourBookingPayload, payload);
       const tour = await store.findTour(tourPayload.tourId);
       assert(tour && tour.status === 'published', 404, 'TOUR_NOT_FOUND', 'This tour package is no longer available');
-      const booking = await store.createBooking({ userId: req.user!.id, vertical: 'tour', status: 'new', request: { ...tourPayload, tourId: tour.id, title: tour.title, priceBdt: tour.priceBdt } });
+      // Only persist server-derived price and the pax/date fields the operator
+      // actually needs. Client-supplied totals (quotedTotal, priceBdt, total)
+      // are ignored so a forged amount can never be charged later.
+      const extra = (tourPayload as Record<string, any>);
+      const adults = Math.max(1, Math.min(30, Number(extra.adults ?? extra.travellers ?? 1)));
+      const children = Math.max(0, Math.min(20, Number(extra.children ?? 0)));
+      const infants = Math.max(0, Math.min(10, Number(extra.infants ?? 0)));
+      const promoCode = typeof extra.promoCode === 'string' ? extra.promoCode.trim().slice(0, 40) : undefined;
+      const request = {
+        tourId: tour.id,
+        slug: tour.slug,
+        title: tour.title,
+        travellers: Math.max(1, Math.min(30, Number(extra.travellers || adults))),
+        adults,
+        children,
+        infants,
+        travelDate: tourPayload.travelDate,
+        priceBdt: tour.priceBdt,
+        ...(promoCode ? { promoCode } : {})
+      };
+      const booking = await store.createBooking({ userId: req.user!.id, vertical: 'tour', status: 'new', request });
       await store.audit('booking.created', { ...clientMeta(req), userId: req.user!.id, metadata: { bookingId: booking.id, vertical: input.vertical, workflow: 'operator_review' } });
       res.status(201).json({ booking });
       return;
@@ -481,7 +529,7 @@ export function buildApp() {
     const booking = await store.findBooking(input.bookingId, req.user!.id);
     assert(booking, 404, 'BOOKING_NOT_FOUND', 'Booking not found');
     assert(!['cancelled', 'rejected', 'new', 'reviewing', 'failed'].includes(booking.status), 409, 'BOOKING_NOT_PAYABLE', 'This booking is not ready for payment');
-    const quote = trustedBookingQuote(booking);
+    const quote = await trustedBookingQuote(store, booking);
     assert(quote, 409, 'BOOKING_NOT_QUOTED', 'This booking has no verified provider quote yet');
     const idempotencyKey = `intent:${booking.id}:${Date.now().toString(36)}`;
     const paymentRecord = await store.createPayment({ bookingId: booking.id, userId: req.user!.id, provider: 'configured', amount: quote.amount, currency: quote.currency, status: 'created', idempotencyKey, initiatedAt: new Date().toISOString() });

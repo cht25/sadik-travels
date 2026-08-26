@@ -5,6 +5,18 @@
   const baseUrl = String(config.apiBase || bodyConfig.apiBase || '/api/v1').replace(/\/$/, '');
   const requestTimeoutMs = Number(config.requestTimeoutMs || 20000);
 
+  // Serialize refresh token exchanges. Several page-load requests can return
+  // 401 at once when the access token expires; a single in-flight refresh is
+  // reused so we never revoke a fresh session with a second stale token.
+  let refreshPromise = null;
+  function refreshSession() {
+    if (!refreshPromise) {
+      refreshPromise = request('/auth/refresh', { method: 'POST' }, false)
+        .finally(() => { refreshPromise = null; });
+    }
+    return refreshPromise;
+  }
+
   async function request(path, options = {}, canRefresh = true) {
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
     const headers = { accept: 'application/json', ...(options.body && !isFormData ? { 'content-type': 'application/json' } : {}), ...(options.headers || {}) };
@@ -19,13 +31,24 @@
     try { payload = await response.json(); } catch { /* empty 204 response */ }
     const skipRefresh = path.includes('/auth/refresh') || path.includes('/auth/logout') || path.includes('/admin/me');
     if (response.status === 401 && canRefresh && !skipRefresh) {
-      try { await request('/auth/refresh', { method: 'POST' }, false); return request(path, options, false); } catch { /* keep original auth error */ }
+      try { await refreshSession(); return request(path, options, false); } catch { /* keep original auth error */ }
     }
     if (!response.ok) {
-      const error = new Error(payload?.error?.message || `Request failed (${response.status})`);
+      const serverMessage = payload?.error?.message || `Request failed (${response.status})`;
+      const details = payload?.error?.details;
+      // Prefer a concrete field message (e.g. "Check-out must be after check-in")
+      // over the generic "Please check the submitted fields" placeholder.
+      let displayMessage = serverMessage;
+      if (details && details.fieldErrors) {
+        const firstFieldError = Object.values(details.fieldErrors).flat().find(Boolean);
+        if (firstFieldError) displayMessage = String(firstFieldError);
+      } else if (details && details.formErrors && details.formErrors[0]) {
+        displayMessage = String(details.formErrors[0]);
+      }
+      const error = new Error(displayMessage);
       error.status = response.status;
       error.code = payload?.error?.code;
-      error.details = payload?.error?.details;
+      error.details = details;
       throw error;
     }
     return payload;

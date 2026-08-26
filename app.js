@@ -968,7 +968,7 @@ async function openTourCheckoutWizard(tour) {
     event.preventDefault();
     try {
       const quote = await refreshQuote();
-      const response = await apiRequest('/bookings', { method: 'POST', body: JSON.stringify({ vertical: 'tour', payload: { tourId: tour.id, slug: tour.slug, title: tour.title, travellers: Number($('#tourAdults').value)||1, adults: Number($('#tourAdults').value)||1, children: Number($('#tourChildren').value)||0, infants: Number($('#tourInfants').value)||0, travelDate: $('#tourTravelDate').value, priceBdt: tour.priceBdt, quotedTotal: quote?.total } }) });
+      const response = await apiRequest('/bookings', { method: 'POST', body: JSON.stringify({ vertical: 'tour', payload: { tourId: tour.id, slug: tour.slug, title: tour.title, travellers: Number($('#tourAdults').value)||1, adults: Number($('#tourAdults').value)||1, children: Number($('#tourChildren').value)||0, infants: Number($('#tourInfants').value)||0, travelDate: $('#tourTravelDate').value, priceBdt: tour.priceBdt, quotedTotal: quote?.total, promoCode: $('#tourPromo').value.trim() || undefined } }) });
       closeModal(modal);
       try {
         const pay = await apiRequest('/initiate-payment', { method: 'POST', body: JSON.stringify({ bookingId: response.booking.id, kind: 'tour' }) });
@@ -1828,6 +1828,7 @@ window.renderPublicRoute = renderPublicRoute;
 window.publicNavigate = publicNavigate;
 window.openLogin = openLogin;
 window.showToast = showToast;
+window.updateAuthUi = updateAuthUi;
 bindPublicRouter();
 document.addEventListener('click', (event) => {
   const link = event.target.closest('[data-scroll]');
@@ -1845,16 +1846,34 @@ document.addEventListener('click', (event) => {
   event.stopImmediatePropagation();
   navigateToSection(link.dataset.scroll);
 }, true);
-void renderPublicRoute();
-if (appConfig.liveApi) {
-  void applySiteSettings();
-  void applySiteNavigation();
-  void applyPublicContent();
-  void apiRequest('/auth/me', {}, false).then(response => { updateAuthUi(response.user); const p = location.pathname.replace(/\/+$/, '') || '/'; if (response.user && (p.startsWith('/bookings') || p.startsWith('/booking/') || p.startsWith('/account'))) void renderPublicRoute(); }).catch(() => updateAuthUi(null));
+async function initStorefront() {
+  // Resolve the persisted session before rendering route-protected pages so a
+  // valid refresh cookie is honoured on reload/direct-link, and an expired
+  // access token never causes an auth flicker or a false login redirect.
+  if (appConfig.liveApi) {
+    void applySiteSettings();
+    void applySiteNavigation();
+    void applyPublicContent();
+    const initialPath = location.pathname.replace(/\/+$/, '') || '/';
+    if (initialPath !== '/') {
+      const home = document.querySelector('main');
+      const root = $('#publicRouteRoot');
+      if (home && root) { home.hidden = true; root.hidden = false; root.innerHTML = publicLoading(); }
+    }
+  }
+  try {
+    const response = await apiRequest('/auth/me');
+    updateAuthUi(response.user);
+  } catch {
+    updateAuthUi(null);
+  }
+  void renderPublicRoute();
+
+  const initialTourParams = new URLSearchParams(window.location.search);
+  if (initialTourParams.get('type') === 'tour') {
+    activateTab('tours');
+    void searchTours({ destination: initialTourParams.get('destination') || '', tourType: initialTourParams.get('tour_type') || '', maxPrice: initialTourParams.get('max_price') || '', sort: initialTourParams.get('sort') || 'newest' }, false);
+  }
+  updatePassengerSummary();
 }
-const initialTourParams = new URLSearchParams(window.location.search);
-if (initialTourParams.get('type') === 'tour') {
-  activateTab('tours');
-  void searchTours({ destination: initialTourParams.get('destination') || '', tourType: initialTourParams.get('tour_type') || '', maxPrice: initialTourParams.get('max_price') || '', sort: initialTourParams.get('sort') || 'newest' }, false);
-}
-updatePassengerSummary();
+void initStorefront();

@@ -1309,7 +1309,9 @@
       if (logout) {
         event.preventDefault();
         try { await api.post('/auth/logout', {}); } catch { /* logout is best effort */ }
-        state.user = null; await refreshBadges(); toast('You have been logged out', 'success');
+        state.user = null;
+        if (typeof window.updateAuthUi === 'function') window.updateAuthUi(null);
+        await refreshBadges(); toast('You have been logged out', 'success');
         window.SadikPages.navigate('/');
         return;
       }

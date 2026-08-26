@@ -5,6 +5,7 @@ import { io as createSocket, type Socket } from 'socket.io-client';
 import { effectiveFinePermissions, hasFinePermission } from './permissions.js';
 import { hashChatToken, verifyChatToken } from './live-chat.js';
 import { ACTIVE_CATALOG_TYPES, RETIRED_VERTICAL_TYPES, isRetiredAdminNavItem } from './legacy-purge.js';
+import { computeTourQuote } from './booking-schema.js';
 
 test('retired verticals such as the legacy Umrah fare entry are rejected everywhere', () => {
   // The persisted row behind "Special Umrah Fair": its base path (/admin/catalog)
@@ -52,6 +53,23 @@ test('live-chat room tokens are hashed and timing-safe verified', () => {
   assert.equal(verifyChatToken(token, hash), true);
   assert.equal(verifyChatToken(`${token}-wrong`, hash), false);
   assert.equal(verifyChatToken('', hash), false);
+});
+
+test('tour pricing is always computed on the server from the persisted adult price', () => {
+  const quote = computeTourQuote({ adultPrice: 200 }, { adults: 3 });
+  assert.equal(quote.baseFare, 600);
+  assert.equal(quote.vat, 90);
+  assert.equal(quote.ait, 30);
+  assert.equal(quote.total, 720);
+
+  // Children default to 70% of adult fare; infants are free unless configured.
+  const family = computeTourQuote({ adultPrice: 200 }, { adults: 2, children: 2, infants: 1 });
+  assert.equal(family.baseFare, 400 + 280 + 0);
+  assert.equal(family.total, family.baseFare + family.vat + family.ait);
+
+  // A configured child price is used, not the default 70%.
+  const explicit = computeTourQuote({ adultPrice: 200, childPrice: 120, infantPrice: 0 }, { adults: 1, children: 2 });
+  assert.equal(explicit.baseFare, 200 + 240);
 });
 
 /**
