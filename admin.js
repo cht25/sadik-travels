@@ -577,9 +577,10 @@ function routeAllowed(path) {
   if (state.isSuperAdmin) return true;
   const isHotelPath = path === 'hotels' || path.startsWith('hotels/') || path === 'hotel-bookings' || path.startsWith('hotel-bookings/');
   if (isHotelPath) {
-    if (state.currentAdmin?.role === 'hotel_owner') return true;
-    const required = requiredPermissionForRoute(path);
-    return !required || state.finePermissions?.has(required);
+    // Mirrors requireHotelManager on the backend: hotel inventory is open only
+    // to Super Admins and Hotel Owners. A plain admin must not reach a page
+    // whose API calls are guaranteed to return HOTEL_ROLE_REQUIRED.
+    return state.currentAdmin?.role === 'hotel_owner';
   }
   if ((path === 'bookings' || path.startsWith('bookings/')) && ['hotel_owner', 'home_owner', 'travel_agent'].includes(state.currentAdmin?.role)) return false;
   if (path === 'catalog' && state.currentAdmin?.role === 'home_owner') return state.finePermissions?.has('home.view');
@@ -680,7 +681,7 @@ function hotelFormMarkup(hotel = {}) {
     <label class="field-label form-span-2"><span>Description</span><textarea id="hotelDescription" rows="5">${escapeHtml(hotel.description || '')}</textarea></label>
     <label class="field-label"><span>Cancellation</span><select id="hotelCancelType"><option value="free" ${(hotel.cancellationPolicy?.type || 'free') === 'free' ? 'selected' : ''}>Free cancellation</option><option value="non_refundable" ${hotel.cancellationPolicy?.type === 'non_refundable' ? 'selected' : ''}>Non-refundable</option></select></label>
     <label class="field-label"><span>Free until (days before)</span><input id="hotelCancelDays" type="number" min="0" max="365" value="${escapeAttr(hotel.cancellationPolicy?.freeUntilDays ?? 1)}"/></label>
-    <label class="field-label"><span>Status</span><select id="hotelStatus"><option value="draft" ${hotel.status === 'draft' || !hotel.status ? 'selected' : ''}>Draft</option><option value="active" ${hotel.status === 'active' ? 'selected' : ''}>Active</option><option value="hidden" ${hotel.status === 'hidden' ? 'selected' : ''}>Hidden</option></select></label>
+    <label class="field-label"><span>Status</span><select id="hotelStatus"><option value="draft" ${hotel.status === 'draft' ? 'selected' : ''}>Draft</option><option value="active" ${hotel.status === 'active' || !hotel.status ? 'selected' : ''}>Active</option><option value="hidden" ${hotel.status === 'hidden' ? 'selected' : ''}>Hidden</option></select></label>
     <label class="field-label"><span>Sort order</span><input id="hotelSort" type="number" value="${escapeAttr(hotel.sortOrder ?? 0)}"/></label>
     <label class="toggle-card"><input id="hotelAvailable" type="checkbox" ${hotel.available !== false ? 'checked' : ''}/><span><strong>Available</strong><small>Expose current pricing publicly</small></span></label>
     <label class="toggle-card"><input id="hotelFeatured" type="checkbox" ${hotel.featured ? 'checked' : ''}/><span><strong>Featured</strong><small>Highlight in search</small></span></label>
@@ -908,7 +909,7 @@ async function openAdminEditor(admin, focusPermissions = false) {
 }
 
 initAuthScene(); bindAuth(); hydrateIcons(); bindShell();
-void $admin('/auth/me', {}, false).then(response => { state.currentAdmin = response.user; return loadWorkspace(false); }).catch(() => { /* Login screen remains visible. */ });
+void $admin('/auth/me').then(response => { state.currentAdmin = response.user; return loadWorkspace(false); }).catch(() => { /* Login screen remains visible. */ });
 
 /* Helpers shared with the commerce admin module (admin-commerce.js). */
 window.renderRoute = renderRoute;

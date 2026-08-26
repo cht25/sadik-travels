@@ -129,6 +129,13 @@ const eachDate = (checkIn: string, checkOut: string): string[] => {
   return dates;
 };
 const nightsBetween = (checkIn: string, checkOut: string) => Math.max(0, Math.round((new Date(`${checkOut}T00:00:00Z`).getTime() - new Date(`${checkIn}T00:00:00Z`).getTime()) / 86_400_000));
+const isValidIsoDate = (value: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const [, year, month, day] = match.map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+};
 
 export function generateBookingNumber() {
   const year = new Date().getFullYear();
@@ -266,6 +273,9 @@ export class HotelStore {
   async priceQuote(input: { hotelId: string; rooms: Array<{ roomId: string; quantity?: number; adults?: number; children?: number }>; checkIn: string; checkOut: string }): Promise<{ rooms: HotelBookingRoom[]; breakdown: PriceBreakdown; hotelName: string }> {
     const hotel = await this.oneHotel(input.hotelId);
     if (!hotel || hotel.deletedAt || hotel.status !== 'active' || hotel.available === false) throw new AppError(404, 'HOTEL_NOT_FOUND', 'Hotel not found');
+    if (!isValidIsoDate(input.checkIn) || !isValidIsoDate(input.checkOut)) throw new AppError(400, 'INVALID_DATES', 'Select valid check-in and check-out dates');
+    const todayStart = new Date(); todayStart.setUTCHours(0, 0, 0, 0);
+    if (Date.parse(`${input.checkIn}T00:00:00Z`) < todayStart.getTime()) throw new AppError(400, 'INVALID_DATES', 'Check-in date cannot be in the past');
     const nights = nightsBetween(input.checkIn, input.checkOut);
     if (nights < 1) throw new AppError(400, 'INVALID_DATES', 'Check-out must be after check-in');
     const datedRooms: HotelBookingRoom[] = [];
@@ -349,8 +359,14 @@ export class HotelStore {
       hotelSnapshot: { name: hotel.name, city: hotel.city, address: hotel.address, image: hotel.images?.[0]?.url },
       createdBy: userId, createdAt: time, updatedAt: time
     };
-    const saved = await this.saveBooking(booking);
-    return saved;
+    try {
+      const saved = await this.saveBooking(booking);
+      return saved;
+    } catch (error) {
+      // Never leave reserved inventory behind when the booking row cannot be persisted.
+      await Promise.all(reserved.map(entry => this.release(entry.roomId, entry.date, entry.quantity)));
+      throw error;
+    }
   }
 
   async confirmBookingPayment(bookingId: string) { return this.patchBookingStatus(bookingId, { status: 'confirmed', paymentStatus: 'paid' }); }
@@ -410,7 +426,7 @@ export class HotelStore {
   }
   async adminFindHotel(id: string) { const hotel = await this.oneHotel(id); return hotel ? hotel as Hotel : undefined; }
   async adminFindRoom(id: string) { const room = await this.oneRoom(id); return room && !room.deletedAt ? room as HotelRoom : undefined; }
-  async adminCreateHotel(input: Partial<Hotel>, actor: string) { const time = now(); const hotel: Hotel = { id: randomUUID(), slug: input.slug!, name: input.name!, shortDescription: input.shortDescription, description: input.description, propertyType: input.propertyType || 'Hotel', address: input.address, city: input.city!, country: input.country || 'Bangladesh', area: input.area, latitude: input.latitude, longitude: input.longitude, phone: input.phone, email: input.email, website: input.website, starRating: input.starRating ?? 3, guestRating: input.guestRating, reviewCount: 0, amenities: input.amenities || [], facilities: input.facilities || [], images: input.images || [], roomTypes: input.roomTypes || [], pricePerNight: input.pricePerNight, seasonalDiscounts: input.seasonalDiscounts || [], available: input.available !== false, ownerId: input.ownerId || actor, checkInTime: input.checkInTime, checkOutTime: input.checkOutTime, cancellationPolicy: input.cancellationPolicy, status: input.status || 'draft', featured: input.featured || false, sortOrder: input.sortOrder || 0, createdBy: actor, updatedAt: time, createdAt: time } as Hotel; return this.saveHotel(hotel); }
+  async adminCreateHotel(input: Partial<Hotel>, actor: string) { const time = now(); const hotel: Hotel = { id: randomUUID(), slug: input.slug!, name: input.name!, shortDescription: input.shortDescription, description: input.description, propertyType: input.propertyType || 'Hotel', address: input.address, city: input.city!, country: input.country || 'Bangladesh', area: input.area, latitude: input.latitude, longitude: input.longitude, phone: input.phone, email: input.email, website: input.website, starRating: input.starRating ?? 3, guestRating: input.guestRating, reviewCount: 0, amenities: input.amenities || [], facilities: input.facilities || [], images: input.images || [], roomTypes: input.roomTypes || [], pricePerNight: input.pricePerNight, seasonalDiscounts: input.seasonalDiscounts || [], available: input.available !== false, ownerId: input.ownerId || actor, checkInTime: input.checkInTime, checkOutTime: input.checkOutTime, cancellationPolicy: input.cancellationPolicy, status: input.status || 'active', featured: input.featured || false, sortOrder: input.sortOrder || 0, createdBy: actor, updatedAt: time, createdAt: time } as Hotel; return this.saveHotel(hotel); }
   async adminUpdateHotel(id: string, patch: Partial<Hotel>, actor: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, ...patch, id, updatedBy: actor, updatedAt: now() }); }
   async adminArchiveHotel(id: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, status: 'archived', updatedAt: now() }); }
   async adminRestoreHotel(id: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, status: 'active', deletedAt: undefined as any, updatedAt: now() }); }
