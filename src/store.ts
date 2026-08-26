@@ -119,7 +119,7 @@ const DEFAULT_NAVIGATION: Array<Omit<CreateNavItem,'id'>> = [
   { groupName:'Website', label:'Media Library', route:'/admin/media', icon:'image', permission:'media_view', sortOrder:71, visible:true, enabled:true },
   { groupName:'Website', label:'Customer Navigation', route:'/admin/navigation', icon:'menu', permission:'navigation_manage', sortOrder:72, visible:true, enabled:true },
   { groupName:'Settings', label:'Settings', route:'/admin/settings', icon:'settings', permission:'settings_view', sortOrder:80, visible:true, enabled:true },
-  { groupName:'Settings', label:'System Status', route:'/admin/system-status', icon:'activity', permission:'dashboard_view', sortOrder:81, visible:true, enabled:true },
+  { groupName:'Settings', label:'System Status', route:'/admin/system-status', icon:'activity', permission:'settings_view', sortOrder:81, visible:true, enabled:true },
   { groupName:'Security', label:'Admin Management', route:'/admin/admins', icon:'lock', permission:'admin.manage', sortOrder:91, visible:true, enabled:true },
   { groupName:'Security', label:'Profile & Security', route:'/admin/profile', icon:'shield', permission:'dashboard_view', sortOrder:90, visible:true, enabled:true }
 ];
