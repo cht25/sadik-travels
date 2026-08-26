@@ -208,7 +208,7 @@ export function registerHotelRoutes(app: Express, deps: { store: Store; hotelSto
   });
 
   // ---------- Admin: inventory ----------
-  app.get('/api/v1/admin/hotels/rooms/:roomId/inventory', requireHotelManager(store, 'room.update'), async (req, res, next) => {
+  app.get('/api/v1/admin/hotels/rooms/:roomId/inventory', requireHotelManager(store, 'room.view'), async (req, res, next) => {
     try { await assertRoomAccess(req, String(req.params.roomId)); const inv = await hotelStore.adminInventory(String(req.params.roomId), String(req.query.from || new Date().toISOString().slice(0, 10)), Number(req.query.days) || 30); if (!inv) throw new AppError(404, 'ROOM_NOT_FOUND', 'Room not found'); res.json({ success: true, ...inv }); }
     catch (error) { next(error); }
   });

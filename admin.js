@@ -49,9 +49,10 @@ function markDirty(value = true) { state.unsaved = value; }
 function resetDirty() { state.unsaved = false; }
 function hasPermission(permission) {
   if (state.isSuperAdmin) return true;
-  if (state.permissions.has(permission)) return true;
+  if (!permission) return true;
   const fineKey = String(permission || '').replace(/_/g, '.').replace(/:/g, '.');
   if (state.finePermissions && state.finePermissions.has(fineKey)) return true;
+  if (state.permissions && state.permissions.has(permission)) return true;
   return false;
 }
 function roleLabel(role) { return String(role || '').replace(/_/g, ' '); }
@@ -175,6 +176,7 @@ function bindAuth() {
 }
 
 const routeFineMap = {
+  '/admin': 'dashboard.view',
   '/admin/hotels': 'hotel.view',
   '/admin/hotel-bookings': 'booking.view',
   '/admin/live-support': 'support.view',
@@ -192,31 +194,46 @@ const routeFineMap = {
   '/admin/media': 'media.view',
   '/admin/navigation': 'navigation.manage',
   '/admin/settings': 'settings.view',
-  '/admin/system-status': 'dashboard.view',
-  '/admin/profile': 'dashboard.view',
-  '/admin': 'dashboard.view'
+  '/admin/system-status': 'settings.view',
+  '/admin/profile': 'dashboard.view'
 };
 
-function hasFineNav(value){ return value && state.finePermissions && state.finePermissions.has(String(value).replace(/_/g,'.')); }
-async function loadNavigation() { const response = await safeRequest('/admin/navigation'); if (isError(response)) return false; const rawItems = response.navigation || []; const byRoute = new Map(); rawItems.forEach(item => { const key = String(item.route || '').trim(); const current = byRoute.get(key); if (!current || Number(item.sortOrder || 0) < Number(current.sortOrder || 0)) byRoute.set(key, item); }); const items = [...byRoute.values()]; const grouped = new Map(); items.filter(item => {
-      if (isRetiredNavItem(item)) return false;
-      if (!item.visible || !item.enabled) return false;
-      if (state.isSuperAdmin) return true;
-      if (item.route === '/admin/admins') return false;
-      const role = state.currentAdmin?.role;
-      const vendor = ['hotel_owner', 'home_owner', 'travel_agent'].includes(role);
-      if (vendor) {
-        if (item.route === '/admin/bookings') return false;
-        if (role === 'hotel_owner' && !['/admin/hotels', '/admin/hotel-bookings', '/admin/profile', '/admin'].includes(item.route)) return false;
-        if (role === 'home_owner' && !['/admin/catalog?type=home', '/admin/profile', '/admin'].includes(item.route)) return false;
-        if (role === 'travel_agent' && !['/admin/travel-agents', '/admin/profile', '/admin'].includes(item.route)) return false;
-      }
-      const routeFine = routeFineMap[item.route];
-      if (routeFine && state.finePermissions.has(routeFine)) return true;
-      if (item.permission && (hasPermission(item.permission) || hasFineNav(item.permission))) return true;
-      if (!item.permission && !routeFine) return true;
-      return false;
-    }).sort((a,b)=>a.sortOrder-b.sortOrder).forEach(item => { if(!grouped.has(item.groupName)) grouped.set(item.groupName,[]); grouped.get(item.groupName).push(item); }); const nav=$('#adminNav'); if(!nav)return true; nav.innerHTML=[...grouped.entries()].map(([group,entries])=>`<div class="nav-group" data-nav-group="${escapeAttr(group)}"><p>${escapeHtml(group)}</p>${entries.map(item=>`<a href="${escapeAttr(item.route)}" data-route="${escapeAttr(item.route)}" data-permission="${escapeAttr(item.permission||'')}" data-nav-id="${escapeAttr(item.id)}"><span data-icon="${escapeAttr(item.icon)}"></span><span>${escapeHtml(item.label)}</span></a>`).join('')}</div>`).join(''); hydrateIcons(nav); if (!state.isSuperAdmin) $$('#adminNav a[data-route="/admin/admins"]').forEach(link => link.remove()); return true; }
+function hasFineNav(value) { return value && state.finePermissions && state.finePermissions.has(String(value).replace(/_/g, '.')); }
+async function loadNavigation() {
+  const response = await safeRequest('/admin/navigation');
+  if (isError(response)) return false;
+  const rawItems = response.navigation || [];
+  const byRoute = new Map();
+  rawItems.forEach(item => {
+    const key = String(item.route || '').trim();
+    const current = byRoute.get(key);
+    if (!current || Number(item.sortOrder || 0) < Number(current.sortOrder || 0)) byRoute.set(key, item);
+  });
+  const items = [...byRoute.values()];
+  const grouped = new Map();
+  items.filter(item => {
+    if (isRetiredNavItem(item)) return false;
+    if (!item.visible || !item.enabled) return false;
+    if (state.isSuperAdmin) return true;
+    if (item.route === '/admin/admins') return false;
+    const role = state.currentAdmin?.role;
+    const vendor = ['hotel_owner', 'home_owner', 'travel_agent'].includes(role);
+    if (vendor && item.route === '/admin/bookings') return false;
+    const routeFine = routeFineMap[item.route];
+    if (routeFine) return state.finePermissions.has(routeFine);
+    if (item.permission) return hasPermission(item.permission) || hasFineNav(item.permission);
+    return true;
+  }).sort((a, b) => a.sortOrder - b.sortOrder).forEach(item => {
+    if (!grouped.has(item.groupName)) grouped.set(item.groupName, []);
+    grouped.get(item.groupName).push(item);
+  });
+  const nav = $('#adminNav');
+  if (!nav) return true;
+  nav.innerHTML = [...grouped.entries()].map(([group, entries]) => `<div class="nav-group" data-nav-group="${escapeAttr(group)}"><p>${escapeHtml(group)}</p>${entries.map(item => `<a href="${escapeAttr(item.route)}" data-route="${escapeAttr(item.route)}" data-permission="${escapeAttr(item.permission || '')}" data-nav-id="${escapeAttr(item.id)}"><span data-icon="${escapeAttr(item.icon)}"></span><span>${escapeHtml(item.label)}</span></a>`).join('')}</div>`).join('');
+  hydrateIcons(nav);
+  if (!state.isSuperAdmin) $$('#adminNav a[data-route="/admin/admins"]').forEach(link => link.remove());
+  return true;
+}
 function isMobileView() { return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches; }
 function currentHref() { return `${location.pathname}${location.search}`; }
 function currentRoute() { const url = new URL(location.href); const path = url.pathname.replace(/^\/admin\/?/, '').replace(/\/$/, '') || 'dashboard'; return { url, path, query: url.searchParams }; }
@@ -357,12 +374,38 @@ async function renderAnalytics() {
 function todayInput() { return new Date().toISOString().slice(0, 10); }
 
 async function renderDashboard() {
-  const [stats, services, payments, tickets] = await Promise.all([safeRequest('/admin/stats'), safeRequest('/admin/services'), hasPermission('payments_view') ? safeRequest('/admin/payments?page=1&pageSize=6') : Promise.resolve({ payments: [] }), hasPermission('support_manage') ? safeRequest('/admin/tickets') : Promise.resolve({ tickets: [] })]);
+  const role = state.currentAdmin?.role;
+  if (role === 'hotel_owner') {
+    const statsRes = await safeRequest('/admin/stats');
+    if (isError(statsRes)) return renderError(statsRes.__error, '/admin');
+    const s = statsRes || {};
+    const recent = s.recentBookings || [];
+    const kpis = [
+      { label: 'Total Hotels', value: s.totalHotels || 0, route: '/admin/hotels', icon: 'hotel' },
+      { label: 'Active Hotels', value: s.activeHotels || 0, route: '/admin/hotels?status=active', icon: 'check' },
+      { label: 'Total Rooms', value: s.totalRooms || 0, route: '/admin/hotels', icon: 'grid' },
+      { label: 'Hotel Bookings', value: s.totalBookings || 0, route: '/admin/hotel-bookings', icon: 'briefcase' },
+      { label: 'Hotel Revenue', value: formatMoney(s.revenueBdt), route: '/admin/hotel-bookings', icon: 'card' },
+      { label: 'Pending Payments', value: s.pendingPayments || 0, route: '/admin/hotel-bookings?paymentStatus=pending', icon: 'clock' }
+    ];
+    $('#adminOutlet').innerHTML = pageHeader('Hotel management', 'Hotel Dashboard', 'A live view of your hotel properties, room inventory, availability and reservations.', `<button class="admin-secondary" data-action="refresh-dashboard">Refresh data</button>`) +
+      `<section class="kpi-grid">${kpis.map(item => `<a href="${escapeAttr(routeHref(item.route))}" data-route="${escapeAttr(routeHref(item.route))}" class="kpi-card"><span class="kpi-icon">${icon(item.icon)}</span><small>${escapeHtml(item.label)}</small><strong>${escapeHtml(item.value)}</strong><span class="kpi-arrow">↗</span></a>`).join('')}</section>
+      <div class="dashboard-grid">
+        <section class="admin-card span-full">${cardHeader('Recent hotel bookings', 'Latest reservations for your properties', '<a class="admin-secondary" href="/admin/hotel-bookings" data-route="/admin/hotel-bookings">View all</a>')}
+          <div class="recent-list">${recent.length ? recent.map(item => `<a class="recent-item" href="/admin/hotel-bookings/${escapeAttr(item.id)}" data-route="/admin/hotel-bookings/${escapeAttr(item.id)}"><span class="recent-main"><strong>${escapeHtml(item.bookingNumber || item.id)} · ${escapeHtml(displayName(item.primaryGuest))}</strong><small>${escapeHtml(item.hotelSnapshot?.name || 'Hotel')} · ${escapeHtml(formatDate(item.createdAt))}</small></span><span>${formatMoney(item.priceBreakdown?.total)}</span>${statusPill(item.status)}</a>`).join('') : emptyState('No bookings yet', 'Hotel bookings will appear here when guests reserve rooms.', 'hotel')}</div>
+        </section>
+      </div>`;
+    hydrateIcons();
+    $('#adminOutlet').querySelector('[data-action="refresh-dashboard"]')?.addEventListener('click', () => void renderRoute());
+    return;
+  }
+
+  const [stats, services, payments, tickets] = await Promise.all([safeRequest('/admin/stats'), hasPermission('service.manage') ? safeRequest('/admin/services') : Promise.resolve({ services: [] }), hasPermission('payment.view') ? safeRequest('/admin/payments?page=1&pageSize=6') : Promise.resolve({ payments: [] }), hasPermission('support.view') ? safeRequest('/admin/tickets') : Promise.resolve({ tickets: [] })]);
   if (isError(stats)) return renderError(stats.__error, '/admin');
   const data = stats; const vertical = data.verticalCounts || {}; const bookings = data.bookings || {}; const serviceRows = isError(services) ? [] : (services.services || []); const recentPayments = isError(payments) ? [] : (payments.payments || []); const supportRows = isError(tickets) ? [] : (tickets.tickets || []);
   const kpis = [{ label: 'Total Bookings', value: bookings.total || 0, route: '/admin/bookings', icon: 'briefcase' }, { label: 'Needs Review', value: (bookings.new || 0) + (bookings.reviewing || 0) + (bookings.pending || 0), route: '/admin/bookings?status=needs_review', icon: 'clock' }, { label: 'Confirmed', value: (bookings.confirmed || 0) + (bookings.completed || 0), route: '/admin/bookings?status=confirmed', icon: 'check' }, { label: 'Customers', value: data.customers || 0, route: '/admin/customers', icon: 'users' }, { label: 'Paid Revenue', value: formatMoney(data.revenueBdt), route: '/admin/payments?status=paid', icon: 'card' }, { label: 'Hotel Bookings', value: vertical.hotel || 0, route: '/admin/hotels', icon: 'hotel' }, { label: 'Home Stays', value: vertical.home || 0, route: '/admin/catalog?type=home', icon: 'home' }, { label: 'Tour Bookings', value: vertical.tour || 0, route: '/admin/tours', icon: 'map' }];
   const recentBookings = data.recentBookings || []; const activity = data.recentActivity || []; const openTickets = supportRows.filter(ticket => !['closed','resolved'].includes(ticket.status)).length;
-  $('#adminOutlet').innerHTML = pageHeader('Operations overview', 'Dashboard', 'A live view of persisted bookings, customers, payments, content and support activity.', `<button class="admin-secondary" data-action="refresh-dashboard">Refresh data</button>`) + `<section class="kpi-grid">${kpis.map(item => `<a href="${escapeAttr(routeHref(item.route))}" data-route="${escapeAttr(routeHref(item.route))}" class="kpi-card"><span class="kpi-icon">${icon(item.icon)}</span><small>${escapeHtml(item.label)}</small><strong>${escapeHtml(item.value)}</strong><span class="kpi-arrow">↗</span></a>`).join('')}</section><div class="dashboard-grid"><section class="admin-card">${cardHeader('Revenue activity', 'Verified paid transactions from the last six months')} ${revenueChart(data.revenueTrend)}</section><section class="admin-card">${cardHeader('Booking status', 'Current lifecycle distribution')}<div class="status-bars">${statusChart(data.statusDistribution, bookings.total)}</div></section><section class="admin-card">${cardHeader('Recent bookings', 'Latest updates in the operations queue', '<a class="admin-secondary" href="/admin/bookings" data-route="/admin/bookings">View all</a>')}<div class="recent-list">${recentBookings.length ? recentBookings.slice(0, 8).map(item => `<a class="recent-item" href="/admin/bookings/${escapeAttr(item.id)}" data-route="/admin/bookings/${escapeAttr(item.id)}"><span class="recent-main"><strong>${escapeHtml(item.vertical)} · ${escapeHtml(displayName(item.customer))}</strong><small>${escapeHtml(item.id.slice(0, 12).toUpperCase())} · ${escapeHtml(formatDate(item.updatedAt))}</small></span>${statusPill(item.status)}</a>`).join('') : emptyState('No bookings yet', 'Bookings will appear here when customers make reservations.', 'briefcase')}</div></section><section class="admin-card">${cardHeader('Recent payments', 'Payment activity from the configured gateway', '<a class="admin-secondary" href="/admin/payments" data-route="/admin/payments">View all</a>')}<div class="recent-list">${recentPayments.length ? recentPayments.map(item => `<a class="recent-item" href="/admin/payments" data-route="/admin/payments"><span class="recent-main"><strong>${escapeHtml(displayName(item.customer))}</strong><small>${escapeHtml(item.provider)} · ${escapeHtml(formatDate(item.createdAt))}</small></span><span>${formatMoney(item.amount, item.currency)}</span>${statusPill(item.status)}</a>`).join('') : emptyState('No payments yet', 'Verified payment transactions will appear here.', 'card')}</div></section><section class="admin-card">${cardHeader('Recent activity', 'Admin and system audit trail', '')}<div class="activity-list">${activity.length ? activity.slice(0, 8).map(item => `<div class="activity-item"><span class="activity-dot"></span><div><strong>${escapeHtml(item.action.replace(/\./g, ' · '))}</strong><small>${escapeHtml(formatDate(item.createdAt))}</small></div></div>`).join('') : emptyState('No activity yet', 'Important actions will be recorded here.', 'activity')}</div></section><section class="admin-card">${cardHeader('Service status', 'Visibility is controlled independently from record retention', hasPermission('services_manage') ? '<a class="admin-secondary" href="/admin/services" data-route="/admin/services">Manage services</a>' : '')}<div class="service-summary">${serviceRows.map(item => `<a class="service-summary-item" href="/admin/services" data-route="/admin/services"><span class="service-summary-icon">${icon(item.icon)}</span><span><strong>${escapeHtml(item.label)}</strong><small>${statusPill(item.status)}</small></span></a>`).join('') || emptyState('No service settings yet', 'Service visibility will appear here.', 'settings')}</div></section><section class="admin-card">${cardHeader('Support summary', 'Customer care queue', '<a class="admin-secondary" href="/admin/support" data-route="/admin/support">Open support</a>')}<div class="support-summary-copy"><strong>${openTickets}</strong><span>open or in-progress tickets</span><p>${supportRows.length ? `${supportRows.length} total ticket records` : 'No support tickets yet.'}</p></div></section></div>`;
+  $('#adminOutlet').innerHTML = pageHeader('Operations overview', 'Dashboard', 'A live view of persisted bookings, customers, payments, content and support activity.', `<button class="admin-secondary" data-action="refresh-dashboard">Refresh data</button>`) + `<section class="kpi-grid">${kpis.map(item => `<a href="${escapeAttr(routeHref(item.route))}" data-route="${escapeAttr(routeHref(item.route))}" class="kpi-card"><span class="kpi-icon">${icon(item.icon)}</span><small>${escapeHtml(item.label)}</small><strong>${escapeHtml(item.value)}</strong><span class="kpi-arrow">↗</span></a>`).join('')}</section><div class="dashboard-grid"><section class="admin-card">${cardHeader('Revenue activity', 'Verified paid transactions from the last six months')} ${revenueChart(data.revenueTrend)}</section><section class="admin-card">${cardHeader('Booking status', 'Current lifecycle distribution')}<div class="status-bars">${statusChart(data.statusDistribution, bookings.total)}</div></section><section class="admin-card">${cardHeader('Recent bookings', 'Latest updates in the operations queue', '<a class="admin-secondary" href="/admin/bookings" data-route="/admin/bookings">View all</a>')}<div class="recent-list">${recentBookings.length ? recentBookings.slice(0, 8).map(item => `<a class="recent-item" href="/admin/bookings/${escapeAttr(item.id)}" data-route="/admin/bookings/${escapeAttr(item.id)}"><span class="recent-main"><strong>${escapeHtml(item.vertical)} · ${escapeHtml(displayName(item.customer))}</strong><small>${escapeHtml(item.id.slice(0, 12).toUpperCase())} · ${escapeHtml(formatDate(item.updatedAt))}</small></span>${statusPill(item.status)}</a>`).join('') : emptyState('No bookings yet', 'Bookings will appear here when customers make reservations.', 'briefcase')}</div></section><section class="admin-card">${cardHeader('Recent payments', 'Payment activity from the configured gateway', '<a class="admin-secondary" href="/admin/payments" data-route="/admin/payments">View all</a>')}<div class="recent-list">${recentPayments.length ? recentPayments.map(item => `<a class="recent-item" href="/admin/payments" data-route="/admin/payments"><span class="recent-main"><strong>${escapeHtml(displayName(item.customer))}</strong><small>${escapeHtml(item.provider)} · ${escapeHtml(formatDate(item.createdAt))}</small></span><span>${formatMoney(item.amount, item.currency)}</span>${statusPill(item.status)}</a>`).join('') : emptyState('No payments yet', 'Verified payment transactions will appear here.', 'card')}</div></section><section class="admin-card">${cardHeader('Recent activity', 'Admin and system audit trail', '')}<div class="activity-list">${activity.length ? activity.slice(0, 8).map(item => `<div class="activity-item"><span class="activity-dot"></span><div><strong>${escapeHtml(item.action.replace(/\./g, ' · '))}</strong><small>${escapeHtml(formatDate(item.createdAt))}</small></div></div>`).join('') : emptyState('No activity yet', 'Important actions will be recorded here.', 'activity')}</div></section><section class="admin-card">${cardHeader('Service status', 'Visibility is controlled independently from record retention', hasPermission('service.manage') ? '<a class="admin-secondary" href="/admin/services" data-route="/admin/services">Manage services</a>' : '')}<div class="service-summary">${serviceRows.map(item => `<a class="service-summary-item" href="/admin/services" data-route="/admin/services"><span class="service-summary-icon">${icon(item.icon)}</span><span><strong>${escapeHtml(item.label)}</strong><small>${statusPill(item.status)}</small></span></a>`).join('') || emptyState('No service settings yet', 'Service visibility will appear here.', 'settings')}</div></section><section class="admin-card">${cardHeader('Support summary', 'Customer care queue', '<a class="admin-secondary" href="/admin/support" data-route="/admin/support">Open support</a>')}<div class="support-summary-copy"><strong>${openTickets}</strong><span>open or in-progress tickets</span><p>${supportRows.length ? `${supportRows.length} total ticket records` : 'No support tickets yet.'}</p></div></section></div>`;
   hydrateIcons();
   $('#adminOutlet').querySelector('[data-action="refresh-dashboard"]')?.addEventListener('click', () => void renderRoute());
 }
@@ -614,7 +657,7 @@ function requiredPermissionForRoute(path) {
     ['services', 'service.manage'],
     ['coupons', 'coupon.view'], ['reviews', 'review.view'], ['bookings', 'booking.view'], ['payments', 'payment.view'],
     ['customers', 'customer.view'], ['content', 'content.view'], ['media', 'media.view'], ['notifications', 'notifications.send'],
-    ['settings', 'settings.view'], ['navigation', 'navigation.manage'], ['analytics', 'reports.view'], ['dashboard', 'dashboard.view']
+    ['settings', 'settings.view'], ['system-status', 'settings.view'], ['navigation', 'navigation.manage'], ['analytics', 'reports.view'], ['dashboard', 'dashboard.view']
   ];
   return rules.find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`))?.[1];
 }
@@ -623,21 +666,9 @@ function routeAllowed(path) {
   if (path === 'admins' || path.startsWith('admins/')) return false;
   const role = state.currentAdmin?.role;
   const vendor = ['hotel_owner', 'home_owner', 'travel_agent'].includes(role);
-  if (vendor) {
-    if (path === 'bookings' || path.startsWith('bookings/')) return false;
-    if (role === 'hotel_owner') {
-      if (path === 'hotels' || path.startsWith('hotels/')) return Boolean(state.finePermissions?.has('hotel.view'));
-      if (path === 'hotel-bookings' || path.startsWith('hotel-bookings/')) return Boolean(state.finePermissions?.has('booking.view'));
-      if (!['hotels', 'hotel-bookings', 'dashboard', 'profile'].includes(path.split('/')[0])) return false;
-    }
-    if (role === 'home_owner') {
-      if (path === 'catalog' && currentRoute().query.get('type') === 'home') return Boolean(state.finePermissions?.has('home.view'));
-      if (!['catalog', 'dashboard', 'profile'].includes(path.split('/')[0])) return false;
-    }
-    if (role === 'travel_agent') {
-      if (path === 'travel-agents' || path.startsWith('travel-agents/')) return Boolean(state.finePermissions?.has('agent.view'));
-      if (!['travel-agents', 'dashboard', 'profile'].includes(path.split('/')[0])) return false;
-    }
+  if (vendor && (path === 'bookings' || path.startsWith('bookings/'))) return false;
+  if (role === 'home_owner' && path === 'catalog' && currentRoute().query.get('type') === 'home') {
+    return Boolean(state.finePermissions?.has('home.view'));
   }
   const required = requiredPermissionForRoute(path);
   return !required || Boolean(state.finePermissions?.has(required));
@@ -857,13 +888,126 @@ async function renderHotelBookingDetail(id) {
 /* ============================================================
    SADIK TRAVELS — SUPER ADMIN: admin accounts & granular permissions
    ============================================================ */
+const ROLE_PERMISSION_PRESETS = {
+  super_admin: [],
+  admin: [
+    'dashboard.view', 'reports.view',
+    'hotel.view', 'hotel.create', 'hotel.update', 'hotel.delete',
+    'room.view', 'room.create', 'room.update', 'room.delete',
+    'home.view', 'home.create', 'home.update', 'home.delete',
+    'tour.view', 'tour.create', 'tour.update', 'tour.delete',
+    'agent.view', 'agent.create', 'agent.update', 'agent.delete',
+    'catalog.view', 'catalog.create', 'catalog.update', 'catalog.delete',
+    'order.view', 'order.update', 'order.cancel', 'order.refund', 'invoice.view',
+    'coupon.view', 'coupon.create', 'coupon.update', 'coupon.delete',
+    'review.view', 'review.moderate', 'review.delete',
+    'content.view', 'offer.view', 'offer.create', 'offer.update', 'offer.delete',
+    'media.view', 'media.upload', 'media.delete',
+    'booking.view', 'booking.create', 'booking.update', 'booking.cancel', 'booking.refund',
+    'customer.view', 'user.manage',
+    'payment.view', 'payment.manage',
+    'support.view', 'support.reply',
+    'notifications.send',
+    'settings.view', 'settings.edit', 'service.manage', 'navigation.manage'
+  ],
+  hotel_owner: [
+    'dashboard.view',
+    'reports.view',
+    'hotel.view',
+    'hotel.create',
+    'hotel.update',
+    'hotel.delete',
+    'room.view',
+    'room.create',
+    'room.update',
+    'room.delete',
+    'booking.view',
+    'booking.create',
+    'booking.update',
+    'booking.cancel',
+    'booking.refund',
+    'media.view',
+    'media.upload',
+    'media.delete',
+    'review.view',
+    'review.moderate',
+    'review.delete'
+  ],
+  home_owner: [
+    'dashboard.view',
+    'reports.view',
+    'home.view',
+    'home.create',
+    'home.update',
+    'home.delete',
+    'media.view',
+    'media.upload',
+    'media.delete',
+    'review.view',
+    'review.moderate'
+  ],
+  travel_agent: [
+    'dashboard.view',
+    'reports.view',
+    'agent.view',
+    'agent.create',
+    'agent.update',
+    'agent.delete',
+    'tour.view',
+    'media.view',
+    'media.upload'
+  ],
+  manager: [
+    'catalog.view', 'order.view', 'order.update', 'order.cancel',
+    'coupon.view', 'review.view', 'review.moderate', 'invoice.view',
+    'dashboard.view', 'reports.view', 'booking.view', 'booking.create',
+    'booking.update', 'booking.cancel', 'customer.view', 'support.view',
+    'support.reply', 'notifications.send'
+  ],
+  support: [
+    'catalog.view', 'order.view', 'review.view', 'dashboard.view',
+    'booking.view', 'customer.view', 'support.view', 'support.reply',
+    'notifications.send'
+  ],
+  content_manager: [
+    'catalog.view', 'catalog.create', 'catalog.update', 'catalog.delete',
+    'coupon.view', 'coupon.create', 'coupon.update', 'review.view',
+    'review.moderate', 'dashboard.view', 'reports.view', 'agent.view',
+    'agent.create', 'agent.update', 'agent.delete', 'tour.view',
+    'tour.create', 'tour.update', 'tour.delete', 'content.view',
+    'offer.view', 'offer.create', 'offer.update', 'offer.delete',
+    'media.view', 'media.upload', 'media.delete', 'service.manage'
+  ],
+  finance: [
+    'order.view', 'order.refund', 'invoice.view', 'catalog.view',
+    'dashboard.view', 'reports.view', 'booking.view', 'payment.view',
+    'payment.manage', 'customer.view'
+  ],
+  staff: [
+    'catalog.view', 'order.view', 'dashboard.view', 'reports.view',
+    'booking.view', 'customer.view', 'support.view'
+  ],
+  customer: []
+};
+let dynamicRolePresets = { ...ROLE_PERMISSION_PRESETS };
+
+function getRolePreset(role) {
+  return dynamicRolePresets[role] ? [...dynamicRolePresets[role]] : (ROLE_PERMISSION_PRESETS[role] ? [...ROLE_PERMISSION_PRESETS[role]] : []);
+}
+
 let permissionCatalog = null;
 let adminSelectedPerms = new Set();
 let adminAvatarUrl = '';
 
 async function ensurePermissionCatalog() {
   if (permissionCatalog) return permissionCatalog;
-  try { const response = await safeRequest('/admin/permissions/catalog'); if (!isError(response)) permissionCatalog = response.catalog; } catch { /* offline fallback */ }
+  try {
+    const response = await safeRequest('/admin/permissions/catalog');
+    if (!isError(response)) {
+      permissionCatalog = response.catalog;
+      if (response.presets) dynamicRolePresets = { ...ROLE_PERMISSION_PRESETS, ...response.presets };
+    }
+  } catch { /* offline fallback */ }
   return permissionCatalog || [];
 }
 function adminStatusPill(status) {
@@ -921,22 +1065,27 @@ async function openAdminEditor(admin, focusPermissions = false) {
   await ensurePermissionCatalog();
   adminAvatarUrl = admin?.avatarUrl || '';
   const isNew = !admin;
+  const initialRole = admin?.role || 'admin';
   if (!isNew) {
     if (Array.isArray(admin.permissions)) {
       adminSelectedPerms = new Set(admin.permissions);
     } else {
       try {
         const detail = await safeRequest(`/admin/admins/${admin.id}`);
-        if (!isError(detail)) {
-          adminSelectedPerms = new Set(Array.isArray(detail.admin?.permissions) ? detail.admin.permissions : (detail.effectiveFine || []));
+        if (!isError(detail) && Array.isArray(detail.admin?.permissions)) {
+          adminSelectedPerms = new Set(detail.admin.permissions);
+        } else if (!isError(detail) && Array.isArray(detail.effectiveFine)) {
+          adminSelectedPerms = new Set(detail.effectiveFine);
         } else {
-          adminSelectedPerms = new Set(admin.effectiveFine || []);
+          adminSelectedPerms = new Set(getRolePreset(admin.role));
         }
       } catch {
-        adminSelectedPerms = new Set(admin.effectiveFine || []);
+        adminSelectedPerms = new Set(getRolePreset(admin.role));
       }
     }
-  } else { adminSelectedPerms = new Set(); }
+  } else {
+    adminSelectedPerms = new Set(getRolePreset(initialRole));
+  }
   const targetIsSuper = admin?.role === 'super_admin';
   const accountFields = `<div class="form-grid">
     <label class="field-label"><span>Full name</span><input id="admFullName" required value="${escapeAttr(admin?.fullName || '')}"/></label>
@@ -949,6 +1098,15 @@ async function openAdminEditor(admin, focusPermissions = false) {
   </div>`;
   openModal(`<div class="modal-heading"><span class="admin-eyebrow">Admin accounts</span><h2>${isNew ? 'Add admin' : 'Edit admin'}</h2></div><form id="adminAccountForm">${accountFields}${targetIsSuper && !isNew ? '<p class="table-secondary" style="margin:14px 0 0">Super Admin has unrestricted access — permissions cannot be limited.</p>' : permissionPanelMarkup()}<div class="form-actions"><span class="form-status" id="adminFormStatus"></span><button type="button" class="admin-secondary" data-modal-close>Cancel</button><button class="admin-primary" type="submit">${isNew ? 'Create admin' : 'Save admin'}</button></div></form>`, () => {
     bindPermissionPanel();
+    $('#admRole')?.addEventListener('change', event => {
+      const selectedRole = event.target.value;
+      if (selectedRole === 'super_admin') {
+        adminSelectedPerms = new Set();
+      } else {
+        adminSelectedPerms = new Set(getRolePreset(selectedRole));
+      }
+      refreshPermissionToggles();
+    });
     if (focusPermissions) document.querySelector('.perm-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     $('#admAvatar')?.addEventListener('change', async event => { const file = event.target.files?.[0]; if (!file) return; try { const media = await uploadMediaFile(file, 'logos', $('#admFullName').value); adminAvatarUrl = media.secureUrl; toast('Profile image uploaded.', 'success'); } catch (error) { toast(error.message || 'Upload failed.', 'error'); event.target.value = ''; } });
     $('#adminAccountForm').addEventListener('submit', async event => {

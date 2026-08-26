@@ -1,6 +1,7 @@
 import { config } from './config.js';
 import { hashPassword, normalizeIdentity, verifyPassword } from './security.js';
 import type { Store } from './store.js';
+import { auditAndMigrateVendorPermissions } from './permissions.js';
 
 /**
  * Optional bootstrap for deployments where an interactive shell is unavailable.
@@ -13,6 +14,9 @@ import type { Store } from './store.js';
  * common cause of the "Invalid admin credentials" error on a manually seeded database.
  */
 export async function bootstrapSuperAdmin(store: Store): Promise<boolean> {
+  // Always run audit and migration for existing vendor accounts
+  await auditAndMigrateVendorPermissions(store).catch(() => undefined);
+
   const email = config.superAdminEmail.trim();
   const password = config.superAdminPassword;
   if (!email && !password) return false;

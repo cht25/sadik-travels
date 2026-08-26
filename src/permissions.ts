@@ -1,15 +1,14 @@
-import type { User } from './store.js';
+import type { User, Store } from './store.js';
 
 /**
  * Granular permission engine (add-on to the existing role-based RBAC).
  *
  * - SUPER_ADMIN always has every permission and cannot be restricted.
- * - Other admin roles receive a default permission set derived from their role,
+ * - Other admin roles receive a default permission preset derived from their role,
  *   UNLESS a Super Admin has configured a custom permission list on the user
  *   document (`user.permissions`). When that array exists it is authoritative.
  * - Fine-grained keys (hotel.create, booking.refund, ...) are enforced directly
- *   on dedicated endpoints. Keys that map to a coarse permission also unlock the
- *   legacy coarse-gated endpoints, so backward compatibility is preserved.
+ *   on dedicated endpoints.
  */
 
 export type CoarsePerm = 'dashboard:view' | 'bookings:view' | 'bookings:manage' | 'payments:view' | 'payments:manage' | 'customers:view' | 'content:manage' | 'services:manage' | 'notifications:send' | 'support:manage' | 'settings:manage' | 'users:manage' | 'audit:view' | 'navigation:manage';
@@ -18,14 +17,14 @@ export type CoarsePerm = 'dashboard:view' | 'bookings:view' | 'bookings:manage' 
 export const FINE_TO_COARSE: Record<string, CoarsePerm[]> = {
   'dashboard.view': ['dashboard:view'],
   'reports.view': ['dashboard:view'],
-  'hotel.view': ['bookings:view'],
-  'hotel.create': ['content:manage'],
-  'hotel.update': ['content:manage'],
-  'hotel.delete': ['content:manage'],
-  'room.view': ['bookings:view'],
-  'room.create': ['content:manage'],
-  'room.update': ['content:manage'],
-  'room.delete': ['content:manage'],
+  'hotel.view': ['services:manage'],
+  'hotel.create': ['services:manage'],
+  'hotel.update': ['services:manage'],
+  'hotel.delete': ['services:manage'],
+  'room.view': ['services:manage'],
+  'room.create': ['services:manage'],
+  'room.update': ['services:manage'],
+  'room.delete': ['services:manage'],
   'home.view': ['content:manage'],
   'home.create': ['content:manage'],
   'home.update': ['content:manage'],
@@ -162,21 +161,94 @@ export const PLATFORM_ROLES = Object.freeze({
 export const VENDOR_ROLES = [PLATFORM_ROLES.HOTEL_OWNER, PLATFORM_ROLES.HOME_OWNER, PLATFORM_ROLES.TRAVEL_AGENT] as const;
 export type VendorRole = typeof VENDOR_ROLES[number];
 
-const ROLE_DEFAULT_FINE: Record<string, string[]> = {
+export const ROLE_PERMISSION_PRESETS: Record<string, string[]> = {
   super_admin: ALL_PERMISSIONS_INCL_SUPER,
-  // Vendor roles intentionally have no implicit access. A Super Admin must
-  // explicitly assign every dashboard module/capability they can use.
-  hotel_owner: [],
-  home_owner: [],
-  travel_agent: [],
   admin: ALL_FINE_PERMISSIONS,
-  manager: ['catalog.view', 'order.view', 'order.update', 'order.cancel', 'coupon.view', 'review.view', 'review.moderate', 'invoice.view', 'dashboard.view', 'reports.view', 'booking.view', 'booking.create', 'booking.update', 'booking.cancel', 'customer.view', 'support.view', 'support.reply', 'notifications.send'],
-  support: ['catalog.view', 'order.view', 'review.view', 'dashboard.view', 'booking.view', 'customer.view', 'support.view', 'support.reply', 'notifications.send'],
-  content_manager: ['catalog.view', 'catalog.create', 'catalog.update', 'catalog.delete', 'coupon.view', 'coupon.create', 'coupon.update', 'review.view', 'review.moderate', 'dashboard.view', 'reports.view', 'agent.view', 'agent.create', 'agent.update', 'agent.delete', 'tour.view', 'tour.create', 'tour.update', 'tour.delete', 'content.view', 'offer.view', 'offer.create', 'offer.update', 'offer.delete', 'media.view', 'media.upload', 'media.delete', 'service.manage'],
-  finance: ['order.view', 'order.refund', 'invoice.view', 'catalog.view', 'dashboard.view', 'reports.view', 'booking.view', 'payment.view', 'payment.manage', 'customer.view'],
-  staff: ['catalog.view', 'order.view', 'dashboard.view', 'reports.view', 'booking.view', 'customer.view', 'support.view'],
+  hotel_owner: [
+    'dashboard.view',
+    'reports.view',
+    'hotel.view',
+    'hotel.create',
+    'hotel.update',
+    'hotel.delete',
+    'room.view',
+    'room.create',
+    'room.update',
+    'room.delete',
+    'booking.view',
+    'booking.create',
+    'booking.update',
+    'booking.cancel',
+    'booking.refund',
+    'media.view',
+    'media.upload',
+    'media.delete',
+    'review.view',
+    'review.moderate',
+    'review.delete'
+  ],
+  home_owner: [
+    'dashboard.view',
+    'reports.view',
+    'home.view',
+    'home.create',
+    'home.update',
+    'home.delete',
+    'media.view',
+    'media.upload',
+    'media.delete',
+    'review.view',
+    'review.moderate'
+  ],
+  travel_agent: [
+    'dashboard.view',
+    'reports.view',
+    'agent.view',
+    'agent.create',
+    'agent.update',
+    'agent.delete',
+    'tour.view',
+    'media.view',
+    'media.upload'
+  ],
+  manager: [
+    'catalog.view', 'order.view', 'order.update', 'order.cancel',
+    'coupon.view', 'review.view', 'review.moderate', 'invoice.view',
+    'dashboard.view', 'reports.view', 'booking.view', 'booking.create',
+    'booking.update', 'booking.cancel', 'customer.view', 'support.view',
+    'support.reply', 'notifications.send'
+  ],
+  support: [
+    'catalog.view', 'order.view', 'review.view', 'dashboard.view',
+    'booking.view', 'customer.view', 'support.view', 'support.reply',
+    'notifications.send'
+  ],
+  content_manager: [
+    'catalog.view', 'catalog.create', 'catalog.update', 'catalog.delete',
+    'coupon.view', 'coupon.create', 'coupon.update', 'review.view',
+    'review.moderate', 'dashboard.view', 'reports.view', 'agent.view',
+    'agent.create', 'agent.update', 'agent.delete', 'tour.view',
+    'tour.create', 'tour.update', 'tour.delete', 'content.view',
+    'offer.view', 'offer.create', 'offer.update', 'offer.delete',
+    'media.view', 'media.upload', 'media.delete', 'service.manage'
+  ],
+  finance: [
+    'order.view', 'order.refund', 'invoice.view', 'catalog.view',
+    'dashboard.view', 'reports.view', 'booking.view', 'payment.view',
+    'payment.manage', 'customer.view'
+  ],
+  staff: [
+    'catalog.view', 'order.view', 'dashboard.view', 'reports.view',
+    'booking.view', 'customer.view', 'support.view'
+  ],
   customer: []
 };
+
+export const ROLE_DEFAULT_FINE: Record<string, string[]> = ROLE_PERMISSION_PRESETS;
+
+export function getRolePreset(role: string): string[] {
+  return ROLE_PERMISSION_PRESETS[role] ? [...ROLE_PERMISSION_PRESETS[role]] : [];
+}
 
 type PermUser = Pick<User, 'role'> & { permissions?: string[] };
 
@@ -208,4 +280,55 @@ export function hasCoarsePermission(user: PermUser | undefined, coarse: string):
 export function sanitizePermissions(input: unknown, isSuperTarget: boolean): string[] {
   const allowed = new Set(isSuperTarget ? ALL_PERMISSIONS_INCL_SUPER : ALL_FINE_PERMISSIONS);
   return [...new Set((Array.isArray(input) ? input : []).map(value => String(value)).filter(key => allowed.has(key)))];
+}
+
+/**
+ * Safely audit existing vendor accounts (Hotel Owners, Home Owners, Travel Agents)
+ * and strip unrelated permissions while guaranteeing their correct role preset permissions.
+ */
+export async function auditAndMigrateVendorPermissions(store: Store): Promise<{ audited: number; updated: number }> {
+  try {
+    const users = await store.listAdmins();
+    let updated = 0;
+    let audited = 0;
+
+    for (const user of users) {
+      if (user.role === 'hotel_owner') {
+        audited += 1;
+        const currentPerms: string[] | undefined = Array.isArray(user.permissions) ? user.permissions : undefined;
+        const hotelPreset = ROLE_PERMISSION_PRESETS.hotel_owner;
+        const unrelatedKeys = ['home.', 'tour.', 'agent.', 'catalog.', 'order.', 'coupon.', 'settings.', 'navigation.', 'payment.', 'customer.', 'user.manage', 'service.manage'];
+        
+        if (!currentPerms || currentPerms.length === 0) {
+          await store.updateAdmin(user.id, { permissions: [...hotelPreset] });
+          updated += 1;
+        } else {
+          const hasUnrelated = currentPerms.some((k: string) => unrelatedKeys.some(u => k.startsWith(u) || k === u));
+          if (hasUnrelated) {
+            const cleaned = currentPerms.filter((k: string) => !unrelatedKeys.some(u => k.startsWith(u) || k === u));
+            const merged = [...new Set([...hotelPreset, ...cleaned])].filter((k: string) => !unrelatedKeys.some(u => k.startsWith(u) || k === u));
+            await store.updateAdmin(user.id, { permissions: merged });
+            updated += 1;
+          }
+        }
+      } else if (user.role === 'home_owner') {
+        audited += 1;
+        const currentPerms: string[] | undefined = Array.isArray(user.permissions) ? user.permissions : undefined;
+        if (!currentPerms || currentPerms.length === 0) {
+          await store.updateAdmin(user.id, { permissions: [...ROLE_PERMISSION_PRESETS.home_owner] });
+          updated += 1;
+        }
+      } else if (user.role === 'travel_agent') {
+        audited += 1;
+        const currentPerms: string[] | undefined = Array.isArray(user.permissions) ? user.permissions : undefined;
+        if (!currentPerms || currentPerms.length === 0) {
+          await store.updateAdmin(user.id, { permissions: [...ROLE_PERMISSION_PRESETS.travel_agent] });
+          updated += 1;
+        }
+      }
+    }
+    return { audited, updated };
+  } catch {
+    return { audited: 0, updated: 0 };
+  }
 }

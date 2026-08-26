@@ -16,7 +16,7 @@ import { hashOtp, hashPassword, issueSession, normalizeIdentity, setAuthCookies,
 import { computeTourQuote, BD_VAT_PCT, BD_AIT_PCT } from './booking-schema.js';
 import { MessagingProvider, PaymentProvider } from './providers.js';
 import { optionalAuth, requireAuth, requireAdmin, requireFinePermission, requireInternalOperator, requireSuperAdmin, permissionsFor, notFound, requestContext } from './middleware.js';
-import { effectiveFinePermissions, sanitizePermissions, PERMISSION_CATALOG, ALL_FINE_PERMISSIONS } from './permissions.js';
+import { effectiveFinePermissions, sanitizePermissions, PERMISSION_CATALOG, ALL_FINE_PERMISSIONS, ROLE_PERMISSION_PRESETS } from './permissions.js';
 import { rateLimit } from './rate-limit.js';
 import { SECRET_MASK } from './secrets.js';
 import { MediaService, optimizedMediaUrl } from './media.js';
@@ -337,12 +337,46 @@ export function buildApp() {
   const adminRoleSchema = z.enum(['admin', 'staff', 'manager', 'support', 'content_manager', 'finance', 'hotel_owner', 'home_owner', 'travel_agent', 'super_admin']);
   const adminCreateSchema = z.object({ fullName: z.string().trim().min(2).max(120), email: z.string().trim().toLowerCase().email(), phone: z.string().max(40).optional(), role: adminRoleSchema, password: passwordSchema, permissions: z.array(z.string().max(60)).default([]), status: z.enum(['active', 'suspended', 'blocked']).default('active'), avatarUrl: z.string().max(500).optional(), avatarMediaId: z.string().uuid().optional() });
   const adminPatchSchema = z.object({ fullName: z.string().trim().min(2).max(120).optional(), email: z.string().trim().toLowerCase().email().optional(), phone: z.string().max(40).optional(), role: adminRoleSchema.optional(), permissions: z.array(z.string().max(60)).optional(), status: z.enum(['active', 'suspended', 'blocked']).optional(), avatarUrl: z.string().max(500).optional(), avatarMediaId: z.string().uuid().optional() });
-  const adminView = (user: any) => ({ ...userView(user), permissions: Array.isArray(user.permissions) ? user.permissions : undefined, isConfigured: Array.isArray(user.permissions) });
-  app.get('/api/v1/admin/permissions/catalog', requireSuperAdmin(store), (_req, res) => res.json({ catalog: PERMISSION_CATALOG, allFine: ALL_FINE_PERMISSIONS }));
+  const adminView = (user: any) => ({ ...userView(user), permissions: Array.isArray(user.permissions) ? user.permissions : (ROLE_PERMISSION_PRESETS[user.role] || []), isConfigured: Array.isArray(user.permissions) });
+  app.get('/api/v1/admin/permissions/catalog', requireSuperAdmin(store), (_req, res) => res.json({ catalog: PERMISSION_CATALOG, allFine: ALL_FINE_PERMISSIONS, presets: ROLE_PERMISSION_PRESETS }));
   app.get('/api/v1/admin/admins', requireSuperAdmin(store), async (_req, res) => res.json({ admins: (await store.listAdmins()).map(adminView) }));
   app.get('/api/v1/admin/admins/:id', requireSuperAdmin(store), async (req, res, next) => { try { const user = await store.findUserById(String(req.params.id)); assert(user && user.role !== 'customer', 404, 'ADMIN_NOT_FOUND', 'Admin not found'); const activity = (await store.listAuditLogs(60)).filter((log: any) => log.userId === user.id).slice(0, 15); res.json({ admin: adminView(user), effectiveFine: effectiveFinePermissions(user), activity }); } catch (error) { next(error); } });
-  app.post('/api/v1/admin/admins', requireSuperAdmin(store), async (req, res, next) => { try { const input = toInput(adminCreateSchema, req.body); const existing = await store.findUserByIdentity(input.email); assert(!existing, 409, 'IDENTITY_IN_USE', 'That email is already registered'); const permissions = sanitizePermissions(input.permissions, input.role === 'super_admin'); const user = await store.createAdminUser({ email: input.email, phone: input.phone, fullName: input.fullName, role: input.role, permissions, status: input.status, avatarUrl: input.avatarUrl, avatarMediaId: input.avatarMediaId }); await store.setPasswordHash(user.id, await hashPassword(input.password)); await store.audit('admin.created', { ...clientMeta(req), userId: req.user!.id, metadata: { adminId: user.id, role: user.role, permissionsCount: permissions.length } }); res.status(201).json({ admin: adminView(user) }); } catch (error) { next(error); } });
-  app.patch('/api/v1/admin/admins/:id', requireSuperAdmin(store), async (req, res, next) => { try { const input = toInput(adminPatchSchema, req.body); const target = await store.findUserById(String(req.params.id)); assert(target && target.role !== 'customer', 404, 'ADMIN_NOT_FOUND', 'Admin not found'); assert(!(target.id === req.user!.id && input.role && input.role !== 'super_admin'), 409, 'SELF_DEMOTE_BLOCKED', 'Another Super Admin must change your role'); const nextRole = input.role || target.role; const patch: Record<string, unknown> = {}; for (const [key, value] of Object.entries(input)) if (value !== undefined) patch[key] = key === 'permissions' ? sanitizePermissions(value, nextRole === 'super_admin') : value; const updated = await store.updateAdmin(target.id, patch); assert(updated, 404, 'ADMIN_NOT_FOUND', 'Admin not found'); await store.audit('admin.updated', { ...clientMeta(req), userId: req.user!.id, metadata: { adminId: target.id, keys: Object.keys(patch) } }); res.json({ admin: adminView(updated) }); } catch (error) { next(error); } });
+  app.post('/api/v1/admin/admins', requireSuperAdmin(store), async (req, res, next) => {
+    try {
+      const input = toInput(adminCreateSchema, req.body);
+      const existing = await store.findUserByIdentity(input.email);
+      assert(!existing, 409, 'IDENTITY_IN_USE', 'That email is already registered');
+      const permissions = input.permissions && input.permissions.length > 0
+        ? sanitizePermissions(input.permissions, input.role === 'super_admin')
+        : sanitizePermissions(ROLE_PERMISSION_PRESETS[input.role] || [], input.role === 'super_admin');
+      const user = await store.createAdminUser({ email: input.email, phone: input.phone, fullName: input.fullName, role: input.role, permissions, status: input.status, avatarUrl: input.avatarUrl, avatarMediaId: input.avatarMediaId });
+      await store.setPasswordHash(user.id, await hashPassword(input.password));
+      await store.audit('admin.created', { ...clientMeta(req), userId: req.user!.id, metadata: { adminId: user.id, role: user.role, permissionsCount: permissions.length } });
+      res.status(201).json({ admin: adminView(user) });
+    } catch (error) { next(error); }
+  });
+  app.patch('/api/v1/admin/admins/:id', requireSuperAdmin(store), async (req, res, next) => {
+    try {
+      const input = toInput(adminPatchSchema, req.body);
+      const target = await store.findUserById(String(req.params.id));
+      assert(target && target.role !== 'customer', 404, 'ADMIN_NOT_FOUND', 'Admin not found');
+      assert(!(target.id === req.user!.id && input.role && input.role !== 'super_admin'), 409, 'SELF_DEMOTE_BLOCKED', 'Another Super Admin must change your role');
+      const nextRole = input.role || target.role;
+      const patch: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(input)) {
+        if (value !== undefined) {
+          patch[key] = key === 'permissions' ? sanitizePermissions(value, nextRole === 'super_admin') : value;
+        }
+      }
+      if (input.role && input.role !== target.role && input.permissions === undefined) {
+        patch.permissions = sanitizePermissions(ROLE_PERMISSION_PRESETS[input.role] || [], nextRole === 'super_admin');
+      }
+      const updated = await store.updateAdmin(target.id, patch);
+      assert(updated, 404, 'ADMIN_NOT_FOUND', 'Admin not found');
+      await store.audit('admin.updated', { ...clientMeta(req), userId: req.user!.id, metadata: { adminId: target.id, keys: Object.keys(patch) } });
+      res.json({ admin: adminView(updated) });
+    } catch (error) { next(error); }
+  });
   app.post('/api/v1/admin/admins/:id/reset-password', requireSuperAdmin(store), async (req, res, next) => { try { const input = toInput(z.object({ newPassword: passwordSchema }), req.body); const target = await store.findUserById(String(req.params.id)); assert(target && target.role !== 'customer', 404, 'ADMIN_NOT_FOUND', 'Admin not found'); await store.setPasswordHash(target.id, await hashPassword(input.newPassword)); await store.revokeOtherSessions(target.id, 'none'); await store.audit('admin.password_reset', { ...clientMeta(req), userId: req.user!.id, metadata: { adminId: target.id } }); res.json({ reset: true }); } catch (error) { next(error); } });
   app.post('/api/v1/admin/admins/:id/status', requireSuperAdmin(store), async (req, res, next) => { try { const input = toInput(z.object({ status: z.enum(['active', 'suspended', 'blocked']) }), req.body); const target = await store.findUserById(String(req.params.id)); assert(target && target.role !== 'customer', 404, 'ADMIN_NOT_FOUND', 'Admin not found'); assert(target.id !== req.user!.id || input.status === 'active', 409, 'SELF_DISABLE_BLOCKED', 'You cannot suspend or disable your own account'); const updated = await store.updateAdmin(target.id, { status: input.status }); if (input.status !== 'active') await store.revokeOtherSessions(target.id, 'none'); await store.audit('admin.status_changed', { ...clientMeta(req), userId: req.user!.id, metadata: { adminId: target.id, status: input.status } }); res.json({ admin: adminView(updated) }); } catch (error) { next(error); } });
   app.delete('/api/v1/admin/admins/:id', requireSuperAdmin(store), async (req, res, next) => { try { const target = await store.findUserById(String(req.params.id)); assert(target && target.role !== 'customer', 404, 'ADMIN_NOT_FOUND', 'Admin not found'); assert(target.id !== req.user!.id, 409, 'SELF_DELETE_BLOCKED', 'You cannot delete your own account'); const deleted = await store.deleteAdminUser(target.id); assert(deleted, 404, 'ADMIN_NOT_FOUND', 'Admin not found'); await store.audit('admin.deleted', { ...clientMeta(req), userId: req.user!.id, metadata: { adminId: target.id } }); res.json({ deleted: true }); } catch (error) { next(error); } });
@@ -350,9 +384,9 @@ export function buildApp() {
   app.get('/api/v1/admin/navigation', requireAdmin(store), async (req, res) => {
     const navigation = await store.listNavigation(false);
     if (req.user!.role === 'super_admin') return res.json({ navigation });
-    const coarse = new Set(permissionsFor(req.user).map(permission => permission.replace(':', '_')));
     const fine = new Set(effectiveFinePermissions(req.user));
     const routePermission: Record<string, string> = {
+      '/admin': 'dashboard.view',
       '/admin/hotels': 'hotel.view',
       '/admin/hotel-bookings': 'booking.view',
       '/admin/live-support': 'support.view',
@@ -370,22 +404,19 @@ export function buildApp() {
       '/admin/media': 'media.view',
       '/admin/navigation': 'navigation.manage',
       '/admin/settings': 'settings.view',
-      '/admin/system-status': 'dashboard.view',
+      '/admin/system-status': 'settings.view',
       '/admin/profile': 'dashboard.view',
-      '/admin': 'dashboard.view'
+      '/admin/admins': 'admin.manage'
     };
     const vendor = ['hotel_owner', 'home_owner', 'travel_agent'].includes(req.user!.role);
     const allowed = navigation.filter(item => {
       if (item.route === '/admin/admins') return false;
-      if (vendor) {
-        if (item.route === '/admin/bookings') return false;
-        if (req.user!.role === 'hotel_owner' && !['/admin/hotels', '/admin/hotel-bookings', '/admin/profile', '/admin'].includes(item.route)) return false;
-        if (req.user!.role === 'home_owner' && !['/admin/catalog?type=home', '/admin/profile', '/admin'].includes(item.route)) return false;
-        if (req.user!.role === 'travel_agent' && !['/admin/travel-agents', '/admin/profile', '/admin'].includes(item.route)) return false;
-      }
+      if (vendor && item.route === '/admin/bookings') return false;
       const routeFine = routePermission[item.route];
-      const configured = String(item.permission || '');
-      return !configured || fine.has(configured.replace(/_/g, '.')) || Boolean(routeFine && fine.has(routeFine)) || (!vendor && coarse.has(configured));
+      const configuredFine = item.permission ? item.permission.replace(/_/g, '.') : undefined;
+      if (routeFine) return fine.has(routeFine);
+      if (configuredFine) return fine.has(configuredFine);
+      return true;
     });
     res.json({ navigation: allowed });
   });
@@ -411,8 +442,22 @@ export function buildApp() {
   app.post('/api/v1/admin/profile/verify-contact-otp', requireAdmin(store), rateLimit('profile-contact-verify', 10, 300), async (req, res) => { const input = toInput(verifyContactOtpRequest, req.body); const challenge = await store.findOtp(input.challengeId); assert(challenge && challenge.userId === req.user!.id && challenge.targetIdentity && ['profile_email_change','profile_phone_change'].includes(challenge.purpose || ''), 404, 'OTP_NOT_FOUND', 'This contact verification is no longer available'); assert(!challenge.consumedAt && new Date(challenge.expiresAt)>new Date(), 400, 'OTP_EXPIRED', 'This verification code has expired'); assert(challenge.attempts < challenge.maxAttempts, 429, 'OTP_LOCKED', 'Too many incorrect attempts'); const valid = await verifyOtpHash(input.code, challenge.codeHash); if(!valid){await store.incrementOtpAttempts(challenge.id); throw new AppError(400,'OTP_INVALID','Incorrect verification code');} await store.consumeOtp(challenge.id); const patch = challenge.channel === 'email' ? { email: challenge.targetIdentity } : { phone: challenge.targetIdentity }; const user = await store.updateUserProfile(req.user!.id, patch); await store.audit(challenge.channel === 'email' ? 'admin.email_changed' : 'admin.phone_changed', { ...clientMeta(req), userId: req.user!.id, metadata: { channel: challenge.channel } }); res.json({ user: userView(user, true) }); });
   app.get('/api/v1/admin/profile/sessions', requireAdmin(store), async (req, res) => res.json({ sessions: await store.listSessions(req.user!.id), currentSessionId: req.auth?.sid }));
   app.post('/api/v1/admin/profile/sessions/revoke-others', requireAdmin(store), async (req, res) => { assert(req.auth?.sid, 401, 'SESSION_INVALID', 'Current session is not available'); await store.revokeOtherSessions(req.user!.id, req.auth.sid); await store.audit('admin.sessions_revoked', { ...clientMeta(req), userId: req.user!.id }); res.json({ revoked: true }); });
-  app.get('/api/v1/admin/system-status', requireFinePermission(store, 'dashboard.view'), async (_req,res)=>{ await store.health(); const smsProvider=await store.getSetting('sms_provider')||config.smsProvider; const emailConfigured=Boolean((await store.getSetting('smtp_host'))||config.smtpHost) && Boolean((await store.getSetting('smtp_from'))||config.smtpFrom); const smsConfigured=smsProvider==='custom_gateway'?Boolean((await store.getSetting('sms_gateway_url'))||config.smsGatewayUrl):Boolean((await store.getSetting('sms_api_key'))||config.bulkSmsApiKey); const paymentConfigured=Boolean(await store.getSetting('sslcommerz_store_id')||await store.getSetting('bkash_base_url')); res.json({services:{database:{status:'connected'},cloudinary:{status:media.isConfigured()?'connected':'not_configured'},email:{status:emailConfigured?'configured':'not_configured'},sms:{status:smsConfigured?'configured':'not_configured'},payment:{status:paymentConfigured?'configured':'not_configured'}}}); });
-  app.get('/api/v1/admin/stats', requireFinePermission(store, 'dashboard.view'), async (_req, res) => { const stats = await store.adminStats(); const recent = await store.listAdminBookings({ page: 1, pageSize: 8 }); res.json({ ...stats, tours: stats.tours, recentBookings: recent.bookings, recentActivity: await store.listAuditLogs(12) }); });
+  app.get('/api/v1/admin/system-status', requireFinePermission(store, 'settings.view'), async (_req,res)=>{ await store.health(); const smsProvider=await store.getSetting('sms_provider')||config.smsProvider; const emailConfigured=Boolean((await store.getSetting('smtp_host'))||config.smtpHost) && Boolean((await store.getSetting('smtp_from'))||config.smtpFrom); const smsConfigured=smsProvider==='custom_gateway'?Boolean((await store.getSetting('sms_gateway_url'))||config.smsGatewayUrl):Boolean((await store.getSetting('sms_api_key'))||config.bulkSmsApiKey); const paymentConfigured=Boolean(await store.getSetting('sslcommerz_store_id')||await store.getSetting('bkash_base_url')); res.json({services:{database:{status:'connected'},cloudinary:{status:media.isConfigured()?'connected':'not_configured'},email:{status:emailConfigured?'configured':'not_configured'},sms:{status:smsConfigured?'configured':'not_configured'},payment:{status:paymentConfigured?'configured':'not_configured'}}}); });
+  app.get('/api/v1/admin/stats', requireFinePermission(store, 'dashboard.view'), async (req, res) => {
+    if (req.user?.role === 'hotel_owner') {
+      const stats = await hotelStore.adminStats(req.user.id);
+      const recent = await hotelStore.adminListBookings({ ownerId: req.user.id, pageSize: 8 });
+      return res.json({
+        ...stats,
+        role: 'hotel_owner',
+        recentBookings: recent.bookings,
+        recentActivity: []
+      });
+    }
+    const stats = await store.adminStats();
+    const recent = await store.listAdminBookings({ page: 1, pageSize: 8 });
+    res.json({ ...stats, tours: stats.tours, recentBookings: recent.bookings, recentActivity: await store.listAuditLogs(12) });
+  });
 
   app.get('/api/v1/admin/services', requireFinePermission(store, 'service.manage'), async (_req, res) => res.json({ services: await store.getServiceVisibility() }));
   app.patch('/api/v1/admin/services/:key/status', requireFinePermission(store, 'service.manage'), async (req, res) => { const key = String(req.params.key) as any; const input = toInput(z.object({ status: serviceStatusSchema, confirm: z.boolean().default(false) }), req.body); const current = (await store.getServiceVisibility()).find(item => item.key === key); assert(current, 404, 'SERVICE_NOT_FOUND', 'Service not found'); assert(input.status === current.status || input.confirm, 400, 'CONFIRMATION_REQUIRED', `Confirm changing ${current.label} visibility`); const service = await store.updateServiceVisibility(key, input.status, req.user!.id); await store.audit('admin.service_visibility_updated', { ...clientMeta(req), userId: req.user!.id, metadata: { service: key, previousStatus: current.status, status: input.status } }); res.json({ service }); });

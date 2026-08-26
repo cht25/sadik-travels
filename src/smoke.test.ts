@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { io as createSocket, type Socket } from 'socket.io-client';
-import { effectiveFinePermissions, hasFinePermission } from './permissions.js';
+import { effectiveFinePermissions, hasFinePermission, ROLE_PERMISSION_PRESETS, getRolePreset, auditAndMigrateVendorPermissions, sanitizePermissions } from './permissions.js';
 import { hashChatToken, verifyChatToken } from './live-chat.js';
 import { ACTIVE_CATALOG_TYPES, RETIRED_VERTICAL_TYPES, isRetiredAdminNavItem } from './legacy-purge.js';
 import { computeTourQuote } from './booking-schema.js';
@@ -32,18 +32,88 @@ test('retired verticals such as the legacy Umrah fare entry are rejected everywh
   assert.equal((RETIRED_VERTICAL_TYPES as readonly string[]).includes('umrah_fare'), true);
 });
 
-test('vendor RBAC is deny-by-default and accepts only explicitly assigned modules', () => {
+test('role-based permission presets: Hotel Owner receives complete hotel preset and unrelated modules remain disabled', () => {
+  // 1. Hotel owner default role preset
   const hotelOwner = { role: 'hotel_owner' as const };
-  assert.deepEqual(effectiveFinePermissions(hotelOwner), []);
-  assert.equal(hasFinePermission(hotelOwner, 'hotel.view'), false);
-  const assignedOwner = { role: 'hotel_owner' as const, permissions: ['hotel.view', 'hotel.update'] };
-  assert.equal(hasFinePermission(assignedOwner, 'hotel.view'), true);
-  assert.equal(hasFinePermission(assignedOwner, 'hotel.create'), false);
-  assert.deepEqual(effectiveFinePermissions({ role: 'home_owner' as const }), []);
-  assert.equal(hasFinePermission({ role: 'home_owner' as const, permissions: ['home.view'] }, 'catalog.view'), false);
-  assert.equal(hasFinePermission({ role: 'home_owner' as const, permissions: ['home.view'] }, 'home.view'), true);
-  assert.deepEqual(effectiveFinePermissions({ role: 'travel_agent' as const }), []);
+  const hotelPerms = effectiveFinePermissions(hotelOwner);
+  assert.deepEqual(hotelPerms, ROLE_PERMISSION_PRESETS.hotel_owner);
+
+  // Hotel features are enabled
+  assert.equal(hasFinePermission(hotelOwner, 'dashboard.view'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'reports.view'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'hotel.view'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'hotel.create'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'hotel.update'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'hotel.delete'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'room.view'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'room.create'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'room.update'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'room.delete'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'booking.view'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'booking.create'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'booking.update'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'booking.cancel'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'booking.refund'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'media.view'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'media.upload'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'media.delete'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'review.view'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'review.moderate'), true);
+  assert.equal(hasFinePermission(hotelOwner, 'review.delete'), true);
+
+  // Unrelated marketplace features MUST remain disabled by default
+  assert.equal(hasFinePermission(hotelOwner, 'home.view'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'home.create'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'tour.view'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'tour.create'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'agent.view'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'catalog.view'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'order.view'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'coupon.view'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'customer.view'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'user.manage'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'payment.view'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'support.view'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'settings.view'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'settings.edit'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'service.manage'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'navigation.manage'), false);
+  assert.equal(hasFinePermission(hotelOwner, 'admin.manage'), false);
+
+  // 2. Home Owner role preset
+  const homeOwner = { role: 'home_owner' as const };
+  assert.deepEqual(effectiveFinePermissions(homeOwner), ROLE_PERMISSION_PRESETS.home_owner);
+  assert.equal(hasFinePermission(homeOwner, 'home.view'), true);
+  assert.equal(hasFinePermission(homeOwner, 'hotel.view'), false);
+  assert.equal(hasFinePermission(homeOwner, 'tour.view'), false);
+  assert.equal(hasFinePermission(homeOwner, 'agent.view'), false);
+
+  // 3. Travel Agent role preset
+  const travelAgent = { role: 'travel_agent' as const };
+  assert.deepEqual(effectiveFinePermissions(travelAgent), ROLE_PERMISSION_PRESETS.travel_agent);
+  assert.equal(hasFinePermission(travelAgent, 'agent.view'), true);
+  assert.equal(hasFinePermission(travelAgent, 'hotel.view'), false);
+  assert.equal(hasFinePermission(travelAgent, 'home.view'), false);
+
+  // 4. Super Admin has unrestricted access
   assert.equal(hasFinePermission({ role: 'super_admin' as const }, 'hotel.delete'), true);
+  assert.equal(hasFinePermission({ role: 'super_admin' as const }, 'admin.manage'), true);
+
+  // 5. Custom permission override: Super Admin can customize Hotel Owner permissions
+  const customizedOwner = {
+    role: 'hotel_owner' as const,
+    permissions: ROLE_PERMISSION_PRESETS.hotel_owner.filter(p => p !== 'room.update')
+  };
+  assert.equal(hasFinePermission(customizedOwner, 'hotel.view'), true);
+  assert.equal(hasFinePermission(customizedOwner, 'room.view'), true);
+  assert.equal(hasFinePermission(customizedOwner, 'room.update'), false); // Removed permission is revoked
+
+  // Explicitly granted additional permission works
+  const extendedOwner = {
+    role: 'hotel_owner' as const,
+    permissions: [...ROLE_PERMISSION_PRESETS.hotel_owner, 'tour.view']
+  };
+  assert.equal(hasFinePermission(extendedOwner, 'tour.view'), true);
 });
 
 test('admin granular permissions enforce exact access and dynamic updates', () => {
@@ -86,6 +156,99 @@ test('admin granular permissions enforce exact access and dynamic updates', () =
   assert.equal(hasFinePermission(hotelOwnerUser, 'tour.view'), false);
   assert.equal(hasFinePermission(hotelOwnerUser, 'customer.view'), false);
   assert.equal(hasFinePermission(hotelOwnerUser, 'admin.manage'), false);
+});
+
+test('role presets helper returns correct default permissions for each role', () => {
+  assert.deepEqual(getRolePreset('hotel_owner'), ROLE_PERMISSION_PRESETS.hotel_owner);
+  assert.deepEqual(getRolePreset('home_owner'), ROLE_PERMISSION_PRESETS.home_owner);
+  assert.deepEqual(getRolePreset('travel_agent'), ROLE_PERMISSION_PRESETS.travel_agent);
+  assert.equal(getRolePreset('hotel_owner').includes('hotel.view'), true);
+  assert.equal(getRolePreset('hotel_owner').includes('room.update'), true);
+  assert.equal(getRolePreset('hotel_owner').includes('booking.view'), true);
+  assert.equal(getRolePreset('hotel_owner').includes('home.view'), false);
+  assert.equal(getRolePreset('hotel_owner').includes('tour.view'), false);
+  assert.equal(getRolePreset('hotel_owner').includes('admin.manage'), false);
+});
+
+test('auditAndMigrateVendorPermissions migrates hotel owners with incorrect permissions', async () => {
+  const users: any[] = [
+    {
+      id: 'ho-1',
+      role: 'hotel_owner',
+      permissions: ['home.view', 'tour.view', 'hotel.view', 'settings.view']
+    },
+    {
+      id: 'ho-2',
+      role: 'hotel_owner',
+      permissions: []
+    },
+    {
+      id: 'ta-1',
+      role: 'travel_agent',
+      permissions: []
+    }
+  ];
+  const updatedAdmins: Record<string, any> = {};
+  const mockStore: any = {
+    listAdmins: async () => users,
+    updateAdmin: async (id: string, patch: any) => {
+      updatedAdmins[id] = patch;
+      const user = users.find(u => u.id === id);
+      if (user) Object.assign(user, patch);
+      return user;
+    }
+  };
+
+  const result = await auditAndMigrateVendorPermissions(mockStore);
+  assert.equal(result.audited, 3);
+  assert.equal(result.updated, 3);
+
+  // ho-1 should have unrelated permissions stripped (home, tour, settings) and hotel preset applied
+  assert.equal(updatedAdmins['ho-1'].permissions.includes('home.view'), false);
+  assert.equal(updatedAdmins['ho-1'].permissions.includes('tour.view'), false);
+  assert.equal(updatedAdmins['ho-1'].permissions.includes('settings.view'), false);
+  assert.equal(updatedAdmins['ho-1'].permissions.includes('hotel.view'), true);
+  assert.equal(updatedAdmins['ho-1'].permissions.includes('room.view'), true);
+  assert.equal(updatedAdmins['ho-1'].permissions.includes('booking.view'), true);
+
+  // ho-2 should have full hotel preset applied
+  assert.deepEqual(updatedAdmins['ho-2'].permissions, ROLE_PERMISSION_PRESETS.hotel_owner);
+
+  // ta-1 should have full travel agent preset applied
+  assert.deepEqual(updatedAdmins['ta-1'].permissions, ROLE_PERMISSION_PRESETS.travel_agent);
+});
+
+test('sanitizePermissions strips super-only permissions for non-super targets and preserves valid fine keys', () => {
+  const rawPerms = ['hotel.view', 'hotel.create', 'admin.manage', 'system.settings', 'tour.view', 'invalid.key'];
+  const sanitizedForAdmin = sanitizePermissions(rawPerms, false);
+  assert.equal(sanitizedForAdmin.includes('hotel.view'), true);
+  assert.equal(sanitizedForAdmin.includes('hotel.create'), true);
+  assert.equal(sanitizedForAdmin.includes('tour.view'), true);
+  assert.equal(sanitizedForAdmin.includes('admin.manage'), false); // Stripped for non-super targets
+  assert.equal(sanitizedForAdmin.includes('system.settings'), false); // Stripped for non-super targets
+  assert.equal(sanitizedForAdmin.includes('invalid.key'), false); // Stripped invalid key
+
+  const sanitizedForSuper = sanitizePermissions(rawPerms, true);
+  assert.equal(sanitizedForSuper.includes('admin.manage'), true);
+  assert.equal(sanitizedForSuper.includes('system.settings'), true);
+});
+
+test('role switching preserves clean role presets without accidental permission bleed', () => {
+  // Switch from Admin to Hotel Owner
+  const previousAdminRole = 'admin';
+  const nextHotelOwnerRole = 'hotel_owner';
+  const hotelOwnerPreset = getRolePreset(nextHotelOwnerRole);
+  assert.equal(hotelOwnerPreset.includes('hotel.view'), true);
+  assert.equal(hotelOwnerPreset.includes('room.view'), true);
+  assert.equal(hotelOwnerPreset.includes('tour.view'), false);
+  assert.equal(hotelOwnerPreset.includes('agent.view'), false);
+
+  // Switch from Hotel Owner to Travel Agent
+  const nextTravelAgentRole = 'travel_agent';
+  const travelAgentPreset = getRolePreset(nextTravelAgentRole);
+  assert.equal(travelAgentPreset.includes('agent.view'), true);
+  assert.equal(travelAgentPreset.includes('hotel.view'), false);
+  assert.equal(travelAgentPreset.includes('room.view'), false);
 });
 
 test('live-chat room tokens are hashed and timing-safe verified', () => {
