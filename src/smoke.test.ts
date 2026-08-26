@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { io as createSocket, type Socket } from 'socket.io-client';
 import { effectiveFinePermissions, hasFinePermission, ROLE_PERMISSION_PRESETS, getRolePreset, auditAndMigrateVendorPermissions, sanitizePermissions } from './permissions.js';
-import { hashChatToken, verifyChatToken } from './live-chat.js';
+import { conversationDedupKey, encodeDedupKey, hashGuestSecret, parseIdentityCredentials, verifyGuestSecret } from './chat/keys.js';
 import { ACTIVE_CATALOG_TYPES, RETIRED_VERTICAL_TYPES, isRetiredAdminNavItem } from './legacy-purge.js';
 import { computeTourQuote } from './booking-schema.js';
 
@@ -251,13 +251,20 @@ test('role switching preserves clean role presets without accidental permission 
   assert.equal(travelAgentPreset.includes('room.view'), false);
 });
 
-test('live-chat room tokens are hashed and timing-safe verified', () => {
-  const token = 'visitor-session-token-with-more-than-32-characters';
-  const hash = hashChatToken(token);
-  assert.notEqual(hash, token);
-  assert.equal(verifyChatToken(token, hash), true);
-  assert.equal(verifyChatToken(`${token}-wrong`, hash), false);
-  assert.equal(verifyChatToken('', hash), false);
+test('chat identity credentials and conversation dedup keys are stable and timing-safe', () => {
+  const secret = 'guest-secret-value-with-length';
+  const hash = hashGuestSecret(secret);
+  assert.notEqual(hash, secret);
+  assert.equal(verifyGuestSecret(secret, hash), true);
+  assert.equal(verifyGuestSecret(`${secret}-wrong`, hash), false);
+  assert.equal(verifyGuestSecret('', hash), false);
+  const uid = 'g-abc123';
+  const header = `${uid}.${secret}`;
+  const parsed = parseIdentityCredentials(header);
+  assert.deepEqual(parsed, { uid, secret });
+  assert.equal(parseIdentityCredentials('invalid'), undefined);
+  assert.equal(conversationDedupKey('hotel', 'hotel-uuid', 'u-user'), 'hotel:hotel-uuid:u-user');
+  assert.equal(encodeDedupKey(conversationDedupKey('hotel', 'hotel-uuid', 'u-user')), encodeDedupKey('hotel:hotel-uuid:u-user'));
 });
 
 test('tour pricing is always computed on the server from the persisted adult price', () => {
@@ -342,22 +349,32 @@ if (!testMongoUri) {
       assert.equal(adminLogin.user.role, 'super_admin');
       const adminCookie = cookies(login);
 
-      const chatStart = await fetch(`${base}/api/v1/live-chat/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Live Chat Visitor', mobile: '01700000000', email: 'visitor@example.com', subject: 'Hotel availability' }) });
+      // Live chat: guest identity bootstrap + support conversation over the Socket.IO fallback.
+      const chatStart = await fetch(`${base}/api/v1/chat/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Live Chat Visitor', contact: '01700000000' }) });
       const { body: chat } = await responseJson(chatStart);
-      assert.equal(chatStart.status, 201);
-      visitorSocket = createSocket(base, { transports: ['websocket'] });
-      adminSocket = createSocket(base, { transports: ['websocket'], extraHeaders: { cookie: adminCookie } });
+      assert.equal(chatStart.status, 200);
+      assert.equal(chat.identity.kind, 'guest');
+      const chatIdentity = `${chat.credentials.uid}.${chat.credentials.secret}`;
+      const conversationStart = await fetch(`${base}/api/v1/chat/conversations`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-chat-identity': chatIdentity }, body: JSON.stringify({ type: 'support' }) });
+      const { body: conversationPayload } = await responseJson(conversationStart);
+      assert.equal(conversationStart.status, 201);
+      const conversationId = conversationPayload.conversation.id;
+      visitorSocket = createSocket(base, { transports: ['websocket'], auth: { identity: chatIdentity } });
+      adminSocket = createSocket(base, { transports: ['websocket'], extraHeaders: { cookie: adminCookie }, auth: { identity: chatIdentity } });
       await Promise.all([connected(visitorSocket), connected(adminSocket)]);
-      const visitorJoin = await socketAck<any>(visitorSocket, 'join_chat_room', { sessionId: chat.session.id, token: chat.token });
+      const visitorHello = await socketAck<any>(visitorSocket, 'chat:hello', {});
+      assert.equal(visitorHello.ok, true);
+      const visitorJoin = await socketAck<any>(visitorSocket, 'chat:join', { conversationId });
       assert.equal(visitorJoin.ok, true);
-      const adminInbox = await socketAck<any>(adminSocket, 'admin_join_inbox', {});
-      assert.equal(adminInbox.ok, true);
-      const adminJoin = await socketAck<any>(adminSocket, 'join_chat_room', { sessionId: chat.session.id });
+      const adminHello = await socketAck<any>(adminSocket, 'chat:hello', {});
+      assert.equal(adminHello.ok, true);
+      assert.equal(adminHello.supportStaff, true, 'the super admin must receive the support inbox');
+      const adminJoin = await socketAck<any>(adminSocket, 'chat:join', { conversationId });
       assert.equal(adminJoin.ok, true);
-      assert.equal((await socketAck<any>(visitorSocket, 'send_chat_message', { message: 'Is a room available this weekend?' })).ok, true);
-      assert.equal((await socketAck<any>(adminSocket, 'admin_reply', { sessionId: chat.session.id, message: 'Yes, we can help with current availability.' })).ok, true);
-      const transcript = await (await fetch(`${base}/api/v1/live-chat/sessions/${chat.session.id}/messages`, { headers: { 'x-chat-token': chat.token } })).json();
-      assert.deepEqual(transcript.messages.map((message: any) => message.authorType), ['customer', 'admin']);
+      assert.equal((await socketAck<any>(visitorSocket, 'chat:send', { conversationId, text: 'Is a room available this weekend?' })).ok, true);
+      assert.equal((await socketAck<any>(adminSocket, 'chat:send', { conversationId, text: 'Yes, we can help with current availability.' })).ok, true);
+      const transcript = await (await fetch(`${base}/api/v1/chat/conversations/${conversationId}/messages`, { headers: { 'x-chat-identity': chatIdentity } })).json();
+      assert.deepEqual(transcript.messages.map((message: any) => message.senderRole), ['customer', 'support']);
 
       const createdTour = await fetch(`${base}/api/v1/admin/tours`, { method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' }, body: JSON.stringify({ slug: `umrah-smoke-${Date.now()}`, title: 'Umrah Smoke Package', country: 'Saudi Arabia', tourType: 'Umrah', destinations: ['Makkah', 'Madinah'], durationDays: 10, durationNights: 9, description: 'Published package for the smoke test.', imageUrl: '', metadata: {}, priceBdt: 125000, status: 'published', featured: true }) });
       const { body: tourPayload } = await responseJson(createdTour);

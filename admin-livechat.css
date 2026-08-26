@@ -15,3 +15,23 @@
 .seasonal-discounts{padding:14px;border:1px solid var(--admin-border);border-radius:9px;background:#fbfcff}.seasonal-discounts-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.seasonal-discount-row{display:grid;grid-template-columns:minmax(120px,1.4fr) minmax(125px,1fr) minmax(125px,1fr) 88px 32px;gap:8px;align-items:center;margin-top:8px}.seasonal-discount-row input{width:100%;height:37px;border:1px solid var(--admin-border-strong);border-radius:7px;padding:7px 9px;background:#fff}.seasonal-discount-row label{position:relative}.seasonal-discount-row label span{position:absolute;right:9px;top:9px;color:var(--admin-muted)}.seasonal-discount-row label input{padding-right:23px}
 @media(max-width:900px){.live-support-layout{grid-template-columns:1fr}.live-thread-pane{border-right:0;border-bottom:1px solid var(--admin-border)}.live-thread-list{max-height:300px}.live-chat-stream{height:430px}.live-chat-empty{min-height:300px}.seasonal-discount-row{grid-template-columns:1fr 1fr}.seasonal-discount-row>input:first-child{grid-column:1/-1}}
 @media(max-width:560px){.live-message{width:90%}.live-reply{align-items:stretch;flex-direction:column}.live-reply button{width:100%}.seasonal-discount-row{grid-template-columns:1fr}.seasonal-discount-row>input:first-child{grid-column:auto}}
+
+/* ---------- Messenger Live Chat inbox ---------- */
+.live-filter-tabs{display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--admin-border);background:#fbfcff}
+.live-filter-tabs button{flex:1;border:1px solid var(--admin-border);background:#fff;border-radius:16px;padding:5px 8px;font-size:9px;font-weight:700;color:var(--admin-muted);cursor:pointer}
+.live-filter-tabs button.active{background:var(--admin-brand);border-color:var(--admin-brand);color:#fff}
+.live-avatar-wrap{position:relative;flex:none}
+.live-avatar-wrap .live-avatar{overflow:hidden}
+.live-avatar-wrap .live-avatar img{width:34px;height:34px;border-radius:50%;object-fit:cover}
+.live-online-dot{position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;background:#22b573;border:2px solid #fff}
+.live-chat-head{height:70px;display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--admin-border);background:#fff}
+.live-chat-identity{flex:1;min-width:0}
+.live-chat-identity h2{margin:0;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.live-chat-identity p{margin:3px 0 0;color:var(--admin-muted);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.live-chat-status{flex:none;font-size:10px;font-weight:700;color:var(--admin-brand);background:var(--admin-brand-soft);border-radius:12px;padding:4px 10px;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.live-message .chat-message-meta{text-align:right;font-size:8px;font-style:normal;color:rgba(255,255,255,.75)}
+.live-message.is-visitor .chat-message-meta{color:var(--admin-muted)}
+.chat-receipt{color:rgba(255,255,255,.7)}
+.live-message.is-visitor .chat-receipt{color:#9aa4b5}
+.chat-receipt.read{color:#7dffb8;font-weight:800}
+.live-message.is-visitor .chat-receipt.read{color:#0d9a63}

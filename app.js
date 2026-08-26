@@ -385,6 +385,7 @@ function openModal(modal) {
 function closeModal(modal) {
   if (!modal) return;
   modal.hidden = true;
+  if (typeof closeActiveChatConversation === 'function') closeActiveChatConversation();
   if (![...document.querySelectorAll('.modal')].some(item => !item.hidden)) {
     document.body.style.overflow = '';
     if (modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus();
@@ -402,28 +403,359 @@ function openTemplateModal(templateId, summary = '') {
   bindDynamicModalEvents();
 }
 
-const LIVE_CHAT_STORAGE_KEY = 'sadik_live_chat_session';
-let liveChatSocket = null;
-let liveChatSession = null;
-const liveChatMessageIds = new Set();
-function storedLiveChat() { try { const value = JSON.parse(sessionStorage.getItem(LIVE_CHAT_STORAGE_KEY) || 'null'); return value?.id && value?.token ? value : null; } catch { return null; } }
-function saveLiveChat(session) { liveChatSession = session; sessionStorage.setItem(LIVE_CHAT_STORAGE_KEY, JSON.stringify(session)); }
-function liveChatMessageMarkup(message) { const mine = message.authorType === 'customer'; return `<article class="visitor-chat-message ${mine ? 'is-visitor' : 'is-support'}" data-chat-message="${escapeHtml(message.id)}"><div><strong>${mine ? 'You' : 'Sadik Travels Support'}</strong><small>${escapeHtml(new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</small></div><p>${escapeHtml(message.message)}</p></article>`; }
-function appendLiveChatMessage(message) { if (!message?.id || liveChatMessageIds.has(message.id) || message.ticketId !== liveChatSession?.id) return; liveChatMessageIds.add(message.id); const stream = $('#visitorChatStream'); if (stream) { stream.insertAdjacentHTML('beforeend', liveChatMessageMarkup(message)); stream.scrollTop = stream.scrollHeight; } if ($('#genericModal')?.hidden && message.authorType === 'admin') { const badge = $('#chatBubble .chat-badge'); if (badge) { badge.hidden = false; badge.textContent = String(Math.min(9, Number(badge.textContent || 0) + 1)); } } }
-function renderLiveChatConversation(session, messages = []) { liveChatMessageIds.clear(); $('#modalContent').innerHTML = `<div class="chat-modal-content visitor-chat"><div class="chat-title-row"><div><span class="online-dot"></span> Sadik Travels Chat</div><span class="chat-status" id="visitorChatStatus">Connecting…</span></div><div class="visitor-chat-subject"><strong>${escapeHtml(session.subject || 'Travel inquiry')}</strong><small>Conversation ${escapeHtml(session.id.slice(0, 8).toUpperCase())}</small></div><div class="visitor-chat-stream" id="visitorChatStream" aria-live="polite">${messages.map(message => { liveChatMessageIds.add(message.id); return liveChatMessageMarkup(message); }).join('') || '<p class="visitor-chat-empty">You are connected. Send a message and our support team will reply here.</p>'}</div><form class="visitor-chat-reply" id="visitorChatReply"><label class="sr-only" for="visitorChatText">Message</label><textarea id="visitorChatText" rows="2" maxlength="4000" placeholder="Type your message…" required></textarea><button class="btn btn-primary" type="submit">Send</button></form><p class="visitor-chat-security">Your conversation is saved securely for support and auditing.</p></div>`; const stream = $('#visitorChatStream'); if (stream) stream.scrollTop = stream.scrollHeight; bindVisitorReply(); }
-async function connectVisitorChat(session) {
-  liveChatSession = session;
-  if (!window.io) { try { const response = await apiRequest(`/live-chat/sessions/${session.id}/messages`, { headers: { 'x-chat-token': session.token } }, false); renderLiveChatConversation(session, response.messages || []); $('#visitorChatStatus').textContent = 'Connected'; } catch (error) { $('#visitorChatStatus').textContent = 'Connection unavailable'; showToast(error.message, 'error'); } return; }
-  if (liveChatSocket) liveChatSocket.disconnect();
-  liveChatSocket = window.io({ path: '/socket.io', transports: ['websocket', 'polling'], reconnectionAttempts: 5, timeout: 10000 });
-  let visitorSocketErrorLogged = false;
-  liveChatSocket.on('connect_error', error => { if (!visitorSocketErrorLogged) { visitorSocketErrorLogged = true; console.warn('Live chat socket unavailable — falling back to REST messaging.', error?.message || error); } });
-  liveChatSocket.on('connect_timeout', () => { if (!visitorSocketErrorLogged) { visitorSocketErrorLogged = true; console.warn('Live chat socket connection timed out — falling back to REST messaging.'); } });
-  liveChatSocket.on('connect', () => { $('#visitorChatStatus') && ($('#visitorChatStatus').textContent = 'Online'); liveChatSocket.emit('join_chat_room', { sessionId: session.id, token: session.token }, result => { if (result?.ok) renderLiveChatConversation(session, result.messages || []); else { $('#visitorChatStatus') && ($('#visitorChatStatus').textContent = 'Unable to join'); showToast(result?.error?.message || 'Unable to join this chat.', 'error'); } }); });
-  liveChatSocket.on('disconnect', () => { $('#visitorChatStatus') && ($('#visitorChatStatus').textContent = 'Reconnecting…'); });
-  liveChatSocket.on('chat_message', appendLiveChatMessage);
+/* ---------- Messenger-style live chat (Firebase Realtime Database) ----------
+   Conversations are context-aware: a chat started from a hotel page carries
+   type:"hotel" + the stable hotel id, so the server can add that hotel's owner
+   (via hotel.ownerId) as a real participant. Messages stream over Realtime
+   Database listeners (or the Socket.IO hub when Firebase is not configured). */
+const visitorChat = {
+  booted: false,
+  activeId: null,
+  conversation: null,
+  conversations: new Map(),
+  messages: new Map(),
+  typing: new Map(),
+  presence: new Map(),
+  inboxUnsubscribe: null,
+  conversationUnsubscribe: null,
+  connectionUnsubscribe: null
+};
+
+function chatInitials(name) { return String(name || '?').replace(/[^a-zA-Z0-9 ]/g, '').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase() || '?'; }
+function chatAvatarHtml(profile, extra = '') {
+  const label = profile?.roleLabel || '';
+  if (profile?.photoUrl) return `<span class="chat-avatar ${extra}"><img src="${escapeHtml(profile.photoUrl)}" alt="" />${label ? `<i>${escapeHtml(label)}</i>` : ''}</span>`;
+  return `<span class="chat-avatar ${extra}"><b>${escapeHtml(chatInitials(profile?.name))}</b>${label ? `<i>${escapeHtml(label)}</i>` : ''}</span>`;
 }
-function bindVisitorReply() { $('#visitorChatReply')?.addEventListener('submit', async event => { event.preventDefault(); const textarea = $('#visitorChatText'); const message = textarea.value.trim(); if (!message || !liveChatSession) return; const button = event.submitter; button.disabled = true; try { if (liveChatSocket?.connected) { const result = await new Promise(resolve => liveChatSocket.emit('send_chat_message', { message }, resolve)); if (!result?.ok) throw new Error(result?.error?.message || 'Unable to send message'); appendLiveChatMessage(result.message); } else { const response = await apiRequest(`/live-chat/sessions/${liveChatSession.id}/messages`, { method: 'POST', headers: { 'x-chat-token': liveChatSession.token }, body: JSON.stringify({ message }) }, false); appendLiveChatMessage(response.message); } textarea.value = ''; textarea.focus(); } catch (error) { showToast(error.message || 'Unable to send message.', 'error'); } finally { button.disabled = false; } }); }
+function chatContextTitle(conversation) {
+  if (conversation?.type === 'hotel') return conversation.label || 'Hotel';
+  if (conversation?.type === 'support') return 'Sadik Travels Support';
+  return conversation?.label || 'Conversation';
+}
+function chatOtherProfile(conversation) {
+  const profiles = conversation?.profiles || {};
+  const others = Object.values(profiles).filter(profile => profile.uid !== window.SadikChat?.viewer?.uid);
+  const staff = others.find(profile => profile.kind === 'staff');
+  return staff || others[0] || { uid: 'support-team', name: 'Sadik Travels Support', roleLabel: 'Support Team' };
+}
+function chatTimeLabel(value) {
+  const date = new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) return '';
+  const today = new Date();
+  if (date.toDateString() === today.toDateString()) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+function chatConnectionLabel() {
+  const state = window.SadikChat?.connectionState;
+  if (state === 'online') return 'Online';
+  if (state === 'offline') return 'Reconnecting…';
+  return 'Connecting…';
+}
+
+function updateChatBubbleBadge() {
+  const badge = $('#chatBubble .chat-badge');
+  if (!badge) return;
+  const mine = window.SadikChat?.viewer?.uid;
+  let unread = 0;
+  visitorChat.conversations.forEach(conversation => { unread += Number(conversation.unread?.[mine] || 0); });
+  badge.hidden = unread === 0 || !$('#genericModal')?.hidden;
+  badge.textContent = String(Math.min(99, unread));
+}
+
+function startVisitorChatInbox() {
+  if (visitorChat.inboxUnsubscribe || !window.SadikChat) return;
+  visitorChat.inboxUnsubscribe = window.SadikChat.watchInbox(list => {
+    visitorChat.conversations.clear();
+    (list || []).forEach(conversation => visitorChat.conversations.set(conversation.id, conversation));
+    updateChatBubbleBadge();
+    if (!$('#genericModal')?.hidden && !visitorChat.activeId) renderChatList();
+  });
+  if (!visitorChat.connectionUnsubscribe) {
+    visitorChat.connectionUnsubscribe = window.SadikChat.onConnectionState(() => {
+      const status = $('#visitorChatStatus');
+      if (status && !visitorChat.activeId) status.textContent = chatConnectionLabel();
+    });
+  }
+}
+
+function chatMessageHtml(message) {
+  const mine = message.senderId === window.SadikChat?.viewer?.uid;
+  const conversation = visitorChat.conversation;
+  const profiles = conversation?.profiles || {};
+  const author = mine ? null : (profiles[message.senderId] || chatOtherProfile(conversation));
+  const otherReadAt = Math.max(0, ...Object.entries(conversation?.reads || {}).filter(([uid]) => uid !== window.SadikChat?.viewer?.uid).map(([, at]) => Number(at) || 0));
+  const receipt = mine ? (otherReadAt >= Number(message.sentAt || 0) ? '<span class="chat-receipt read" title="Read">✓✓</span>' : '<span class="chat-receipt" title="Sent">✓</span>') : '';
+  const roleLabel = author ? `<small>${escapeHtml(author.roleLabel || (author.kind === 'staff' ? 'Support' : 'Customer'))}</small>` : '';
+  return `<article class="visitor-chat-message ${mine ? 'is-visitor' : 'is-support'}${message.pending ? ' is-pending' : ''}" data-chat-message="${escapeHtml(message.id)}">
+    <div><strong>${mine ? 'You' : escapeHtml(author?.name || 'Support')}</strong>${roleLabel}<small>${escapeHtml(new Date(message.sentAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</small></div>
+    <p>${escapeHtml(message.text)}</p>
+    ${mine ? `<i class="chat-message-meta">${receipt}</i>` : ''}
+  </article>`;
+}
+
+function renderChatMessages() {
+  const stream = $('#visitorChatStream');
+  if (!stream) return;
+  const ordered = [...visitorChat.messages.values()].sort((a, b) => (a.sentAt || 0) - (b.sentAt || 0) || String(a.id).localeCompare(String(b.id)));
+  stream.innerHTML = ordered.length ? ordered.map(chatMessageHtml).join('') : '<p class="visitor-chat-empty">Say hello — messages arrive here instantly.</p>';
+  stream.scrollTop = stream.scrollHeight;
+}
+
+function renderChatHeader() {
+  const conversation = visitorChat.conversation;
+  if (!conversation) return;
+  const other = chatOtherProfile(conversation);
+  const presence = visitorChat.presence.get(other.uid);
+  const typing = [...visitorChat.typing.values()].some(entry => Date.now() - entry.at < 6000);
+  const online = presence?.online === true;
+  const status = typing ? `${escapeHtml(other.name)} is typing…` : online ? '● Online' : (presence?.lastSeen ? `Last seen ${chatTimeLabel(presence.lastSeen)}` : chatConnectionLabel());
+  const header = $('#visitorChatHeader');
+  if (!header) return;
+  header.innerHTML = `<button type="button" class="chat-back" id="chatBackBtn" aria-label="Back to conversations">←</button>${chatAvatarHtml(other)}<span class="chat-header-copy"><strong>${escapeHtml(chatContextTitle(conversation))}</strong><small>${escapeHtml(other.roleLabel || (other.kind === 'staff' ? 'Support' : 'Customer'))}${conversation.type === 'hotel' && conversation.label && other.name && other.name !== conversation.label ? ` · ${escapeHtml(other.name)}` : ''}</small><em id="visitorChatStatus" class="${typing ? 'typing' : online ? 'online' : ''}">${status}</em></span>`;
+  $('#chatBackBtn')?.addEventListener('click', () => { closeActiveChatConversation(); renderChatList(); });
+}
+
+function watchActiveConversation(conversationId) {
+  visitorChat.conversationUnsubscribe?.();
+  visitorChat.conversationUnsubscribe = null;
+  visitorChat.messages.clear();
+  visitorChat.typing.clear();
+  visitorChat.presence.clear();
+  visitorChat.activeId = conversationId;
+  visitorChat.conversationUnsubscribe = window.SadikChat.watchConversation(conversationId, {
+    onHistory(messages) {
+      visitorChat.messages.clear();
+      (messages || []).forEach(message => visitorChat.messages.set(message.id, message));
+      if (visitorChat.activeId === conversationId) renderChatMessages();
+    },
+    onMessage(message) {
+      if (!message?.id || visitorChat.messages.has(message.id)) return;
+      visitorChat.messages.set(message.id, message);
+      if (visitorChat.activeId !== conversationId) return;
+      const stream = $('#visitorChatStream');
+      if (stream) {
+        stream.querySelector('.visitor-chat-empty')?.remove();
+        stream.insertAdjacentHTML('beforeend', chatMessageHtml(message));
+        stream.scrollTop = stream.scrollHeight;
+      }
+      void window.SadikChat.markRead(conversationId);
+    },
+    onConversation(conversation) {
+      visitorChat.conversation = { ...(visitorChat.conversation || {}), ...conversation };
+      visitorChat.conversations.set(conversationId, visitorChat.conversation);
+      if (visitorChat.activeId === conversationId) { renderChatHeader(); updateChatBubbleBadge(); }
+    },
+    onRead() { if (visitorChat.activeId === conversationId) renderChatMessages(); },
+    onTyping(entries) {
+      visitorChat.typing.clear();
+      (entries || []).forEach(entry => visitorChat.typing.set(entry.uid, entry));
+      if (visitorChat.activeId === conversationId) renderChatHeader();
+      setTimeout(() => { if (visitorChat.activeId === conversationId && visitorChat.typing.size) renderChatHeader(); }, 6500);
+    },
+    onPresence(payload) {
+      if (!payload?.uid) return;
+      visitorChat.presence.set(payload.uid, { online: payload.online === true, lastSeen: payload.lastSeen });
+      if (visitorChat.activeId === conversationId) renderChatHeader();
+    },
+    onError(error) { showToast(error?.message || 'This conversation is not available.', 'error'); }
+  });
+  void window.SadikChat.markRead(conversationId);
+}
+
+function closeActiveChatConversation() {
+  visitorChat.conversationUnsubscribe?.();
+  visitorChat.conversationUnsubscribe = null;
+  visitorChat.activeId = null;
+  visitorChat.conversation = null;
+  visitorChat.messages.clear();
+}
+
+function renderChatList() {
+  const mine = window.SadikChat?.viewer?.uid;
+  const items = [...visitorChat.conversations.values()].sort((a, b) => (b.lastMessage?.sentAt || b.updatedAt || 0) - (a.lastMessage?.sentAt || a.updatedAt || 0));
+  const rows = items.map(conversation => {
+    const other = chatOtherProfile(conversation);
+    const unread = Number(conversation.unread?.[mine] || 0);
+    const preview = conversation.lastMessage?.text ? `${conversation.lastMessage.senderId === mine ? 'You: ' : ''}${conversation.lastMessage.text}` : 'New conversation';
+    return `<button type="button" class="chat-thread${unread ? ' has-unread' : ''}" data-chat-thread="${escapeHtml(conversation.id)}">
+      ${chatAvatarHtml(other)}
+      <span class="chat-thread-copy">
+        <strong>${escapeHtml(chatContextTitle(conversation))}<time>${escapeHtml(chatTimeLabel(conversation.lastMessage?.sentAt || conversation.updatedAt))}</time></strong>
+        <small>${escapeHtml(other.name || '')}</small>
+        <em>${escapeHtml(preview.slice(0, 90))}</em>
+      </span>
+      ${unread ? `<b class="chat-unread">${unread > 9 ? '9+' : unread}</b>` : ''}
+    </button>`;
+  }).join('');
+  $('#modalContent').innerHTML = `<div class="chat-modal-content visitor-chat chat-inbox">
+    <div class="chat-title-row"><div><span class="online-dot"></span> Messages</div><span class="chat-status" id="visitorChatStatus">${chatConnectionLabel()}</span></div>
+    <div class="chat-thread-list">${rows || '<p class="visitor-chat-empty">No conversations yet. Start one from any hotel page or with our travel team below.</p>'}</div>
+    <button type="button" class="btn btn-outline full-btn" id="chatSupportBtn">${icon('i-headset')} Chat with our travel team</button>
+  </div>`;
+  $('#visitorChatStatus').textContent = chatConnectionLabel();
+  $$('#modalContent [data-chat-thread]').forEach(button => button.addEventListener('click', () => void openChatConversation(button.dataset.chatThread)));
+  $('#chatSupportBtn')?.addEventListener('click', () => void startSupportConversation());
+}
+
+async function openChatConversation(conversationId) {
+  try {
+    const payload = await window.SadikChat.openExisting(conversationId);
+    visitorChat.conversation = payload.conversation;
+    renderConversationShell();
+    watchActiveConversation(conversationId);
+    (payload.messages || []).forEach(message => visitorChat.messages.set(message.id, message));
+    renderChatMessages();
+  } catch (error) { showToast(error.message || 'Unable to open that conversation.', 'error'); }
+}
+
+function renderConversationShell() {
+  const conversation = visitorChat.conversation || {};
+  $('#modalContent').innerHTML = `<div class="chat-modal-content visitor-chat">
+    <header class="chat-conversation-header" id="visitorChatHeader"></header>
+    <div class="visitor-chat-stream" id="visitorChatStream" aria-live="polite"></div>
+    <form class="visitor-chat-reply" id="visitorChatReply">
+      <label class="sr-only" for="visitorChatText">Message</label>
+      <textarea id="visitorChatText" rows="2" maxlength="4000" placeholder="Type a message…" required></textarea>
+      <button class="btn btn-primary" type="submit">Send</button>
+    </form>
+    <p class="visitor-chat-security">Messages are end-to-end delivered through Firebase Realtime Database and saved for your account.</p>
+  </div>`;
+  renderChatHeader();
+  bindChatComposer();
+  if (!visitorChat.connectionUnsubscribe) {
+    visitorChat.connectionUnsubscribe = window.SadikChat.onConnectionState(() => renderChatHeader());
+  }
+}
+
+function bindChatComposer() {
+  const form = $('#visitorChatReply');
+  const textarea = $('#visitorChatText');
+  let typingActive = false;
+  textarea?.addEventListener('input', () => {
+    if (!visitorChat.activeId) return;
+    if (!typingActive && textarea.value.trim()) { typingActive = true; void window.SadikChat.setTyping(visitorChat.activeId, true); }
+    if (typingActive && !textarea.value.trim()) { typingActive = false; void window.SadikChat.setTyping(visitorChat.activeId, false); }
+  });
+  form?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const text = textarea.value.trim();
+    if (!text || !visitorChat.activeId) return;
+    const button = event.submitter;
+    if (button) button.disabled = true;
+    if (typingActive) { typingActive = false; void window.SadikChat.setTyping(visitorChat.activeId, false); }
+    try {
+      const message = await window.SadikChat.sendMessage(visitorChat.activeId, text, visitorChat.conversation);
+      textarea.value = '';
+      if (message && !visitorChat.messages.has(message.id)) {
+        visitorChat.messages.set(message.id, message);
+        const stream = $('#visitorChatStream');
+        if (stream) {
+          stream.querySelector('.visitor-chat-empty')?.remove();
+          stream.insertAdjacentHTML('beforeend', chatMessageHtml(message));
+          stream.scrollTop = stream.scrollHeight;
+        }
+      }
+      textarea.focus();
+    } catch (error) { showToast(error.message || 'Unable to send the message.', 'error'); }
+    finally { if (button) button.disabled = false; }
+  });
+}
+
+function renderVisitorGuestIntro(context) {
+  $('#modalContent').innerHTML = `<div class="chat-modal-content">
+    <div class="chat-title-row"><div><span class="online-dot"></span> Sadik Travels Chat</div><span class="chat-status">Live</span></div>
+    <div class="chat-welcome"><strong>Start a live conversation${context?.hotelName ? ` with ${escapeHtml(context.hotelName)}` : ''}</strong><p>Tell us your name and how to reach you — the conversation continues instantly and stays in your account.</p></div>
+    <form id="visitorChatIntro">
+      <label class="chat-intro-field"><span>Name</span><input name="name" autocomplete="name" placeholder="Your name" required /></label>
+      <label class="chat-intro-field"><span>Mobile or email</span><input name="contact" autocomplete="tel" placeholder="01XXXXXXXXX or you@example.com" required /></label>
+      <button class="btn btn-primary full-btn" type="submit">Continue to chat</button>
+    </form>
+  </div>`;
+  $('#visitorChatIntro')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = Object.fromEntries(new FormData(form).entries());
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await window.SadikChat.updateProfile({ name: String(data.name || '').trim(), contact: String(data.contact || '').trim() });
+      if (context?.hotelId) await startHotelConversation({ id: context.hotelId, name: context.hotelName });
+      else await renderVisitorInbox();
+    } catch (error) {
+      showToast(error.message || 'Enter your name and a phone number or email.', 'error');
+      button.disabled = false;
+    }
+  });
+}
+
+async function startHotelConversation(hotel) {
+  try {
+    const conversation = await window.SadikChat.openConversation('hotel', hotel.id);
+    visitorChat.conversation = conversation;
+    renderConversationShell();
+    watchActiveConversation(conversation.id);
+    renderChatMessages();
+  } catch (error) {
+    showToast(error.message || 'This hotel chat is not available right now.', 'error');
+    await renderVisitorInbox();
+  }
+}
+
+async function startSupportConversation() {
+  try {
+    const conversation = await window.SadikChat.openConversation('support');
+    visitorChat.conversation = conversation;
+    renderConversationShell();
+    watchActiveConversation(conversation.id);
+    renderChatMessages();
+  } catch (error) { showToast(error.message || 'Support chat is not available right now.', 'error'); }
+}
+
+function visitorNeedsIntro() {
+  const viewer = window.SadikChat?.viewer;
+  return viewer && viewer.kind === 'guest' && (!viewer.name || viewer.name === 'Guest');
+}
+
+async function renderVisitorInbox() {
+  try {
+    await window.SadikChat.ready();
+    startVisitorChatInbox();
+    if (visitorNeedsIntro()) return renderVisitorGuestIntro({});
+    renderChatList();
+  } catch (error) {
+    $('#modalContent').innerHTML = `<div class="chat-modal-content"><p class="visitor-chat-empty">${escapeHtml(error.message || 'Live chat is temporarily unavailable.')}</p></div>`;
+  }
+}
+
+/** Open the messenger from the floating bubble or the support buttons. */
+function openChat() {
+  const badge = $('#chatBubble .chat-badge');
+  if (badge) { badge.hidden = true; badge.textContent = '0'; }
+  openModal($('#genericModal'));
+  void renderVisitorInbox();
+}
+
+/** Entry point for the "Chat with Hotel" button on hotel detail pages. */
+async function openHotelChat(hotel) {
+  openModal($('#genericModal'));
+  try {
+    await window.SadikChat.ready();
+    startVisitorChatInbox();
+    if (visitorNeedsIntro()) return renderVisitorGuestIntro({ hotelId: hotel.id, hotelName: hotel.name });
+    await startHotelConversation(hotel);
+  } catch (error) {
+    $('#modalContent').innerHTML = `<div class="chat-modal-content"><p class="visitor-chat-empty">${escapeHtml(error.message || 'Live chat is temporarily unavailable.')}</p></div>`;
+  }
+}
+
+document.addEventListener('click', event => {
+  const closer = event.target.closest('[data-close-modal]');
+  if (closer) closeActiveChatConversation();
+});
+window.addEventListener('pagehide', () => {
+  visitorChat.conversationUnsubscribe?.();
+  visitorChat.inboxUnsubscribe?.();
+});
 
 function bindDynamicModalEvents() {
   $('#trackForm')?.addEventListener('submit', async event => {
@@ -438,19 +770,6 @@ function bindDynamicModalEvents() {
       const booking = response.booking;
       $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-search')}</div><h2 id="modalTitle">Booking status</h2></div><p class="modal-subtitle">Reference <strong>${escapeHtml(booking.id)}</strong></p><div class="result-summary"><strong>${escapeHtml(booking.vertical)} · ${escapeHtml(booking.status)}</strong><br><span>Created ${escapeHtml(new Date(booking.createdAt).toLocaleString())}</span>${booking.providerRef ? `<br><span>Provider reference: ${escapeHtml(booking.providerRef)}</span>` : ''}</div><button type="button" class="btn btn-primary full-btn" data-close-modal>Done</button>`;
     } catch (error) { showToast(error.message || 'Unable to find that booking.', 'error'); } finally { button.disabled = false; }
-  });
-  $('#chatForm')?.addEventListener('submit', async event => {
-    event.preventDefault();
-    const form = $('#chatForm');
-    const button = event.submitter || form.querySelector('button[type="submit"]');
-    const data = Object.fromEntries(new FormData(form).entries());
-    if (!String(data.mobile || '').trim() && !String(data.email || '').trim()) { showToast('Enter a phone number or email address.', 'error'); return; }
-    button.disabled = true;
-    try {
-      const response = await apiRequest('/live-chat/sessions', { method: 'POST', body: JSON.stringify(data) }, false);
-      const session = { id: response.session.id, token: response.token, name: response.session.name, subject: response.session.subject };
-      saveLiveChat(session); renderLiveChatConversation(session); await connectVisitorChat(session);
-    } catch (error) { showToast(error.message || 'Unable to start live chat.', 'error'); } finally { button.disabled = false; }
   });
 }
 
@@ -709,7 +1028,6 @@ async function loginWithGoogle() {
 }
 $('#googleLoginBtn')?.addEventListener('click', loginWithGoogle);
 
-function openChat() { const badge = $('#chatBubble .chat-badge'); if (badge) { badge.hidden = true; badge.textContent = '0'; } const saved = storedLiveChat(); if (!saved) return openTemplateModal('chatTemplate'); liveChatSession = saved; renderLiveChatConversation(saved); openModal($('#genericModal')); void connectVisitorChat(saved); }
 $('#chatBubble')?.addEventListener('click', openChat);
 $('#supportBtn')?.addEventListener('click', openChat);
 $('#supportSideBtn')?.addEventListener('click', () => { if (window.innerWidth < 1024) closeSidebar(); openChat(); });
@@ -1642,6 +1960,10 @@ async function renderHotelDetail(root, slug, query) {
           ${hotel.description ? `<div class="hotel-detail-section"><h3>About this property</h3><p>${escapeHtml(hotel.description)}</p></div>` : ''}
           ${hotel.shortDescription && !hotel.description ? `<div class="hotel-detail-section"><h3>About this property</h3><p>${escapeHtml(hotel.shortDescription)}</p></div>` : ''}
           ${hotel.cancellationPolicy ? `<div class="hotel-detail-section"><h3>Cancellation policy</h3><p>${escapeHtml(hotel.cancellationPolicy.type === 'free' ? `Free cancellation${hotel.cancellationPolicy.freeUntilDays ? ` up to ${hotel.cancellationPolicy.freeUntilDays} day${hotel.cancellationPolicy.freeUntilDays === 1 ? '' : 's'} before check-in` : ''}.` : 'Non-refundable.')}${hotel.cancellationPolicy.description ? ` ${escapeHtml(hotel.cancellationPolicy.description)}` : ''}</p></div>` : ''}
+          <div class="hotel-detail-section hotel-chat-cta">
+            <button type="button" class="btn btn-outline" data-chat-hotel>${icon('i-headset')} Chat with ${escapeHtml(hotel.name)}</button>
+            <small>Live messages with the property team — replies arrive instantly.</small>
+          </div>
           ${(hotel.phone || hotel.email || hotel.website) ? `<div class="hotel-detail-section"><h3>Contact the property</h3><div class="hotel-contact-row">${hotel.phone ? `<a href="tel:${escapeHtml(hotel.phone.replace(/[^+\d]/g, ''))}">${icon('i-phone')}${escapeHtml(hotel.phone)}</a>` : ''}${hotel.email ? `<a href="mailto:${escapeHtml(hotel.email)}">${icon('i-mail')}${escapeHtml(hotel.email)}</a>` : ''}${hotel.website ? `<a href="${escapeHtml(hotel.website)}" target="_blank" rel="noopener">${icon('i-globe')}Website</a>` : ''}</div></div>` : ''}
           ${hotel.latitude && hotel.longitude ? `<div class="hotel-detail-section"><h3>Location</h3><div class="hotel-map"><iframe title="Map of ${escapeHtml(hotel.name)}" loading="lazy" src="https://www.openstreetmap.org/export/embed.html?bbox=${Number(hotel.longitude) - 0.01}%2C${Number(hotel.latitude) - 0.008}%2C${Number(hotel.longitude) + 0.01}%2C${Number(hotel.latitude) + 0.008}&amp;layer=mapnik&amp;marker=${Number(hotel.latitude)}%2C${Number(hotel.longitude)}"></iframe></div></div>` : ''}
         </div>
@@ -1696,6 +2018,7 @@ async function renderHotelDetail(root, slug, query) {
   }
   function bindHotelDetail(hotel, selection, search) {
     $$('.hotel-detail-hero, .hotel-detail-thumb').forEach(el => el.addEventListener('click', () => { const idx = el.dataset.thumb ? hotel.images.findIndex(i => i.url === el.dataset.thumb) : 0; hotelGalleryModal(hotel.images, Math.max(0, idx)); }));
+    $$('[data-chat-hotel]').forEach(btn => btn.addEventListener('click', () => { void openHotelChat({ id: hotel.id, name: hotel.name }); }));
     $$('[data-select-room]').forEach(btn => btn.addEventListener('click', () => { const room = hotel.rooms.find(r => r.id === btn.dataset.selectRoom); if (!room) return; selection.rooms.push({ roomId: room.id, roomName: room.name, quantity: 1, pricePerNight: room.pricePerNight, maxGuests: room.maxGuests, image: room.images?.[0]?.url }); selection.hotelId = hotel.id; selection.slug = hotel.slug; selection.hotelName = hotel.name; selection.hotelCity = hotel.city; selection.hotelImage = hotel.images?.[0]?.url; roomSelectionSave(selection); renderDetail(); updateSticky(); }));
     $$('[data-remove-room]').forEach(btn => btn.addEventListener('click', () => { const idx = selection.rooms.findIndex(r => r.roomId === btn.dataset.removeRoom); if (idx >= 0) selection.rooms.splice(idx, 1); roomSelectionSave(selection); renderDetail(); updateSticky(); }));
     updateSticky();

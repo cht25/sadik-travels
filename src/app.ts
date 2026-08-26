@@ -26,8 +26,12 @@ import { createCommerceStore } from './commerce-store.js';
 import { registerCommerceRoutes } from './commerce-routes.js';
 import { registerAnalyticsRoutes, trackEvent } from './analytics.js';
 import { registerPaymentGatewayRoutes } from './payment-gateway-routes.js';
-import { LiveChatHub, registerLiveChatRoutes } from './live-chat.js';
-import { createLiveChatDb } from './live-chat-db.js';
+import { ChatRealtimeHub } from './chat/realtime.js';
+import { ChatService } from './chat/service.js';
+import { createChatStore } from './chat/store.js';
+import { registerChatRoutes } from './chat/routes.js';
+import { createStoreDirectory } from './chat/directory.js';
+import { firebaseChatBridge } from './firebase.js';
 
 const verticalSchema = z.enum(['tour']);
 const tourStatusSchema = z.enum(['draft', 'published', 'archived']);
@@ -152,10 +156,12 @@ export function buildApp() {
   const media = new MediaService();
   const hotelStore = createHotelStore();
   const commerce = createCommerceStore();
-  // Live chat conversations and transcripts live in Firebase Realtime Database
-  // when configured; otherwise they fall back to the MongoDB support collections.
-  const liveChatDb = createLiveChatDb(store);
-  const liveChat = new LiveChatHub(store, liveChatDb);
+  // Messenger-style live chat: Firebase Realtime Database is the real-time
+  // source of truth when configured (browsers subscribe directly); otherwise
+  // the MongoDB store keeps transcripts and the Socket.IO hub fans out events.
+  const chatStore = createChatStore();
+  const chatService = new ChatService({ store: chatStore, directory: createStoreDirectory(store, hotelStore), firebase: firebaseChatBridge(), brandName: 'Sadik Travels' });
+  const chatHub = new ChatRealtimeHub(chatService);
   connection.then(async () => {
     try { await hotelStore.ensureIndexes(); } catch { /* index creation is best-effort */ }
     try { await commerce.ensureIndexes(); } catch { /* index creation is best-effort */ }
@@ -167,8 +173,8 @@ export function buildApp() {
 
   app.use(pinoHttp({ level: config.logLevel, redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'] }));
   app.use(requestContext());
-  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' }, contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'https:'], fontSrc: ["'self'", 'https:', 'data:'], styleSrc: ["'self'", 'https:', "'unsafe-inline'"], scriptSrc: ["'self'", 'https://www.gstatic.com', 'https://apis.google.com'], connectSrc: ["'self'", 'https://identitytoolkit.googleapis.com', 'https://securetoken.googleapis.com', 'https://*.googleapis.com'], frameSrc: ["'self'", 'https://*.firebaseapp.com', 'https://accounts.google.com', 'https://*.google.com'] } } }));
-  const corsMiddleware = cors({ origin: (origin, callback) => { if (!origin || config.corsOrigins.includes(origin)) callback(null, true); else callback(new AppError(403, 'CORS_DENIED', 'Origin is not allowed')); }, credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Chat-Token'] });
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' }, contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'https:'], fontSrc: ["'self'", 'https:', 'data:'], styleSrc: ["'self'", 'https:', "'unsafe-inline'"], scriptSrc: ["'self'", 'https://www.gstatic.com', 'https://apis.google.com'], connectSrc: ["'self'", 'https://identitytoolkit.googleapis.com', 'https://securetoken.googleapis.com', 'https://*.googleapis.com', 'https://*.firebaseio.com', 'wss://*.firebaseio.com', 'https://*.firebasedatabase.app', 'wss://*.firebasedatabase.app'], frameSrc: ["'self'", 'https://*.firebaseapp.com', 'https://accounts.google.com', 'https://*.google.com'] } } }));
+  const corsMiddleware = cors({ origin: (origin, callback) => { if (!origin || config.corsOrigins.includes(origin)) callback(null, true); else callback(new AppError(403, 'CORS_DENIED', 'Origin is not allowed')); }, credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Chat-Token', 'X-Chat-Identity'] });
   app.use((req, res, next) => { const origin = req.get('origin'); let sameOrigin = !origin; if (origin) { try { sameOrigin = new URL(origin).host === req.get('host'); } catch { /* Invalid origins are handled by CORS. */ } } if (sameOrigin) return next(); return corsMiddleware(req, res, next); });
   app.use(express.json({ limit: '1mb', verify: (req, _res, buffer) => { (req as any).rawBody = Buffer.from(buffer); } }));
   app.use(cookieParser());
@@ -182,7 +188,7 @@ export function buildApp() {
     next();
   });
 
-  registerLiveChatRoutes(app, { store, db: liveChatDb, hub: liveChat });
+  registerChatRoutes(app, { service: chatService, hub: chatHub, auth: { optional: optionalAuth(store) } });
 
   app.get(['/healthz', '/api/health'], async (_req, res, next) => { try { const healthy = await store.health(); assert(healthy, 503, 'NOT_READY', 'Database is not connected'); res.json({ status: 'ok', ok: true, service: 'sadik-travels-api', database: 'connected', env: config.nodeEnv }); } catch (error) { next(error instanceof AppError ? error : new AppError(503, 'NOT_READY', 'Service dependencies are not ready', config.isProduction ? undefined : error)); } });
   app.get(['/readyz', '/api/ready'], async (_req, res, next) => { try { const healthy = await store.health(); assert(healthy, 503, 'NOT_READY', 'Database is not connected'); res.json({ ok: true, database: 'mongodb' }); } catch (error) { next(error instanceof AppError ? error : new AppError(503, 'NOT_READY', 'Service dependencies are not ready', config.isProduction ? undefined : error)); } });
@@ -758,5 +764,5 @@ export function buildApp() {
     if (config.serveStatic && !req.path.startsWith('/api/')) return res.status(normalized.statusCode).type('html').send(errorPageHtml(normalized.statusCode));
     res.status(normalized.statusCode).json({ error: { code: normalized.code, message: safeExpose ? normalized.message : 'An unexpected error occurred', ...(safeExpose && normalized.details ? { details: normalized.details } : {}) }, requestId: req.requestId });
   });
-  return { app, store, connection, liveChat };
+  return { app, store, connection, liveChat: chatHub, chatHub, chatService, chatStore };
 }

@@ -37,6 +37,11 @@ services:
         sync: false
       - key: FIREBASE_MEASUREMENT_ID
         sync: false
+      # Live chat Realtime Database. Set this (with the service account above)
+      # so browsers stream messages directly over Firebase; publish the
+      # repository's database.rules.json to the Firebase project.
+      - key: FIREBASE_DATABASE_URL
+        sync: false
       - key: CLOUDINARY_CLOUD_NAME
         sync: false
       - key: CLOUDINARY_API_KEY

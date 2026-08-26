@@ -15,7 +15,8 @@
     "audit": "npm audit --omit=dev --audit-level=high",
     "admin:create": "tsx src/admin-create.ts",
     "cleanup:legacy": "tsx src/cleanup-legacy.ts",
-    "test": "npm run build && node --test dist/smoke.test.js"
+    "test": "npm run build && node --test dist/smoke.test.js dist/chat.test.js",
+    "demo": "tsx src/demo-server.ts"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",

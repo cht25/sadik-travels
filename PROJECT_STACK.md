@@ -40,28 +40,19 @@ price), apply the current seasonal discount, and never trust browser totals.
 
 ## Real-time support
 
-`src/live-chat.ts` attaches Socket.IO to the same HTTP server. Visitors create a
-chat session with contact metadata, receive a random room capability whose hash
-is stored with the session, and join with `join_chat_room`. Admin sockets
-authenticate with the existing server-side session and require
-`support.view`/`support.reply`.
-
-Live chat storage is abstracted behind `LiveChatDb` (`src/live-chat-db.ts`).
-When Firebase is configured, conversations (`live-chat/sessions/{id}`) and
-transcripts (`live-chat/messages/{id}`) live in **Firebase Realtime Database**
-and are read/written through the Admin SDK. The server subscribes to those
-nodes and relays changes into the Socket.IO rooms, so Realtime Database is the
-real-time event source: messages or session updates written by any process —
-or in the Firebase console — reach connected visitors and admins, and the
-inbox reflects unread/status/assignment changes as they happen. Unread
-counters use RTDB transactions; visitor presence is tracked per conversation
-and persisted on the session node. The REST endpoints and Socket.IO protocol
-are unchanged, and client de-duplication by message id keeps the explicit and
-database-driven deliveries in sync. Without Firebase credentials the adapter
-falls back to the MongoDB `support_tickets`/`support_messages` collections
-(`source: 'live_chat'`), so local development and the integration suite run
-without Firebase. Browsers never talk to the Realtime Database directly; the
-recommended rules deny all client access (the Admin SDK bypasses rules).
+The live chat module lives in `src/chat/`. `service.ts` resolves conversation
+context server-side (hotel id → `hotel.ownerId` → owner participant), enforces
+per-role scoping (hotel owners see only their hotels, support staff see all)
+and derives duplicate-prevention keys (`type:contextId:customerUid`).
+`store.ts` persists the model behind a `ChatStore` interface: Firebase
+Realtime Database (`conversations`, `userConversations`, `messages`, `typing`,
+`presence`, `chatIdentities`) when credentials are configured, MongoDB
+otherwise. `realtime.ts` fans Socket.IO events out for the MongoDB mode.
+Browsers use `chat-client.js`: with Firebase they subscribe directly to
+Realtime Database using server-minted custom tokens (onValue/onChildAdded
+listeners, direct writes) — Realtime Database is the real-time source of
+truth; without Firebase the same UI runs on Socket.IO events. The production
+security rules are in `database.rules.json`.
 
 ## Media
 
