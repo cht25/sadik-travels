@@ -1,0 +1,69 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "conversations": {
+      ".read": "auth != null && auth.token.support == true",
+      "$cid": {
+        ".read": "auth != null && (root.child('userConversations').child(auth.uid).child($cid).exists() || auth.token.support == true)",
+        ".write": false,
+        "reads": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('userConversations').child(auth.uid).child($cid).exists()"
+          }
+        },
+        "unread": {
+          "$uid": {
+            ".write": "auth != null && (root.child('userConversations').child(auth.uid).child($cid).exists()) && (($uid === auth.uid) || (newData.isNumber() && newData.val() < 999 && (!data.exists() || newData.val() > data.val())))"
+          }
+        },
+        "lastMessage": {
+          ".write": "auth != null && root.child('userConversations').child(auth.uid).child($cid).exists() && newData.child('senderId').val() === auth.uid",
+          ".validate": "newData.child('text').isString() && newData.child('senderId').isString() && newData.child('sentAt').isNumber()"
+        },
+        "updatedAt": {
+          ".write": "auth != null && root.child('userConversations').child(auth.uid).child($cid).exists()"
+        }
+      }
+    },
+
+    "userConversations": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": false
+      }
+    },
+
+    "messages": {
+      "$cid": {
+        ".read": "auth != null && (root.child('userConversations').child(auth.uid).child($cid).exists() || auth.token.support == true)",
+        "$mid": {
+          ".write": "auth != null && !data.exists() && newData.exists() && newData.child('senderId').val() === auth.uid && (root.child('userConversations').child(auth.uid).child($cid).exists() || auth.token.support == true)",
+          ".validate": "newData.child('text').isString() && newData.child('text').val().length >= 1 && newData.child('text').val().length <= 4000 && newData.child('senderId').isString() && newData.child('senderRole').isString() && ['customer','guest','hotel_owner','home_owner','travel_agent','support','system'].includes(newData.child('senderRole').val()) && newData.child('type').val() === 'text' && newData.child('sentAt').val() === now"
+        }
+      }
+    },
+
+    "typing": {
+      "$cid": {
+        ".read": "auth != null && (root.child('userConversations').child(auth.uid).child($cid).exists() || auth.token.support == true)",
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid && (root.child('userConversations').child(auth.uid).child($cid).exists() || auth.token.support == true)",
+          ".validate": "newData.isNumber() && newData.val() <= now"
+        }
+      }
+    },
+
+    "presence": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['online'])"
+      }
+    },
+
+    "chatIdentities": { ".read": false, ".write": false },
+    "conversationKeys": { ".read": false, ".write": false }
+  }
+}

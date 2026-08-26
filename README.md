@@ -58,6 +58,39 @@ Every production storefront route works on refresh and direct access:
 Admin deep links render the same console shell, then a frontend route guard and
 backend middleware independently enforce the account’s assigned permission.
 
+### Hotel marketplace
+
+`src/hotel-store.ts` and `src/hotel-routes.ts` implement the public hotel
+marketplace:
+
+- **Images** — the canonical representation is
+  `hotel.images = [{ url, publicId?, mediaId?, alt? }]`. Admin uploads go to
+  Cloudinary through the media library; every save and every read passes
+  through `normalizeHotelImages`, which repairs legacy string rows, upgrades
+  insecure `http://` URLs, and drops empty entries — so an image URL in the
+  database is always a usable `https://` URL and a missing/failed image
+  renders the branded Sadik Travels placeholder, never a broken icon. The
+  first image is the primary photo (re-orderable from Admin → Hotel → Images
+  via "Make primary") and feeds listing cards, search results, the details
+  hero and booking snapshots. Replaced images get new Cloudinary public ids,
+  so guests always see the latest version without manual cache clearing.
+  Card and hero containers use fixed `aspect-ratio` boxes with
+  `object-fit: cover`, so unusual upload dimensions can never stretch the UI.
+- **Search & filters** — the public `/hotels/search` page derives its filter
+  options from live data (property types, areas, amenities, star levels and
+  price bounds are returned as facets by `GET /api/v1/hotels`). Filters are
+  server-side and combinable: multi property types (OR), multi areas (OR),
+  exact star levels (OR), amenities (AND), price band over the real lowest
+  bookable nightly price, guest score, free cancellation, name/area search,
+  and date-aware availability (hotels with no room for the selected dates are
+  hidden and flagged). Sorting: recommended, price ↑/↓, rating.
+- **Pricing & availability** — listing prices come from persisted room prices
+  (`priceFrom`), nightly seasonal discounts included. `POST
+  /api/v1/hotels/price-quote` and booking creation recalculate everything
+  server-side from the database (never trusting browser values), validate
+  occupancy against room capacity and atomically reserve per-date inventory
+  with rollback on overbooking.
+
 ## Commerce engine
 
 `src/commerce-store.ts` and `src/commerce-routes.ts` add the catalogue and
@@ -119,14 +152,61 @@ Authorization rules for the Google account that signs in:
 - Otherwise, if the email is listed in `ADMIN_IDENTITIES` (comma-separated), the account is granted `admin`.
 - An existing admin account with a matching email is signed in regardless of the whitelist.
 
-### Live chat (Firebase Realtime Database)
+### Live chat (Messenger-style, Firebase Realtime Database)
 
-Live chat conversations and transcripts are stored in **Firebase Realtime Database** when the Firebase service account is configured. The server writes through the Firebase Admin SDK and subscribes to the chat nodes (`live-chat/sessions`, `live-chat/messages`), relaying every change to the Socket.IO rooms — so Realtime Database is the real-time event source and updates made from any server instance (or the Firebase console) reach connected visitors and admins immediately. Visitors still authenticate with the existing per-session chat token; the browser never talks to the Realtime Database directly.
+Live chat is a Messenger-style conversation system with context: every
+conversation carries a `type` (`hotel`, `tour`, `home_stay`, `travel_agent`,
+`support`) and a stable `contextId` (e.g. the hotel UUID — never a name).
+When a customer starts a chat from a hotel page, the server looks up
+`hotel.ownerId`, resolves that account, and adds it as a real participant with
+its own profile (photo, name, "Hotel Owner" role label). The customer and the
+hotel owner then message each other instantly; support conversations reach the
+support/admin inbox.
 
-- Set `FIREBASE_DATABASE_URL` to your database's web API URL, or leave it blank to use the project default (`https://<FIREBASE_PROJECT_ID>-default-rtdb.firebaseio.com`).
-- Enable Realtime Database in the Firebase console (the default instance is created automatically for new projects).
-- Lock the security rules so no browser/client can read or write the chat data directly — the Admin SDK bypasses rules, which is all the app needs: `{ "rules": { ".read": false, ".write": false } }`.
-- Without Firebase credentials the app falls back to the MongoDB `support_tickets`/`support_messages` collections automatically, so local development works without any Firebase setup.
+**Real-time path.** Firebase Realtime Database is the source of truth. The
+server mints a Firebase **custom token** for each chat identity (registered
+customers `u-<userId>`, staff `s-<userId>`, guests get server-issued `g-<uid>`
+credentials), the browser signs into Firebase Auth with it, and all message
+traffic uses Realtime Database listeners (`onValue`, `onChildAdded`) and
+direct database writes. There is no polling anywhere.
+
+**Authorization.**
+
+- `database.rules.json` (this repository) is the production ruleset: a user
+  can read a conversation only through `userConversations/<uid>/<cid>`
+  (participants) or the `support` custom-token claim; messages are append-only
+  writes validated against `senderId === auth.uid`; read state
+  (`reads`, `unread`) can only be changed for yourself (others may only
+  increment); presence and typing are self-owned and ephemeral.
+- Hotel owners can only ever be participants of conversations for hotels they
+  own — the server derives participation from `hotel.ownerId`, and the REST
+  inbox filters by owned hotel ids. Owner B cannot read or write owner A's
+  threads (verified by tests).
+- Super Admin / support staff (`support.view` fine permission) can access all
+  conversations according to their level.
+- Conversation creation and all REST fallbacks are server-validated: the
+  browser never dictates `hotelId`, participants, or roles.
+
+**Duplicate prevention.** Conversations are keyed deterministically by
+`type:contextId:customerUid`, so the same customer returning to the same hotel
+reuses the existing conversation instead of creating a new one.
+
+**Unread / receipts / presence / typing.** Read state is stored in Firebase
+(`conversations/$cid/reads/$uid`), unread counters in
+`conversations/$cid/unread/$uid` (increment-only for others, resettable only
+by the owner of the counter), presence in `presence/$uid` (with
+`onDisconnect`), and typing in `typing/$cid/$uid` with short TTL semantics.
+The storefront and the admin Live Chat inbox render Messenger-style lists,
+bubbles, sent ✓ / read ✓✓ receipts, online status and typing indicators.
+
+**Deploying the rules.** Publish `database.rules.json` to your Firebase
+project (Firebase console → Realtime Database → Rules, or
+`firebase deploy --only database`). The Admin SDK bypasses rules; browsers are
+constrained by them. Never run with `".read": true, ".write": true`.
+
+**Without Firebase credentials** (local development, CI, demo mode) the same
+conversation model is stored in MongoDB and events fan out over Socket.IO —
+still push-based; no polling. Transcripts persist in both modes.
 
 ## MongoDB
 
@@ -203,11 +283,11 @@ TEST_MONGODB_URI='mongodb+srv://…/sadik_travels_test' npm test
 - **Vendor RBAC** — `HOTEL_OWNER`, `HOME_OWNER` and `TRAVEL_AGENT` accounts are
   deny-by-default. Navigation, frontend routes and backend APIs all enforce the
   granular permissions assigned by a Super Admin.
-- **Live support** — visitors initialize a token-protected Socket.IO room and
-  exchange messages with the dual-pane Admin Live Support Inbox. Transcripts,
-  unread counters and assignment state are persisted in Firebase Realtime
-  Database (MongoDB fallback) and fanned out to sockets from the database
-  subscription.
+- **Live support** — a Messenger-style, context-aware chat: hotel pages offer
+  "Chat with Hotel", the hotel's owner is added as the conversation partner,
+  and messages stream over Firebase Realtime Database listeners (Socket.IO
+  fallback without Firebase). The admin Live Chat inbox scopes hotel threads
+  to their owners and support threads to the support team.
 - **Payment safety** — gateway IPNs are idempotent, totals are calculated on the
   server and customer payment history uses the persisted ledger.
 - **SEO/PWA** — live sitemap, robots policy, structured data and network-first

@@ -95,3 +95,28 @@ export function firebasePublicConfig(): Record<string, string> | undefined {
   if (config.firebaseMeasurementId) value.measurementId = config.firebaseMeasurementId;
   return value;
 }
+
+/**
+ * Live chat realtime bridge for the browser: the public web config (including
+ * the Realtime Database URL) plus the ability to mint per-user custom tokens.
+ * The browser signs into Firebase Auth with the custom token and then reads
+ * and writes the chat nodes directly — Realtime Database is the real-time
+ * source of truth, gated by database.rules.json.
+ */
+export function firebaseChatBridge(): { webConfig: Record<string, string>; databaseUrl: string; mintToken(uid: string, claims: Record<string, string | boolean>): Promise<string> } | undefined {
+  const webConfig = firebasePublicConfig();
+  const databaseUrl = firebaseDatabaseUrl();
+  if (!webConfig || !databaseUrl || !isFirebaseDatabaseConfigured()) return undefined;
+  return {
+    webConfig: { ...webConfig, databaseURL: databaseUrl },
+    databaseUrl,
+    async mintToken(uid, claims) {
+      try {
+        return await getAuth(app()).createCustomToken(uid, claims);
+      } catch (error) {
+        console.error('Firebase custom token minting failed', error);
+        throw new AppError(503, 'CHAT_TOKEN_UNAVAILABLE', 'Realtime chat is temporarily unavailable');
+      }
+    }
+  };
+}

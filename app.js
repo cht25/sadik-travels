@@ -385,6 +385,7 @@ function openModal(modal) {
 function closeModal(modal) {
   if (!modal) return;
   modal.hidden = true;
+  if (typeof closeActiveChatConversation === 'function') closeActiveChatConversation();
   if (![...document.querySelectorAll('.modal')].some(item => !item.hidden)) {
     document.body.style.overflow = '';
     if (modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus();
@@ -402,28 +403,359 @@ function openTemplateModal(templateId, summary = '') {
   bindDynamicModalEvents();
 }
 
-const LIVE_CHAT_STORAGE_KEY = 'sadik_live_chat_session';
-let liveChatSocket = null;
-let liveChatSession = null;
-const liveChatMessageIds = new Set();
-function storedLiveChat() { try { const value = JSON.parse(sessionStorage.getItem(LIVE_CHAT_STORAGE_KEY) || 'null'); return value?.id && value?.token ? value : null; } catch { return null; } }
-function saveLiveChat(session) { liveChatSession = session; sessionStorage.setItem(LIVE_CHAT_STORAGE_KEY, JSON.stringify(session)); }
-function liveChatMessageMarkup(message) { const mine = message.authorType === 'customer'; return `<article class="visitor-chat-message ${mine ? 'is-visitor' : 'is-support'}" data-chat-message="${escapeHtml(message.id)}"><div><strong>${mine ? 'You' : 'Sadik Travels Support'}</strong><small>${escapeHtml(new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</small></div><p>${escapeHtml(message.message)}</p></article>`; }
-function appendLiveChatMessage(message) { if (!message?.id || liveChatMessageIds.has(message.id) || message.ticketId !== liveChatSession?.id) return; liveChatMessageIds.add(message.id); const stream = $('#visitorChatStream'); if (stream) { stream.insertAdjacentHTML('beforeend', liveChatMessageMarkup(message)); stream.scrollTop = stream.scrollHeight; } if ($('#genericModal')?.hidden && message.authorType === 'admin') { const badge = $('#chatBubble .chat-badge'); if (badge) { badge.hidden = false; badge.textContent = String(Math.min(9, Number(badge.textContent || 0) + 1)); } } }
-function renderLiveChatConversation(session, messages = []) { liveChatMessageIds.clear(); $('#modalContent').innerHTML = `<div class="chat-modal-content visitor-chat"><div class="chat-title-row"><div><span class="online-dot"></span> Sadik Travels Chat</div><span class="chat-status" id="visitorChatStatus">Connecting…</span></div><div class="visitor-chat-subject"><strong>${escapeHtml(session.subject || 'Travel inquiry')}</strong><small>Conversation ${escapeHtml(session.id.slice(0, 8).toUpperCase())}</small></div><div class="visitor-chat-stream" id="visitorChatStream" aria-live="polite">${messages.map(message => { liveChatMessageIds.add(message.id); return liveChatMessageMarkup(message); }).join('') || '<p class="visitor-chat-empty">You are connected. Send a message and our support team will reply here.</p>'}</div><form class="visitor-chat-reply" id="visitorChatReply"><label class="sr-only" for="visitorChatText">Message</label><textarea id="visitorChatText" rows="2" maxlength="4000" placeholder="Type your message…" required></textarea><button class="btn btn-primary" type="submit">Send</button></form><p class="visitor-chat-security">Your conversation is saved securely for support and auditing.</p></div>`; const stream = $('#visitorChatStream'); if (stream) stream.scrollTop = stream.scrollHeight; bindVisitorReply(); }
-async function connectVisitorChat(session) {
-  liveChatSession = session;
-  if (!window.io) { try { const response = await apiRequest(`/live-chat/sessions/${session.id}/messages`, { headers: { 'x-chat-token': session.token } }, false); renderLiveChatConversation(session, response.messages || []); $('#visitorChatStatus').textContent = 'Connected'; } catch (error) { $('#visitorChatStatus').textContent = 'Connection unavailable'; showToast(error.message, 'error'); } return; }
-  if (liveChatSocket) liveChatSocket.disconnect();
-  liveChatSocket = window.io({ path: '/socket.io', transports: ['websocket', 'polling'], reconnectionAttempts: 5, timeout: 10000 });
-  let visitorSocketErrorLogged = false;
-  liveChatSocket.on('connect_error', error => { if (!visitorSocketErrorLogged) { visitorSocketErrorLogged = true; console.warn('Live chat socket unavailable — falling back to REST messaging.', error?.message || error); } });
-  liveChatSocket.on('connect_timeout', () => { if (!visitorSocketErrorLogged) { visitorSocketErrorLogged = true; console.warn('Live chat socket connection timed out — falling back to REST messaging.'); } });
-  liveChatSocket.on('connect', () => { $('#visitorChatStatus') && ($('#visitorChatStatus').textContent = 'Online'); liveChatSocket.emit('join_chat_room', { sessionId: session.id, token: session.token }, result => { if (result?.ok) renderLiveChatConversation(session, result.messages || []); else { $('#visitorChatStatus') && ($('#visitorChatStatus').textContent = 'Unable to join'); showToast(result?.error?.message || 'Unable to join this chat.', 'error'); } }); });
-  liveChatSocket.on('disconnect', () => { $('#visitorChatStatus') && ($('#visitorChatStatus').textContent = 'Reconnecting…'); });
-  liveChatSocket.on('chat_message', appendLiveChatMessage);
+/* ---------- Messenger-style live chat (Firebase Realtime Database) ----------
+   Conversations are context-aware: a chat started from a hotel page carries
+   type:"hotel" + the stable hotel id, so the server can add that hotel's owner
+   (via hotel.ownerId) as a real participant. Messages stream over Realtime
+   Database listeners (or the Socket.IO hub when Firebase is not configured). */
+const visitorChat = {
+  booted: false,
+  activeId: null,
+  conversation: null,
+  conversations: new Map(),
+  messages: new Map(),
+  typing: new Map(),
+  presence: new Map(),
+  inboxUnsubscribe: null,
+  conversationUnsubscribe: null,
+  connectionUnsubscribe: null
+};
+
+function chatInitials(name) { return String(name || '?').replace(/[^a-zA-Z0-9 ]/g, '').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase() || '?'; }
+function chatAvatarHtml(profile, extra = '') {
+  const label = profile?.roleLabel || '';
+  if (profile?.photoUrl) return `<span class="chat-avatar ${extra}"><img src="${escapeHtml(profile.photoUrl)}" alt="" />${label ? `<i>${escapeHtml(label)}</i>` : ''}</span>`;
+  return `<span class="chat-avatar ${extra}"><b>${escapeHtml(chatInitials(profile?.name))}</b>${label ? `<i>${escapeHtml(label)}</i>` : ''}</span>`;
 }
-function bindVisitorReply() { $('#visitorChatReply')?.addEventListener('submit', async event => { event.preventDefault(); const textarea = $('#visitorChatText'); const message = textarea.value.trim(); if (!message || !liveChatSession) return; const button = event.submitter; button.disabled = true; try { if (liveChatSocket?.connected) { const result = await new Promise(resolve => liveChatSocket.emit('send_chat_message', { message }, resolve)); if (!result?.ok) throw new Error(result?.error?.message || 'Unable to send message'); appendLiveChatMessage(result.message); } else { const response = await apiRequest(`/live-chat/sessions/${liveChatSession.id}/messages`, { method: 'POST', headers: { 'x-chat-token': liveChatSession.token }, body: JSON.stringify({ message }) }, false); appendLiveChatMessage(response.message); } textarea.value = ''; textarea.focus(); } catch (error) { showToast(error.message || 'Unable to send message.', 'error'); } finally { button.disabled = false; } }); }
+function chatContextTitle(conversation) {
+  if (conversation?.type === 'hotel') return conversation.label || 'Hotel';
+  if (conversation?.type === 'support') return 'Sadik Travels Support';
+  return conversation?.label || 'Conversation';
+}
+function chatOtherProfile(conversation) {
+  const profiles = conversation?.profiles || {};
+  const others = Object.values(profiles).filter(profile => profile.uid !== window.SadikChat?.viewer?.uid);
+  const staff = others.find(profile => profile.kind === 'staff');
+  return staff || others[0] || { uid: 'support-team', name: 'Sadik Travels Support', roleLabel: 'Support Team' };
+}
+function chatTimeLabel(value) {
+  const date = new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) return '';
+  const today = new Date();
+  if (date.toDateString() === today.toDateString()) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+function chatConnectionLabel() {
+  const state = window.SadikChat?.connectionState;
+  if (state === 'online') return 'Online';
+  if (state === 'offline') return 'Reconnecting…';
+  return 'Connecting…';
+}
+
+function updateChatBubbleBadge() {
+  const badge = $('#chatBubble .chat-badge');
+  if (!badge) return;
+  const mine = window.SadikChat?.viewer?.uid;
+  let unread = 0;
+  visitorChat.conversations.forEach(conversation => { unread += Number(conversation.unread?.[mine] || 0); });
+  badge.hidden = unread === 0 || !$('#genericModal')?.hidden;
+  badge.textContent = String(Math.min(99, unread));
+}
+
+function startVisitorChatInbox() {
+  if (visitorChat.inboxUnsubscribe || !window.SadikChat) return;
+  visitorChat.inboxUnsubscribe = window.SadikChat.watchInbox(list => {
+    visitorChat.conversations.clear();
+    (list || []).forEach(conversation => visitorChat.conversations.set(conversation.id, conversation));
+    updateChatBubbleBadge();
+    if (!$('#genericModal')?.hidden && !visitorChat.activeId) renderChatList();
+  });
+  if (!visitorChat.connectionUnsubscribe) {
+    visitorChat.connectionUnsubscribe = window.SadikChat.onConnectionState(() => {
+      const status = $('#visitorChatStatus');
+      if (status && !visitorChat.activeId) status.textContent = chatConnectionLabel();
+    });
+  }
+}
+
+function chatMessageHtml(message) {
+  const mine = message.senderId === window.SadikChat?.viewer?.uid;
+  const conversation = visitorChat.conversation;
+  const profiles = conversation?.profiles || {};
+  const author = mine ? null : (profiles[message.senderId] || chatOtherProfile(conversation));
+  const otherReadAt = Math.max(0, ...Object.entries(conversation?.reads || {}).filter(([uid]) => uid !== window.SadikChat?.viewer?.uid).map(([, at]) => Number(at) || 0));
+  const receipt = mine ? (otherReadAt >= Number(message.sentAt || 0) ? '<span class="chat-receipt read" title="Read">✓✓</span>' : '<span class="chat-receipt" title="Sent">✓</span>') : '';
+  const roleLabel = author ? `<small>${escapeHtml(author.roleLabel || (author.kind === 'staff' ? 'Support' : 'Customer'))}</small>` : '';
+  return `<article class="visitor-chat-message ${mine ? 'is-visitor' : 'is-support'}${message.pending ? ' is-pending' : ''}" data-chat-message="${escapeHtml(message.id)}">
+    <div><strong>${mine ? 'You' : escapeHtml(author?.name || 'Support')}</strong>${roleLabel}<small>${escapeHtml(new Date(message.sentAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</small></div>
+    <p>${escapeHtml(message.text)}</p>
+    ${mine ? `<i class="chat-message-meta">${receipt}</i>` : ''}
+  </article>`;
+}
+
+function renderChatMessages() {
+  const stream = $('#visitorChatStream');
+  if (!stream) return;
+  const ordered = [...visitorChat.messages.values()].sort((a, b) => (a.sentAt || 0) - (b.sentAt || 0) || String(a.id).localeCompare(String(b.id)));
+  stream.innerHTML = ordered.length ? ordered.map(chatMessageHtml).join('') : '<p class="visitor-chat-empty">Say hello — messages arrive here instantly.</p>';
+  stream.scrollTop = stream.scrollHeight;
+}
+
+function renderChatHeader() {
+  const conversation = visitorChat.conversation;
+  if (!conversation) return;
+  const other = chatOtherProfile(conversation);
+  const presence = visitorChat.presence.get(other.uid);
+  const typing = [...visitorChat.typing.values()].some(entry => Date.now() - entry.at < 6000);
+  const online = presence?.online === true;
+  const status = typing ? `${escapeHtml(other.name)} is typing…` : online ? '● Online' : (presence?.lastSeen ? `Last seen ${chatTimeLabel(presence.lastSeen)}` : chatConnectionLabel());
+  const header = $('#visitorChatHeader');
+  if (!header) return;
+  header.innerHTML = `<button type="button" class="chat-back" id="chatBackBtn" aria-label="Back to conversations">←</button>${chatAvatarHtml(other)}<span class="chat-header-copy"><strong>${escapeHtml(chatContextTitle(conversation))}</strong><small>${escapeHtml(other.roleLabel || (other.kind === 'staff' ? 'Support' : 'Customer'))}${conversation.type === 'hotel' && conversation.label && other.name && other.name !== conversation.label ? ` · ${escapeHtml(other.name)}` : ''}</small><em id="visitorChatStatus" class="${typing ? 'typing' : online ? 'online' : ''}">${status}</em></span>`;
+  $('#chatBackBtn')?.addEventListener('click', () => { closeActiveChatConversation(); renderChatList(); });
+}
+
+function watchActiveConversation(conversationId) {
+  visitorChat.conversationUnsubscribe?.();
+  visitorChat.conversationUnsubscribe = null;
+  visitorChat.messages.clear();
+  visitorChat.typing.clear();
+  visitorChat.presence.clear();
+  visitorChat.activeId = conversationId;
+  visitorChat.conversationUnsubscribe = window.SadikChat.watchConversation(conversationId, {
+    onHistory(messages) {
+      visitorChat.messages.clear();
+      (messages || []).forEach(message => visitorChat.messages.set(message.id, message));
+      if (visitorChat.activeId === conversationId) renderChatMessages();
+    },
+    onMessage(message) {
+      if (!message?.id || visitorChat.messages.has(message.id)) return;
+      visitorChat.messages.set(message.id, message);
+      if (visitorChat.activeId !== conversationId) return;
+      const stream = $('#visitorChatStream');
+      if (stream) {
+        stream.querySelector('.visitor-chat-empty')?.remove();
+        stream.insertAdjacentHTML('beforeend', chatMessageHtml(message));
+        stream.scrollTop = stream.scrollHeight;
+      }
+      void window.SadikChat.markRead(conversationId);
+    },
+    onConversation(conversation) {
+      visitorChat.conversation = { ...(visitorChat.conversation || {}), ...conversation };
+      visitorChat.conversations.set(conversationId, visitorChat.conversation);
+      if (visitorChat.activeId === conversationId) { renderChatHeader(); updateChatBubbleBadge(); }
+    },
+    onRead() { if (visitorChat.activeId === conversationId) renderChatMessages(); },
+    onTyping(entries) {
+      visitorChat.typing.clear();
+      (entries || []).forEach(entry => visitorChat.typing.set(entry.uid, entry));
+      if (visitorChat.activeId === conversationId) renderChatHeader();
+      setTimeout(() => { if (visitorChat.activeId === conversationId && visitorChat.typing.size) renderChatHeader(); }, 6500);
+    },
+    onPresence(payload) {
+      if (!payload?.uid) return;
+      visitorChat.presence.set(payload.uid, { online: payload.online === true, lastSeen: payload.lastSeen });
+      if (visitorChat.activeId === conversationId) renderChatHeader();
+    },
+    onError(error) { showToast(error?.message || 'This conversation is not available.', 'error'); }
+  });
+  void window.SadikChat.markRead(conversationId);
+}
+
+function closeActiveChatConversation() {
+  visitorChat.conversationUnsubscribe?.();
+  visitorChat.conversationUnsubscribe = null;
+  visitorChat.activeId = null;
+  visitorChat.conversation = null;
+  visitorChat.messages.clear();
+}
+
+function renderChatList() {
+  const mine = window.SadikChat?.viewer?.uid;
+  const items = [...visitorChat.conversations.values()].sort((a, b) => (b.lastMessage?.sentAt || b.updatedAt || 0) - (a.lastMessage?.sentAt || a.updatedAt || 0));
+  const rows = items.map(conversation => {
+    const other = chatOtherProfile(conversation);
+    const unread = Number(conversation.unread?.[mine] || 0);
+    const preview = conversation.lastMessage?.text ? `${conversation.lastMessage.senderId === mine ? 'You: ' : ''}${conversation.lastMessage.text}` : 'New conversation';
+    return `<button type="button" class="chat-thread${unread ? ' has-unread' : ''}" data-chat-thread="${escapeHtml(conversation.id)}">
+      ${chatAvatarHtml(other)}
+      <span class="chat-thread-copy">
+        <strong>${escapeHtml(chatContextTitle(conversation))}<time>${escapeHtml(chatTimeLabel(conversation.lastMessage?.sentAt || conversation.updatedAt))}</time></strong>
+        <small>${escapeHtml(other.name || '')}</small>
+        <em>${escapeHtml(preview.slice(0, 90))}</em>
+      </span>
+      ${unread ? `<b class="chat-unread">${unread > 9 ? '9+' : unread}</b>` : ''}
+    </button>`;
+  }).join('');
+  $('#modalContent').innerHTML = `<div class="chat-modal-content visitor-chat chat-inbox">
+    <div class="chat-title-row"><div><span class="online-dot"></span> Messages</div><span class="chat-status" id="visitorChatStatus">${chatConnectionLabel()}</span></div>
+    <div class="chat-thread-list">${rows || '<p class="visitor-chat-empty">No conversations yet. Start one from any hotel page or with our travel team below.</p>'}</div>
+    <button type="button" class="btn btn-outline full-btn" id="chatSupportBtn">${icon('i-headset')} Chat with our travel team</button>
+  </div>`;
+  $('#visitorChatStatus').textContent = chatConnectionLabel();
+  $$('#modalContent [data-chat-thread]').forEach(button => button.addEventListener('click', () => void openChatConversation(button.dataset.chatThread)));
+  $('#chatSupportBtn')?.addEventListener('click', () => void startSupportConversation());
+}
+
+async function openChatConversation(conversationId) {
+  try {
+    const payload = await window.SadikChat.openExisting(conversationId);
+    visitorChat.conversation = payload.conversation;
+    renderConversationShell();
+    watchActiveConversation(conversationId);
+    (payload.messages || []).forEach(message => visitorChat.messages.set(message.id, message));
+    renderChatMessages();
+  } catch (error) { showToast(error.message || 'Unable to open that conversation.', 'error'); }
+}
+
+function renderConversationShell() {
+  const conversation = visitorChat.conversation || {};
+  $('#modalContent').innerHTML = `<div class="chat-modal-content visitor-chat">
+    <header class="chat-conversation-header" id="visitorChatHeader"></header>
+    <div class="visitor-chat-stream" id="visitorChatStream" aria-live="polite"></div>
+    <form class="visitor-chat-reply" id="visitorChatReply">
+      <label class="sr-only" for="visitorChatText">Message</label>
+      <textarea id="visitorChatText" rows="2" maxlength="4000" placeholder="Type a message…" required></textarea>
+      <button class="btn btn-primary" type="submit">Send</button>
+    </form>
+    <p class="visitor-chat-security">Messages are end-to-end delivered through Firebase Realtime Database and saved for your account.</p>
+  </div>`;
+  renderChatHeader();
+  bindChatComposer();
+  if (!visitorChat.connectionUnsubscribe) {
+    visitorChat.connectionUnsubscribe = window.SadikChat.onConnectionState(() => renderChatHeader());
+  }
+}
+
+function bindChatComposer() {
+  const form = $('#visitorChatReply');
+  const textarea = $('#visitorChatText');
+  let typingActive = false;
+  textarea?.addEventListener('input', () => {
+    if (!visitorChat.activeId) return;
+    if (!typingActive && textarea.value.trim()) { typingActive = true; void window.SadikChat.setTyping(visitorChat.activeId, true); }
+    if (typingActive && !textarea.value.trim()) { typingActive = false; void window.SadikChat.setTyping(visitorChat.activeId, false); }
+  });
+  form?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const text = textarea.value.trim();
+    if (!text || !visitorChat.activeId) return;
+    const button = event.submitter;
+    if (button) button.disabled = true;
+    if (typingActive) { typingActive = false; void window.SadikChat.setTyping(visitorChat.activeId, false); }
+    try {
+      const message = await window.SadikChat.sendMessage(visitorChat.activeId, text, visitorChat.conversation);
+      textarea.value = '';
+      if (message && !visitorChat.messages.has(message.id)) {
+        visitorChat.messages.set(message.id, message);
+        const stream = $('#visitorChatStream');
+        if (stream) {
+          stream.querySelector('.visitor-chat-empty')?.remove();
+          stream.insertAdjacentHTML('beforeend', chatMessageHtml(message));
+          stream.scrollTop = stream.scrollHeight;
+        }
+      }
+      textarea.focus();
+    } catch (error) { showToast(error.message || 'Unable to send the message.', 'error'); }
+    finally { if (button) button.disabled = false; }
+  });
+}
+
+function renderVisitorGuestIntro(context) {
+  $('#modalContent').innerHTML = `<div class="chat-modal-content">
+    <div class="chat-title-row"><div><span class="online-dot"></span> Sadik Travels Chat</div><span class="chat-status">Live</span></div>
+    <div class="chat-welcome"><strong>Start a live conversation${context?.hotelName ? ` with ${escapeHtml(context.hotelName)}` : ''}</strong><p>Tell us your name and how to reach you — the conversation continues instantly and stays in your account.</p></div>
+    <form id="visitorChatIntro">
+      <label class="chat-intro-field"><span>Name</span><input name="name" autocomplete="name" placeholder="Your name" required /></label>
+      <label class="chat-intro-field"><span>Mobile or email</span><input name="contact" autocomplete="tel" placeholder="01XXXXXXXXX or you@example.com" required /></label>
+      <button class="btn btn-primary full-btn" type="submit">Continue to chat</button>
+    </form>
+  </div>`;
+  $('#visitorChatIntro')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = Object.fromEntries(new FormData(form).entries());
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await window.SadikChat.updateProfile({ name: String(data.name || '').trim(), contact: String(data.contact || '').trim() });
+      if (context?.hotelId) await startHotelConversation({ id: context.hotelId, name: context.hotelName });
+      else await renderVisitorInbox();
+    } catch (error) {
+      showToast(error.message || 'Enter your name and a phone number or email.', 'error');
+      button.disabled = false;
+    }
+  });
+}
+
+async function startHotelConversation(hotel) {
+  try {
+    const conversation = await window.SadikChat.openConversation('hotel', hotel.id);
+    visitorChat.conversation = conversation;
+    renderConversationShell();
+    watchActiveConversation(conversation.id);
+    renderChatMessages();
+  } catch (error) {
+    showToast(error.message || 'This hotel chat is not available right now.', 'error');
+    await renderVisitorInbox();
+  }
+}
+
+async function startSupportConversation() {
+  try {
+    const conversation = await window.SadikChat.openConversation('support');
+    visitorChat.conversation = conversation;
+    renderConversationShell();
+    watchActiveConversation(conversation.id);
+    renderChatMessages();
+  } catch (error) { showToast(error.message || 'Support chat is not available right now.', 'error'); }
+}
+
+function visitorNeedsIntro() {
+  const viewer = window.SadikChat?.viewer;
+  return viewer && viewer.kind === 'guest' && (!viewer.name || viewer.name === 'Guest');
+}
+
+async function renderVisitorInbox() {
+  try {
+    await window.SadikChat.ready();
+    startVisitorChatInbox();
+    if (visitorNeedsIntro()) return renderVisitorGuestIntro({});
+    renderChatList();
+  } catch (error) {
+    $('#modalContent').innerHTML = `<div class="chat-modal-content"><p class="visitor-chat-empty">${escapeHtml(error.message || 'Live chat is temporarily unavailable.')}</p></div>`;
+  }
+}
+
+/** Open the messenger from the floating bubble or the support buttons. */
+function openChat() {
+  const badge = $('#chatBubble .chat-badge');
+  if (badge) { badge.hidden = true; badge.textContent = '0'; }
+  openModal($('#genericModal'));
+  void renderVisitorInbox();
+}
+
+/** Entry point for the "Chat with Hotel" button on hotel detail pages. */
+async function openHotelChat(hotel) {
+  openModal($('#genericModal'));
+  try {
+    await window.SadikChat.ready();
+    startVisitorChatInbox();
+    if (visitorNeedsIntro()) return renderVisitorGuestIntro({ hotelId: hotel.id, hotelName: hotel.name });
+    await startHotelConversation(hotel);
+  } catch (error) {
+    $('#modalContent').innerHTML = `<div class="chat-modal-content"><p class="visitor-chat-empty">${escapeHtml(error.message || 'Live chat is temporarily unavailable.')}</p></div>`;
+  }
+}
+
+document.addEventListener('click', event => {
+  const closer = event.target.closest('[data-close-modal]');
+  if (closer) closeActiveChatConversation();
+});
+window.addEventListener('pagehide', () => {
+  visitorChat.conversationUnsubscribe?.();
+  visitorChat.inboxUnsubscribe?.();
+});
 
 function bindDynamicModalEvents() {
   $('#trackForm')?.addEventListener('submit', async event => {
@@ -438,19 +770,6 @@ function bindDynamicModalEvents() {
       const booking = response.booking;
       $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-search')}</div><h2 id="modalTitle">Booking status</h2></div><p class="modal-subtitle">Reference <strong>${escapeHtml(booking.id)}</strong></p><div class="result-summary"><strong>${escapeHtml(booking.vertical)} · ${escapeHtml(booking.status)}</strong><br><span>Created ${escapeHtml(new Date(booking.createdAt).toLocaleString())}</span>${booking.providerRef ? `<br><span>Provider reference: ${escapeHtml(booking.providerRef)}</span>` : ''}</div><button type="button" class="btn btn-primary full-btn" data-close-modal>Done</button>`;
     } catch (error) { showToast(error.message || 'Unable to find that booking.', 'error'); } finally { button.disabled = false; }
-  });
-  $('#chatForm')?.addEventListener('submit', async event => {
-    event.preventDefault();
-    const form = $('#chatForm');
-    const button = event.submitter || form.querySelector('button[type="submit"]');
-    const data = Object.fromEntries(new FormData(form).entries());
-    if (!String(data.mobile || '').trim() && !String(data.email || '').trim()) { showToast('Enter a phone number or email address.', 'error'); return; }
-    button.disabled = true;
-    try {
-      const response = await apiRequest('/live-chat/sessions', { method: 'POST', body: JSON.stringify(data) }, false);
-      const session = { id: response.session.id, token: response.token, name: response.session.name, subject: response.session.subject };
-      saveLiveChat(session); renderLiveChatConversation(session); await connectVisitorChat(session);
-    } catch (error) { showToast(error.message || 'Unable to start live chat.', 'error'); } finally { button.disabled = false; }
   });
 }
 
@@ -709,7 +1028,6 @@ async function loginWithGoogle() {
 }
 $('#googleLoginBtn')?.addEventListener('click', loginWithGoogle);
 
-function openChat() { const badge = $('#chatBubble .chat-badge'); if (badge) { badge.hidden = true; badge.textContent = '0'; } const saved = storedLiveChat(); if (!saved) return openTemplateModal('chatTemplate'); liveChatSession = saved; renderLiveChatConversation(saved); openModal($('#genericModal')); void connectVisitorChat(saved); }
 $('#chatBubble')?.addEventListener('click', openChat);
 $('#supportBtn')?.addEventListener('click', openChat);
 $('#supportSideBtn')?.addEventListener('click', () => { if (window.innerWidth < 1024) closeSidebar(); openChat(); });
@@ -1401,7 +1719,20 @@ const HOTEL_AMENITIES = ['Free Wi-Fi', 'Swimming Pool', 'Gym', 'Couple-Friendly'
 const HOTEL_NEIGHBORHOODS = { "Cox's Bazar": ['Kolatoli Road', 'Inani Beach', 'Laboni Beach', 'Himchari'], Dhaka: ['Gulshan', 'Banani', 'Dhanmondi', 'Uttara'] };
 const REVIEW_BUCKETS = [{ id: '4.25', label: '8.5+ Excellent', min: 4.25 }, { id: '4', label: '8.0+ Very good', min: 4 }, { id: '3.5', label: '7.0+ Good', min: 3.5 }];
 const HOTEL_CHECKOUT_KEY = 'sadikHotelCheckout';
-const hotelSearchState = { destination: '', checkIn: '', checkOut: '', adults: 2, children: 0, rooms: 1, minPrice: '', maxPrice: '', minStarRating: '', minGuestRating: '', area: '', neighborhoods: [], propertyType: [], amenities: [], freeCancellation: false, sort: 'recommended', page: 1 };
+const hotelSearchState = { destination: '', checkIn: '', checkOut: '', adults: 2, children: 0, rooms: 1, minPrice: '', maxPrice: '', minStarRating: '', starRatings: [], minGuestRating: '', area: '', areas: [], neighborhoods: [], propertyType: [], amenities: [], freeCancellation: false, sort: 'recommended', page: 1 };
+/* Branded fallback so a missing/failing image never renders as a broken icon. */
+const HOTEL_PLACEHOLDER = '/assets/hotel-placeholder.svg';
+const hotelImageSrc = (hotel) => hotel?.thumbnail || hotel?.images?.[0]?.url || hotel?.imageUrl || '';
+const hotelNightsBetween = (checkIn, checkOut) => Math.max(1, Math.round((new Date(`${checkOut}T00:00:00`) - new Date(`${checkIn}T00:00:00`)) / 86400000));
+const hotelImageTag = (src, alt, attrs = '') => `<img src="${escapeHtml(src || HOTEL_PLACEHOLDER)}" alt="${escapeHtml(alt || '')}" loading="lazy" ${attrs} />`;
+/* CSP-safe global fallback: any hotel image that fails to load (deleted asset,
+   stale URL, offline file) is swapped for the branded placeholder exactly once. */
+document.addEventListener('error', event => {
+  const img = event.target;
+  if (!img || img.tagName !== 'IMG' || img.dataset.fallbackApplied) return;
+  img.dataset.fallbackApplied = '1';
+  img.src = HOTEL_PLACEHOLDER;
+}, true);
 const hotelMoney = (value) => `৳${Number(value || 0).toLocaleString('en-BD')}`;
 const tourMoney = (value) => `BDT ${Number(value || 0).toLocaleString('en-BD')}`;
 const hotelStars = (rating) => { const n = Math.max(0, Math.min(5, Math.round(Number(rating || 0)))); return Array.from({ length: n }, () => icon('i-star')).join(''); };
@@ -1412,7 +1743,13 @@ function hotelReadQuery(query) {
   return {
     destination: query.get('destination') || '', checkIn: query.get('checkIn') || isoDateFromToday(1), checkOut: query.get('checkOut') || isoDateFromToday(2),
     adults: Number(query.get('adults')) || 2, children: Number(query.get('children')) || 0, rooms: Number(query.get('rooms')) || 1,
+    q: query.get('q') || '',
     minPrice: query.get('minPrice') || '', maxPrice: query.get('maxPrice') || '', minStarRating: query.get('minStarRating') || '',
+    starRatings: query.get('starRatings') ? query.get('starRatings').split(',').map(Number).filter(Number.isFinite) : [],
+    minGuestRating: query.get('minGuestRating') || '',
+    area: query.get('area') || '',
+    areas: query.get('areas') ? query.get('areas').split(',').filter(Boolean) : [],
+    neighborhoods: query.get('neighborhoods') ? query.get('neighborhoods').split(',').filter(Boolean) : [],
     propertyType: query.get('propertyType') ? query.get('propertyType').split(',').filter(Boolean) : [],
     amenities: query.get('amenities') ? query.get('amenities').split(',').filter(Boolean) : [],
     freeCancellation: query.get('freeCancellation') === 'true', sort: query.get('sort') || 'recommended', page: Number(query.get('page')) || 1
@@ -1423,13 +1760,16 @@ function hotelBuildUrl(params) {
   if (params.destination) p.set('destination', params.destination);
   p.set('checkIn', params.checkIn); p.set('checkOut', params.checkOut);
   p.set('adults', params.adults); p.set('children', params.children); p.set('rooms', params.rooms);
+  if (params.q) p.set('q', params.q);
   if (params.minPrice) p.set('minPrice', params.minPrice);
   if (params.maxPrice) p.set('maxPrice', params.maxPrice);
   if (params.minStarRating) p.set('minStarRating', params.minStarRating);
+  if (params.starRatings?.length) p.set('starRatings', params.starRatings.join(','));
   if (params.minGuestRating) p.set('minGuestRating', params.minGuestRating);
   if (params.area) p.set('area', params.area);
+  if (params.areas?.length) p.set('areas', params.areas.join(','));
   if (params.neighborhoods?.length) p.set('neighborhoods', params.neighborhoods.join(','));
-  if (params.propertyType?.length) p.set('propertyType', params.propertyType.join(','));
+  if (params.propertyType?.length) p.set('propertyTypes', params.propertyType.join(','));
   if (params.amenities?.length) p.set('amenities', params.amenities.join(','));
   if (params.freeCancellation) p.set('freeCancellation', 'true');
   if (params.sort && params.sort !== 'recommended') p.set('sort', params.sort);
@@ -1481,7 +1821,7 @@ function hotelStepper(label, id, value, min, max) {
   return `<div class="guest-stepper"><div><strong>${escapeHtml(label)}</strong></div><div class="stepper"><button type="button" data-step-target="${id}" data-dir="-1">−</button><output id="${id}" data-value="${value}"><span id="${id}Val">${value}</span></output><button type="button" data-step-target="${id}" data-dir="1">+</button></div></div>`;
 }
 function hotelCardHtml(hotel, search) {
-  const img = hotel.thumbnail || hotel.images?.[0]?.url;
+  const img = hotelImageSrc(hotel);
   const photoCount = hotel.images?.length || 0;
   const rating = hotel.guestRating || hotel.starRating || 0;
   const reviews = hotel.reviewCount || 0;
@@ -1489,11 +1829,13 @@ function hotelCardHtml(hotel, search) {
   const amenities = (hotel.amenities || []).slice(0, 4).map(a => `<span class="hotel-chip">${escapeHtml(a)}</span>`).join('');
   const hasDiscount = typeof hotel.priceFrom === 'number' && typeof hotel.originalPriceFrom === 'number' && hotel.originalPriceFrom > hotel.priceFrom;
   const discountPct = hasDiscount ? Math.round((1 - hotel.priceFrom / hotel.originalPriceFrom) * 100) : 0;
-  return `<article class="hotel-card" data-hotel-slug="${escapeHtml(hotel.slug)}">
+  const datesSelected = Boolean(search?.checkIn && search?.checkOut);
+  const soldOutForDates = datesSelected && Number(hotel.availableRooms) === 0;
+  return `<article class="hotel-card${soldOutForDates ? ' is-soldout' : ''}" data-hotel-slug="${escapeHtml(hotel.slug)}">
     <a class="hotel-card-media" href="${escapeHtml(detailHref)}" data-public-route="${escapeHtml(detailHref)}" data-gallery="${escapeHtml(hotel.slug)}">
-      ${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(hotel.name)}" loading="lazy" />` : `<div class="hotel-card-noimg">${icon('i-images')}</div>`}
+      ${hotelImageTag(img, hotel.name)}
       ${photoCount > 1 ? `<span class="hotel-card-photos">${icon('i-images')} ${photoCount}</span>` : ''}
-      ${hotel.availableRooms === 0 ? '<span class="hotel-card-soldout">Sold out</span>' : ''}
+      ${soldOutForDates ? `<span class="hotel-card-soldout">Not available ${escapeHtml(hotelNightWord(hotelNightsBetween(search.checkIn, search.checkOut)))}</span>` : ''}
     </a>
     <div class="hotel-card-body">
       <div class="hotel-card-head">
@@ -1535,17 +1877,12 @@ async function renderHotelSearch(root, query) {
   const nights = Math.max(1, Math.round((new Date(`${search.checkOut}T00:00:00`) - new Date(`${search.checkIn}T00:00:00`)) / 86400000));
   trackAnalytics('search', { type: 'hotel', destination: search.destination, nights, adults: search.adults });
   root.innerHTML = publicPageHeader('Stays', 'Hotels', 'Find your stay with Sadik Travels.', '') + `
-    <div class="hotel-search-bar">
-      <div class="hotel-search-summary">
-        <strong>${escapeHtml(search.destination || 'All destinations')}</strong>
-        <span>${formatDate(search.checkIn)} → ${formatDate(search.checkOut)}</span>
-        <span>${hotelNightWord(nights)} · ${search.rooms} room${search.rooms > 1 ? 's' : ''} · ${hotelGuestsWord(search.adults, search.children)}</span>
-      </div>
-      <button type="button" class="btn btn-outline" id="hotelModifyBtn">${icon('i-sliders')} Modify search</button>
-    </div>
-    <div id="hotelModifySlot"></div>
+    <section class="public-page-card hotel-search-panel">
+      <div class="hotel-landing-search">${hotelCompactSearchForm(search)}</div>
+      <div class="hotel-search-meta"><span>${icon('i-calendar')} ${formatDate(search.checkIn)} → ${formatDate(search.checkOut)}</span><span>${hotelNightWord(nights)}</span><span>${search.rooms} room${search.rooms > 1 ? 's' : ''} · ${hotelGuestsWord(search.adults, search.children)}</span></div>
+    </section>
     <div class="hotel-results-layout">
-      <aside class="hotel-filters" id="hotelFilters"><div class="public-public-loading"><span class="spinner"></span>Loading filters…</div></aside>
+      <aside class="hotel-filters" id="hotelFiltersPane"><div id="hotelFilters"><div class="public-public-loading"><span class="spinner"></span>Loading filters…</div></div></aside>
       <div class="hotel-results-main">
         <div class="hotel-results-toolbar">
           <span id="hotelResultsCount" class="hotel-count">Searching…</span>
@@ -1561,13 +1898,13 @@ async function renderHotelSearch(root, query) {
     <div class="mobile-sheet" id="hotelMobileSheet"><div><small>Filters &amp; book</small><strong id="hotelSheetCount">Searching…</strong></div><div style="display:flex;gap:8px"><button type="button" class="btn btn-outline" id="hotelSheetFilters">Filters</button></div></div>`;
   wrapPublicRouteContent(root);
   $('#hotelSort').value = search.sort;
-  let facetData = { propertyTypes: [], cities: [] };
+  let facetData = { propertyTypes: [], areas: [], amenities: [], starRatings: [], priceBounds: {} };
   const loadResults = async () => {
     const grid = $('#hotelResultsGrid'); grid.innerHTML = Array.from({ length: 4 }, () => `<div class="hotel-card-skeleton"></div>`).join('');
     try {
       const params = { ...search, propertyType: search.propertyType, amenities: search.amenities };
       const r = await apiRequest(`/hotels?${hotelBuildUrl(params)}`);
-      facetData = { propertyTypes: r.propertyTypes || [], cities: r.cities || [], areas: r.areas || [], priceBounds: r.priceBounds || {} };
+      facetData = { propertyTypes: r.propertyTypes || [], cities: r.cities || [], areas: r.areas || [], amenities: r.amenities || [], starRatings: r.starRatings || [], priceBounds: r.priceBounds || {} };
       const hint = $('#liveFilterHint'); if (hint) hint.textContent = `${r.total} stays`;
       $('#hotelResultsCount').textContent = `${r.total} hotel${r.total === 1 ? '' : 's'} found`;
       const sheet = $('#hotelSheetCount'); if (sheet) sheet.textContent = `${r.total} stay${r.total === 1 ? '' : 's'}`;
@@ -1575,33 +1912,72 @@ async function renderHotelSearch(root, query) {
       renderHotelPagination(r);
       renderHotelFilters(facetData);
       $$('#hotelResultsGrid [data-gallery]').forEach(el => el.addEventListener('click', async e => { e.preventDefault(); try { const detail = await apiRequest(`/hotels/${encodeURIComponent(el.dataset.gallery)}`); hotelGalleryModal(detail.hotel.images); } catch {} }));
-      $('#hotelClearFilters')?.addEventListener('click', () => { ['minPrice', 'maxPrice', 'minStarRating'].forEach(k => hotelSearchState[k] = ''); hotelSearchState.propertyType = []; hotelSearchState.amenities = []; hotelSearchState.freeCancellation = false; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); });
+      $('#hotelClearFilters')?.addEventListener('click', () => { ['minPrice', 'maxPrice', 'minStarRating', 'minGuestRating', 'q'].forEach(k => hotelSearchState[k] = ''); hotelSearchState.propertyType = []; hotelSearchState.amenities = []; hotelSearchState.starRatings = []; hotelSearchState.areas = []; hotelSearchState.neighborhoods = []; hotelSearchState.area = ''; hotelSearchState.freeCancellation = false; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); });
     } catch (error) { grid.innerHTML = publicErrorState(error.message || 'Hotel search is unavailable. Please try again.'); }
   };
   const renderHotelFilters = (facets) => {
     const node = $('#hotelFilters');
-    const starOptions = [5, 4, 3, 2, 1];
-    const priceMax = search.maxPrice || 25000;
-    const hoods = HOTEL_NEIGHBORHOODS[search.destination] || facets.areas || [];
-    node.innerHTML = `<div class="filter-group"><h4>Price per night <span class="filter-count" id="liveFilterHint"></span></h4><div class="filter-price"><label>Min<input type="number" id="fMinPrice" value="${escapeHtml(search.minPrice)}" placeholder="0" min="0" /></label><label>Max<input type="number" id="fMaxPrice" value="${escapeHtml(search.maxPrice)}" placeholder="25000" min="0" /></label></div><div class="range-wrap"><input type="range" id="fPriceSlider" min="0" max="${Number(facets.priceBounds?.max || 25000)}" value="${escapeHtml(search.maxPrice || facets.priceBounds?.max || 25000)}" /></div></div>
+    const propertyTypes = facets.propertyTypes?.length ? facets.propertyTypes : [];
+    const areas = facets.areas?.length ? facets.areas : [];
+    const amenities = facets.amenities?.length ? facets.amenities : [];
+    const starOptions = facets.starRatings?.length ? facets.starRatings : [5, 4, 3, 2, 1];
+    const bounds = facets.priceBounds || {};
+    const priceMaxBound = Number(bounds.max) > 0 ? Math.ceil(Number(bounds.max)) : 25000;
+    const priceMinBound = Number(bounds.min) >= 0 ? Math.floor(Number(bounds.min)) : 0;
+    const anyFilterActive = Boolean(search.q || search.minPrice || search.maxPrice || search.starRatings?.length || search.minGuestRating || search.areas?.length || search.propertyType?.length || search.amenities?.length || search.freeCancellation);
+    node.innerHTML = `<div class="filter-head"><strong>Filters &amp; Sort</strong>${anyFilterActive ? '<button type="button" class="filter-clear" id="hotelClearFiltersSide">Clear All</button>' : ''}</div>
+      <div class="filter-group"><h4>Search hotel name / area</h4><input type="search" class="filter-search" id="fNameSearch" value="${escapeHtml(search.q || '')}" placeholder="e.g. Royal, Kolatoli…" /></div>
+      <div class="filter-group"><h4>Sort by</h4><div class="filter-checks">${[['recommended', 'Recommended'], ['price_asc', 'Price: Low to High'], ['price_desc', 'Price: High to Low'], ['rating', 'Rating']].map(([value, label]) => `<label class="check-pill"><input type="radio" name="fSort" data-sort-radio="${value}" ${search.sort === value ? 'checked' : ''} /><span>${label}</span></label>`).join('')}</div></div>
+      <div class="filter-group"><h4>Price / night <small class="filter-hint">BDT ${priceMinBound.toLocaleString('en-BD')} – ${priceMaxBound.toLocaleString('en-BD')}</small></h4><div class="filter-price"><label>Min<input type="number" id="fMinPrice" value="${escapeHtml(search.minPrice)}" placeholder="${priceMinBound}" min="0" /></label><label>Max<input type="number" id="fMaxPrice" value="${escapeHtml(search.maxPrice)}" placeholder="${priceMaxBound}" min="0" /></label></div><div class="range-wrap"><input type="range" id="fPriceSlider" min="${priceMinBound}" max="${priceMaxBound}" value="${escapeHtml(search.maxPrice || priceMaxBound)}" /></div></div>
+      ${propertyTypes.length ? `<div class="filter-group"><h4>Property type</h4><div class="filter-checks">${propertyTypes.map(t => `<label class="check-pill"><input type="checkbox" data-ptype="${escapeHtml(t)}" ${search.propertyType.includes(t) ? 'checked' : ''} /><span>${escapeHtml(t)}</span></label>`).join('')}</div></div>` : ''}
+      ${areas.length ? `<div class="filter-group"><h4>Area</h4><div class="filter-checks filter-scroll">${areas.map(a => `<label class="check-pill"><input type="checkbox" data-area="${escapeHtml(a)}" ${(search.areas || []).includes(a) || search.area === a ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>` : ''}
+      ${amenities.length ? `<div class="filter-group"><h4>Amenities</h4><div class="filter-checks filter-scroll">${amenities.map(a => `<label class="check-pill"><input type="checkbox" data-amenity="${escapeHtml(a)}" ${search.amenities.includes(a) ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>` : ''}
+      ${starOptions.length ? `<div class="filter-group"><h4>Star rating</h4><div class="filter-checks">${starOptions.map(stars => `<label class="check-pill"><input type="checkbox" data-star="${stars}" ${search.starRatings.includes(Number(stars)) ? 'checked' : ''} /><span>${hotelStars(stars)} ${stars} star${stars === 1 ? '' : 's'}</span></label>`).join('')}</div></div>` : ''}
       <div class="filter-group"><h4>Guest score</h4><div class="filter-checks">${REVIEW_BUCKETS.map(b => `<label class="check-pill"><input type="radio" name="guestScore" data-score="${b.min}" ${Number(search.minGuestRating) === b.min ? 'checked' : ''} /><span>${escapeHtml(b.label)}</span></label>`).join('')}</div></div>
-      ${hoods.length ? `<div class="filter-group"><h4>Neighborhoods</h4><div class="filter-checks">${hoods.map(a => `<label class="check-pill"><input type="checkbox" data-hood="${escapeHtml(a)}" ${(search.neighborhoods || []).includes(a) || search.area === a ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>` : ''}
-      <div class="filter-group"><h4>Star rating</h4><div class="filter-checks">${starOptions.map(s => `<label class="check-pill"><input type="checkbox" data-star="${s}" ${Number(search.minStarRating) === s ? 'checked' : ''} /><span>${hotelStars(s)} ${s}★</span></label>`).join('')}</div></div>
-      ${facets.propertyTypes.length ? `<div class="filter-group"><h4>Property type</h4><div class="filter-checks">${facets.propertyTypes.map(t => `<label class="check-pill"><input type="checkbox" data-ptype="${escapeHtml(t)}" ${search.propertyType.includes(t) ? 'checked' : ''} /><span>${escapeHtml(t)}</span></label>`).join('')}</div></div>` : ''}
-      <div class="filter-group"><h4>Amenities</h4><div class="filter-checks">${HOTEL_AMENITIES.map(a => `<label class="check-pill"><input type="checkbox" data-amenity="${escapeHtml(a)}" ${search.amenities.includes(a) ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>
       <div class="filter-group"><label class="check-pill"><input type="checkbox" id="fFreeCancel" ${search.freeCancellation ? 'checked' : ''} /><span>Free cancellation</span></label></div>
-      <button type="button" class="btn btn-outline full-btn" id="hotelClearFiltersSide">Clear all</button>`;
-    const apply = () => { hotelSearchState.minPrice = $('#fMinPrice').value; hotelSearchState.maxPrice = $('#fMaxPrice').value; hotelSearchState.propertyType = $$('[data-ptype]:checked').map(i => i.dataset.ptype); hotelSearchState.amenities = $$('[data-amenity]:checked').map(i => i.dataset.amenity); const star = $$('[data-star]:checked').map(i => Number(i.dataset.star)); hotelSearchState.minStarRating = star.length ? String(Math.min(...star)) : ''; hotelSearchState.minGuestRating = $$('[data-score]:checked')[0]?.dataset.score || ''; hotelSearchState.neighborhoods = $$('[data-hood]:checked').map(i => i.dataset.hood); hotelSearchState.area = hotelSearchState.neighborhoods[0] || ''; hotelSearchState.freeCancellation = $('#fFreeCancel').checked; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); };
+      <button type="button" class="btn btn-outline full-btn" id="hotelClearFiltersSide2">Clear All</button>`;
+    const clearAll = () => { ['minPrice', 'maxPrice', 'minStarRating', 'minGuestRating', 'q'].forEach(k => hotelSearchState[k] = ''); hotelSearchState.propertyType = []; hotelSearchState.amenities = []; hotelSearchState.starRatings = []; hotelSearchState.areas = []; hotelSearchState.neighborhoods = []; hotelSearchState.area = ''; hotelSearchState.freeCancellation = false; hotelSearchState.sort = 'recommended'; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); };
+    const apply = () => {
+      hotelSearchState.q = $('#fNameSearch')?.value.trim() || '';
+      hotelSearchState.minPrice = $('#fMinPrice')?.value || '';
+      hotelSearchState.maxPrice = $('#fMaxPrice')?.value || '';
+      hotelSearchState.propertyType = $$('[data-ptype]:checked').map(i => i.dataset.ptype);
+      hotelSearchState.amenities = $$('[data-amenity]:checked').map(i => i.dataset.amenity);
+      hotelSearchState.starRatings = $$('[data-star]:checked').map(i => Number(i.dataset.star));
+      hotelSearchState.areas = $$('[data-area]:checked').map(i => i.dataset.area);
+      hotelSearchState.neighborhoods = [];
+      hotelSearchState.area = '';
+      hotelSearchState.minGuestRating = $$('[data-score]:checked')[0]?.dataset.score || '';
+      hotelSearchState.freeCancellation = $('#fFreeCancel')?.checked || false;
+      hotelSearchState.sort = $$('[data-sort-radio]:checked')[0]?.dataset.sortRadio || hotelSearchState.sort || 'recommended';
+      hotelSearchState.page = 1;
+      publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`);
+    };
+    let nameTimer;
+    $('#fNameSearch')?.addEventListener('input', () => { clearTimeout(nameTimer); nameTimer = setTimeout(apply, 350); });
     node.querySelectorAll('input[type=checkbox], input[type=number], input[type=radio], input[type=range]').forEach(i => i.addEventListener('change', apply));
-    $('#fPriceSlider')?.addEventListener('input', () => { $('#fMaxPrice').value = $('#fPriceSlider').value; });
     $('#fMinPrice')?.addEventListener('blur', apply); $('#fMaxPrice')?.addEventListener('blur', apply);
-    $('#hotelClearFiltersSide')?.addEventListener('click', () => { ['minPrice', 'maxPrice', 'minStarRating'].forEach(k => hotelSearchState[k] = ''); hotelSearchState.propertyType = []; hotelSearchState.amenities = []; hotelSearchState.freeCancellation = false; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); });
+    $('#fPriceSlider')?.addEventListener('input', () => { $('#fMaxPrice').value = $('#fPriceSlider').value; });
+    $('#fPriceSlider')?.addEventListener('change', apply);
+    $('#hotelClearFiltersSide')?.addEventListener('click', clearAll);
+    $('#hotelClearFiltersSide2')?.addEventListener('click', clearAll);
   };
   const renderHotelPagination = (r) => { const node = $('#hotelPagination'); if (r.pageCount <= 1) { node.innerHTML = ''; return; } node.innerHTML = `${r.page > 1 ? `<button class="btn btn-outline" data-page="${r.page - 1}">← Prev</button>` : ''}<span>Page ${r.page} of ${r.pageCount}</span>${r.page < r.pageCount ? `<button class="btn btn-outline" data-page="${r.page + 1}">Next →</button>` : ''}`; $$('[data-page]', node).forEach(b => b.addEventListener('click', () => { hotelSearchState.page = Number(b.dataset.page); publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); })); };
   $('#hotelSort').addEventListener('change', e => { hotelSearchState.sort = e.target.value; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); });
-  let modifyOpen = false;
-  $('#hotelModifyBtn').addEventListener('click', () => { modifyOpen = !modifyOpen; const slot = $('#hotelModifySlot'); if (modifyOpen) { slot.innerHTML = `<section class="public-page-card"><div class="hotel-landing-search">${hotelCompactSearchForm(search)}</div></section>`; bindHotelModifyForm(search); } else { slot.innerHTML = ''; } });
-  $('#hotelFiltersToggle').addEventListener('click', () => { const node = $('#hotelFilters'); openModal($('#genericModal')); $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-sliders')}</div><h2 id="modalTitle">Filters</h2></div><div id="mobileFiltersSlot"></div><button type="button" class="btn btn-primary full-btn" data-close-modal>Show results</button>`; const orig = node; $('#mobileFiltersSlot').innerHTML = orig.innerHTML; orig.style.display = 'none'; $$('#mobileFiltersSlot input').forEach(i => i.addEventListener('change', () => { const target = $(`#hotelFilters #${i.id}`) || $(`#hotelFilters [data-amenity="${i.dataset.amenity}"]`) || $(`#hotelFilters [data-ptype="${i.dataset.ptype}"]`) || $(`#hotelFilters [data-star="${i.dataset.star}"]`); if (target) target.checked = i.checked; })); $$('#modalContent [data-close-modal]').forEach(b => b.addEventListener('click', () => { closeModal($('#genericModal')); orig.style.display = ''; })); });
+  bindHotelModifyForm(search);
+  // Mobile/tablet: the live sidebar is MOVED into the sheet so there is a
+  // single source of truth — changes apply immediately through navigation,
+  // and the sidebar returns to its pane when the sheet closes.
+  const openFilterSheet = () => {
+    const node = $('#hotelFilters');
+    if (!node) return;
+    openModal($('#genericModal'));
+    $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-sliders')}</div><h2 id="modalTitle">Filters &amp; Sort</h2></div><div id="mobileFiltersSlot"></div><button type="button" class="btn btn-primary full-btn" data-close-modal>Show results</button>`;
+    $('#mobileFiltersSlot').appendChild(node);
+    $('#modalContent [data-close-modal]')?.addEventListener('click', () => { const pane = $('#hotelFiltersPane'); if (pane && !pane.contains(node)) pane.appendChild(node); });
+  };
+  $('#hotelFiltersToggle')?.addEventListener('click', openFilterSheet);
+  $('#hotelSheetFilters')?.addEventListener('click', openFilterSheet);
   await loadResults();
 }
 function roomSelectionFromStore(hotelId) { try { const raw = sessionStorage.getItem(HOTEL_CHECKOUT_KEY); const data = raw ? JSON.parse(raw) : null; return data && data.hotelId === hotelId ? data : null; } catch { return null; } }
@@ -1619,15 +1995,18 @@ async function renderHotelDetail(root, slug, query) {
   document.title = `${hotel.name} | Sadik Travels`;
   setSeo({ title: hotel.name, description: hotel.shortDescription || `${hotel.name} in ${hotel.city}. Book with Sadik Travels.`, canonical: `/hotels/${hotel.slug}`, image: hotel.images?.[0]?.url, jsonLd: { '@context': 'https://schema.org', '@type': 'Hotel', name: hotel.name, address: { '@type': 'PostalAddress', addressLocality: hotel.city, addressCountry: hotel.country }, starRating: { '@type': 'Rating', ratingValue: hotel.starRating }, ...(hotel.priceFrom ? { priceRange: `৳${hotel.priceFrom}` } : {}) } });
   trackAnalytics('hotel_view', { slug: hotel.slug, city: hotel.city });
-  const mainImg = hotel.images?.[0]?.url;
+  const images = hotel.images?.length ? hotel.images : [];
+  const mainImg = images[0]?.url || '';
+  const allSoldOut = Boolean((search.checkIn && search.checkOut) && hotel.rooms?.length && hotel.rooms.every(room => Number(room.available) <= 0));
   const selection = roomSelectionFromStore(hotel.id) || { hotelId: hotel.id, slug: hotel.slug, hotelName: hotel.name, hotelCity: hotel.city, hotelImage: mainImg, checkIn: search.checkIn, checkOut: search.checkOut, nights, rooms: [] };
   const renderDetail = () => {
     root.innerHTML = hotelBreadcrumb([{ label: 'Home', href: '/' }, { label: 'Hotels', href: '/hotels' }, { label: hotel.city, href: `/hotels/search?destination=${encodeURIComponent(hotel.city)}` }, { label: hotel.name, href: `/hotels/${hotel.slug}` }]) + `
       <div class="hotel-detail">
         <div class="hotel-detail-media">
-          <button class="hotel-detail-hero" data-gallery-open><img src="${escapeHtml(mainImg || '')}" alt="${escapeHtml(hotel.name)}" />${hotel.images?.length ? `<span class="hotel-detail-photos">${icon('i-images')} ${hotel.images.length} photo${hotel.images.length === 1 ? '' : 's'}</span>` : ''}</button>
-          <div class="hotel-detail-thumbs">${(hotel.images || []).slice(1, 5).map(img => `<button type="button" class="hotel-detail-thumb" data-thumb="${escapeHtml(img.url)}"><img src="${escapeHtml(img.url)}" alt="${escapeHtml(img.alt || hotel.name)}" loading="lazy" /></button>`).join('')}</div>
+          <button class="hotel-detail-hero" data-gallery-open ${images.length ? '' : 'disabled'}>${hotelImageTag(mainImg, hotel.name)}${images.length ? `<span class="hotel-detail-photos">${icon('i-images')} ${images.length} photo${images.length === 1 ? '' : 's'}</span>` : `<span class="hotel-detail-photos">${icon('i-images')} Photos coming soon</span>`}</button>
+          <div class="hotel-detail-thumbs">${images.slice(1, 4).map(img => `<button type="button" class="hotel-detail-thumb" data-thumb="${escapeHtml(img.url)}"><img src="${escapeHtml(img.url)}" alt="${escapeHtml(img.alt || hotel.name)}" loading="lazy" /></button>`).join('')}${images.length > 4 ? `<button type="button" class="hotel-detail-thumb hotel-detail-viewall" data-gallery-open>+${images.length - 4} more</button>` : images.length ? '' : `<div class="hotel-detail-thumb is-empty">${icon('i-images')}</div>`}</div>
         </div>
+        ${allSoldOut ? `<div class="hotel-soldout-banner">${icon('i-info')} Not available for the selected dates (${formatDate(search.checkIn)} → ${formatDate(search.checkOut)}). Try different dates or <a href="/hotels/search?${escapeHtml(hotelBuildUrl({ ...search, destination: hotel.city }))}" data-public-route="/hotels/search?${escapeHtml(hotelBuildUrl({ ...search, destination: hotel.city }))}">browse other hotels</a>.</div>` : ''}
         <div class="hotel-detail-info">
           <div class="hotel-detail-head">
             <div><div class="hotel-card-stars">${hotelStars(hotel.starRating)}</div><h1>${escapeHtml(hotel.name)}</h1><p class="hotel-card-loc">${icon('i-location')}${escapeHtml([hotel.address, hotel.area, hotel.city].filter(Boolean).join(', '))}</p></div>
@@ -1642,6 +2021,10 @@ async function renderHotelDetail(root, slug, query) {
           ${hotel.description ? `<div class="hotel-detail-section"><h3>About this property</h3><p>${escapeHtml(hotel.description)}</p></div>` : ''}
           ${hotel.shortDescription && !hotel.description ? `<div class="hotel-detail-section"><h3>About this property</h3><p>${escapeHtml(hotel.shortDescription)}</p></div>` : ''}
           ${hotel.cancellationPolicy ? `<div class="hotel-detail-section"><h3>Cancellation policy</h3><p>${escapeHtml(hotel.cancellationPolicy.type === 'free' ? `Free cancellation${hotel.cancellationPolicy.freeUntilDays ? ` up to ${hotel.cancellationPolicy.freeUntilDays} day${hotel.cancellationPolicy.freeUntilDays === 1 ? '' : 's'} before check-in` : ''}.` : 'Non-refundable.')}${hotel.cancellationPolicy.description ? ` ${escapeHtml(hotel.cancellationPolicy.description)}` : ''}</p></div>` : ''}
+          <div class="hotel-detail-section hotel-chat-cta">
+            <button type="button" class="btn btn-outline" data-chat-hotel>${icon('i-headset')} Chat with ${escapeHtml(hotel.name)}</button>
+            <small>Live messages with the property team — replies arrive instantly.</small>
+          </div>
           ${(hotel.phone || hotel.email || hotel.website) ? `<div class="hotel-detail-section"><h3>Contact the property</h3><div class="hotel-contact-row">${hotel.phone ? `<a href="tel:${escapeHtml(hotel.phone.replace(/[^+\d]/g, ''))}">${icon('i-phone')}${escapeHtml(hotel.phone)}</a>` : ''}${hotel.email ? `<a href="mailto:${escapeHtml(hotel.email)}">${icon('i-mail')}${escapeHtml(hotel.email)}</a>` : ''}${hotel.website ? `<a href="${escapeHtml(hotel.website)}" target="_blank" rel="noopener">${icon('i-globe')}Website</a>` : ''}</div></div>` : ''}
           ${hotel.latitude && hotel.longitude ? `<div class="hotel-detail-section"><h3>Location</h3><div class="hotel-map"><iframe title="Map of ${escapeHtml(hotel.name)}" loading="lazy" src="https://www.openstreetmap.org/export/embed.html?bbox=${Number(hotel.longitude) - 0.01}%2C${Number(hotel.latitude) - 0.008}%2C${Number(hotel.longitude) + 0.01}%2C${Number(hotel.latitude) + 0.008}&amp;layer=mapnik&amp;marker=${Number(hotel.latitude)}%2C${Number(hotel.longitude)}"></iframe></div></div>` : ''}
         </div>
@@ -1664,7 +2047,7 @@ async function renderHotelDetail(root, slug, query) {
     const img = room.images?.[0]?.url || hotel.images?.[0]?.url;
     const discountBadge = room.originalPrice && room.originalPrice > room.pricePerNight ? `<span class="room-discount">${Math.round((1 - room.pricePerNight / room.originalPrice) * 100)}% OFF</span>` : '';
     return `<article class="hotel-room-card${soldOut ? ' soldout' : ''}${selected ? ' selected' : ''}" data-room-id="${escapeHtml(room.id)}">
-      <div class="hotel-room-media">${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(room.name)}" loading="lazy" />` : `<div class="hotel-card-noimg">${icon('i-bed')}</div>`}</div>
+      <div class="hotel-room-media">${hotelImageTag(img, room.name)}</div>
       <div class="hotel-room-body">
         <div class="hotel-room-top">
           <div><h3>${escapeHtml(room.name)}</h3><p class="hotel-room-meta">${[room.size ? `${room.size} sq ft` : '', room.bedType, `${room.maxGuests} guest${room.maxGuests === 1 ? '' : 's'}`, room.numBeds ? `${room.numBeds} bed${room.numBeds === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}</p></div>
@@ -1696,6 +2079,7 @@ async function renderHotelDetail(root, slug, query) {
   }
   function bindHotelDetail(hotel, selection, search) {
     $$('.hotel-detail-hero, .hotel-detail-thumb').forEach(el => el.addEventListener('click', () => { const idx = el.dataset.thumb ? hotel.images.findIndex(i => i.url === el.dataset.thumb) : 0; hotelGalleryModal(hotel.images, Math.max(0, idx)); }));
+    $$('[data-chat-hotel]').forEach(btn => btn.addEventListener('click', () => { void openHotelChat({ id: hotel.id, name: hotel.name }); }));
     $$('[data-select-room]').forEach(btn => btn.addEventListener('click', () => { const room = hotel.rooms.find(r => r.id === btn.dataset.selectRoom); if (!room) return; selection.rooms.push({ roomId: room.id, roomName: room.name, quantity: 1, pricePerNight: room.pricePerNight, maxGuests: room.maxGuests, image: room.images?.[0]?.url }); selection.hotelId = hotel.id; selection.slug = hotel.slug; selection.hotelName = hotel.name; selection.hotelCity = hotel.city; selection.hotelImage = hotel.images?.[0]?.url; roomSelectionSave(selection); renderDetail(); updateSticky(); }));
     $$('[data-remove-room]').forEach(btn => btn.addEventListener('click', () => { const idx = selection.rooms.findIndex(r => r.roomId === btn.dataset.removeRoom); if (idx >= 0) selection.rooms.splice(idx, 1); roomSelectionSave(selection); renderDetail(); updateSticky(); }));
     updateSticky();
@@ -1778,7 +2162,7 @@ async function renderMyBookings(root) {
       <div class="bookings-list">${filtered.length ? filtered.map(b => {
         const href = `/booking/${b.id}`;
         return `<a class="booking-row" href="${escapeHtml(href)}" data-public-route="${escapeHtml(href)}">
-          <div class="booking-row-media">${b.hotelSnapshot?.image ? `<img src="${escapeHtml(b.hotelSnapshot.image)}" alt="" loading="lazy" />` : `<div class="hotel-card-noimg">${icon('i-hotel')}</div>`}</div>
+          <div class="booking-row-media">${hotelImageTag(b.hotelSnapshot?.image, booking?.hotelSnapshot?.name || '')}</div>
           <div class="booking-row-main"><strong>${escapeHtml(b.hotelSnapshot?.name || 'Hotel')}</strong><small>${escapeHtml(b.bookingNumber)} · ${formatDate(b.checkIn)} → ${formatDate(b.checkOut)}</small><span>${b.rooms.length} room${b.rooms.length > 1 ? 's' : ''} · ${hotelGuestsWord(b.rooms.reduce((s, r) => s + r.adults, 0), b.rooms.reduce((s, r) => s + r.children, 0))}</span></div>
           <div class="booking-row-side"><strong>${hotelMoney(b.priceBreakdown.total)}</strong><span class="hotel-status hotel-status-${escapeHtml(b.status)}">${escapeHtml(b.status.replace(/_/g, ' '))}</span></div>
         </a>`;

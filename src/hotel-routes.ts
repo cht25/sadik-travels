@@ -73,16 +73,20 @@ export function registerHotelRoutes(app: Express, deps: { store: Store; hotelSto
   app.get('/api/v1/hotels', rateLimit('hotel-search', 120, 60), async (req, res, next) => {
     try {
       const q = req.query;
+      const listParam = (name: string) => q[name] ? String(q[name]).split(',').map((s: string) => s.trim()).filter(Boolean) : undefined;
       const result = await hotelStore.listHotels({
         q: q.q ? String(q.q) : undefined, destination: q.destination ? String(q.destination) : undefined,
         city: q.city ? String(q.city) : undefined, country: q.country ? String(q.country) : undefined,
         propertyType: q.propertyType ? String(q.propertyType) : undefined,
+        propertyTypes: listParam('propertyTypes'),
         minPrice: q.minPrice ? Number(q.minPrice) : undefined, maxPrice: q.maxPrice ? Number(q.maxPrice) : undefined,
         minStarRating: q.minStarRating ? Number(q.minStarRating) : undefined,
+        starRatings: listParam('starRatings')?.map(Number).filter(Number.isFinite),
         minGuestRating: q.minGuestRating ? Number(q.minGuestRating) : undefined,
         area: q.area ? String(q.area) : undefined,
-        neighborhoods: q.neighborhoods ? String(q.neighborhoods).split(',').map((s: string) => s.trim()).filter(Boolean) : undefined,
-        amenities: q.amenities ? String(q.amenities).split(',').map((s: string) => s.trim()).filter(Boolean) : undefined,
+        areas: listParam('areas'),
+        neighborhoods: listParam('neighborhoods'),
+        amenities: listParam('amenities'),
         checkIn: q.checkIn ? String(q.checkIn) : undefined, checkOut: q.checkOut ? String(q.checkOut) : undefined,
         freeCancellationOnly: q.freeCancellation === 'true',
         sort: ['recommended', 'price_asc', 'price_desc', 'rating'].includes(String(q.sort)) ? String(q.sort) : 'recommended',

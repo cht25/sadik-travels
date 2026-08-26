@@ -189,3 +189,11 @@ a.ac-stat:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(16,36,80,.
 .friendly-list{margin:0;padding-left:18px}
 .friendly-list li{margin:2px 0}
 .public-detail-price{margin:0 0 10px;font-size:18px;color:var(--brand, #001ea0)}
+
+/* Hotel image manager: primary image selection */
+.image-cell{position:relative}
+.image-cell.is-primary{outline:2px solid var(--admin-brand);outline-offset:1px}
+.image-primary-badge{position:absolute;left:6px;top:6px;background:var(--admin-brand);color:#fff;font-size:8px;font-weight:800;padding:2px 7px;border-radius:9px;letter-spacing:.04em}
+.image-primary{position:absolute;left:6px;top:6px;border:0;background:rgba(15,23,42,.82);color:#fff;font-size:8px;font-weight:800;padding:3px 8px;border-radius:9px;cursor:pointer}
+.image-primary:hover{background:var(--admin-brand)}
+.image-hint{margin:8px 0 0;color:var(--admin-muted);font-size:9.5px;line-height:1.5}

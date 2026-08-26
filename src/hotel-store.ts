@@ -61,9 +61,9 @@ export type HotelBooking = {
 };
 
 export type HotelFilters = {
-  q?: string; destination?: string; city?: string; country?: string; propertyType?: string;
-  minPrice?: number; maxPrice?: number; minStarRating?: number; minGuestRating?: number; amenities?: string[];
-  area?: string; neighborhoods?: string[];
+  q?: string; destination?: string; city?: string; country?: string; propertyType?: string; propertyTypes?: string[];
+  minPrice?: number; maxPrice?: number; minStarRating?: number; starRatings?: number[]; minGuestRating?: number; amenities?: string[];
+  area?: string; areas?: string[]; neighborhoods?: string[];
   checkIn?: string; checkOut?: string; freeCancellationOnly?: boolean; sort?: string;
   page?: number; pageSize?: number; includeArchived?: boolean; status?: HotelStatus | 'all'; ownerId?: string;
 };
@@ -143,7 +143,39 @@ export function generateBookingNumber() {
   return `ST-${year}-${code}`;
 }
 
-const optimizeImages = (images: HotelImage[] | undefined, width: number): HotelImage[] => (images || []).map(image => ({ ...image, url: optimizedMediaUrl(image.url, { width }) || image.url }));
+const optimizeImages = (images: HotelImage[] | undefined, width: number): HotelImage[] => normalizeHotelImages(images).map(image => ({ ...image, url: optimizedMediaUrl(image.url, { width }) || image.url }));
+
+/**
+ * Canonical image normalization — applied on every save AND every read.
+ *
+ * Fixes the root causes of missing hotel images:
+ *  - legacy/malformed rows where `images` contains plain URL strings instead
+ *    of {url} objects (these previously produced `url: undefined` and empty
+ *    <img src=""> tags — the broken image containers on the public site);
+ *  - insecure `http://` URLs, which are blocked by the production CSP and by
+ *    browsers on the HTTPS site — upgraded to `https://`;
+ *  - whitespace-only or missing URLs, which are dropped entirely so the
+ *    frontend can rely on `images[n].url` being a usable absolute URL.
+ */
+export function normalizeHotelImages(images: unknown): HotelImage[] {
+  if (!Array.isArray(images)) return [];
+  const normalized: HotelImage[] = [];
+  for (const entry of images) {
+    const raw = typeof entry === 'string' ? entry : (entry as HotelImage | null)?.url;
+    if (typeof raw !== 'string') continue;
+    let url = raw.trim();
+    if (!url || !/^(https?:\/\/|\/)/i.test(url)) continue;
+    if (url.startsWith('http://')) url = `https://${url.slice('http://'.length)}`;
+    const source = typeof entry === 'object' && entry ? (entry as HotelImage) : ({} as HotelImage);
+    normalized.push({
+      url,
+      ...(source.publicId ? { publicId: String(source.publicId) } : {}),
+      ...(source.mediaId ? { mediaId: String(source.mediaId) } : {}),
+      ...(source.alt ? { alt: String(source.alt).slice(0, 300) } : {})
+    });
+  }
+  return normalized;
+}
 
 export class HotelStore {
   async ensureIndexes() { await Promise.all(MODELS.map(model => model.createIndexes())); }
@@ -191,7 +223,7 @@ export class HotelStore {
     return min === Infinity ? Math.max(0, fallbackTotal) : Math.max(0, min);
   }
 
-  async listHotels(filters: HotelFilters = {}): Promise<{ hotels: any[]; total: number; page: number; pageSize: number; pageCount: number; propertyTypes: string[]; cities: string[]; areas: string[]; priceBounds: { min: number; max: number } }> {
+  async listHotels(filters: HotelFilters = {}): Promise<{ hotels: any[]; total: number; page: number; pageSize: number; pageCount: number; propertyTypes: string[]; cities: string[]; areas: string[]; amenities: string[]; starRatings: number[]; priceBounds: { min: number; max: number } }> {
     let hotels = (await this.allHotels()).filter(hotel => !hotel.deletedAt);
     if (filters.includeArchived) { /* keep all */ }
     else if (filters.status && filters.status !== 'all') hotels = hotels.filter(hotel => hotel.status === filters.status);
@@ -224,9 +256,15 @@ export class HotelStore {
     if (filters.destination) items = items.filter(hotel => contains(`${hotel.name} ${hotel.city} ${hotel.country} ${hotel.area || ''}`, filters.destination));
     if (filters.city) items = items.filter(hotel => normalize(hotel.city) === normalize(filters.city));
     if (filters.country) items = items.filter(hotel => normalize(hotel.country) === normalize(filters.country));
-    if (filters.propertyType) items = items.filter(hotel => normalize(hotel.propertyType) === normalize(filters.propertyType));
-    if (filters.minStarRating) items = items.filter(hotel => (hotel.starRating || 0) >= filters.minStarRating!);
+    // Property type: single value (compat) or multi-select OR-within-group.
+    if (filters.propertyTypes?.length) items = items.filter(hotel => filters.propertyTypes!.some(type => normalize(hotel.propertyType) === normalize(type)));
+    else if (filters.propertyType) items = items.filter(hotel => normalize(hotel.propertyType) === normalize(filters.propertyType));
+    // Star rating: exact match against the selected star levels (OR-within-group).
+    if (filters.starRatings?.length) items = items.filter(hotel => filters.starRatings!.includes(Math.round(Number(hotel.starRating) || 0)));
+    else if (filters.minStarRating) items = items.filter(hotel => (hotel.starRating || 0) >= filters.minStarRating!);
     if (filters.minGuestRating) items = items.filter(hotel => (hotel.guestRating || hotel.starRating || 0) >= filters.minGuestRating!);
+    // Area: single value (compat) or multi-select OR-within-group (exact, case-insensitive).
+    if (filters.areas?.length) items = items.filter(hotel => filters.areas!.some(area => normalize(hotel.area || '') === normalize(area)));
     if (filters.area) items = items.filter(hotel => normalize(hotel.area || '') === normalize(filters.area) || contains(hotel.area, filters.area));
     if (filters.neighborhoods?.length) items = items.filter(hotel => filters.neighborhoods!.some(n => contains(`${hotel.area || ''} ${hotel.address || ''}`, n)));
     if (filters.minPrice !== undefined) items = items.filter(hotel => typeof hotel.priceFrom === 'number' && hotel.priceFrom >= filters.minPrice!);
@@ -257,9 +295,18 @@ export class HotelStore {
     const propertyTypes = [...new Set(live.map(h => h.propertyType).filter(Boolean))].sort();
     const cities = [...new Set(live.map(h => h.city).filter(Boolean))].sort();
     const areas = [...new Set(live.map(h => h.area).filter(Boolean))].sort();
+    // Amenity/star facets are derived from live hotel data (never hardcoded),
+    // so admin-managed taxonomy changes automatically reach the filter panel.
+    const amenityCounts = new Map<string, number>();
+    for (const hotel of live) for (const amenity of hotel.amenities || []) {
+      const key = String(amenity).trim();
+      if (key) amenityCounts.set(key, (amenityCounts.get(key) || 0) + 1);
+    }
+    const amenities = [...amenityCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([amenity]) => amenity);
+    const starRatings = [...new Set(live.map(h => Math.round(Number(h.starRating) || 0)).filter(stars => stars > 0))].sort((a, b) => b - a);
     const prices = items.map(h => h.priceFrom).filter((n): n is number => typeof n === 'number');
     const priceBounds = { min: prices.length ? Math.min(...prices) : 0, max: prices.length ? Math.max(...prices) : 25000 };
-    return { hotels: view, total, page: currentPage, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)), propertyTypes, cities, areas, priceBounds };
+    return { hotels: view, total, page: currentPage, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)), propertyTypes, cities, areas, amenities, starRatings, priceBounds };
   }
 
   async findHotel(idOrSlug: string, options: { checkIn?: string; checkOut?: string; withRooms?: boolean } = {}) {
@@ -426,16 +473,16 @@ export class HotelStore {
   }
   async adminFindHotel(id: string) { const hotel = await this.oneHotel(id); return hotel ? hotel as Hotel : undefined; }
   async adminFindRoom(id: string) { const room = await this.oneRoom(id); return room && !room.deletedAt ? room as HotelRoom : undefined; }
-  async adminCreateHotel(input: Partial<Hotel>, actor: string) { const time = now(); const hotel: Hotel = { id: randomUUID(), slug: input.slug!, name: input.name!, shortDescription: input.shortDescription, description: input.description, propertyType: input.propertyType || 'Hotel', address: input.address, city: input.city!, country: input.country || 'Bangladesh', area: input.area, latitude: input.latitude, longitude: input.longitude, phone: input.phone, email: input.email, website: input.website, starRating: input.starRating ?? 3, guestRating: input.guestRating, reviewCount: 0, amenities: input.amenities || [], facilities: input.facilities || [], images: input.images || [], roomTypes: input.roomTypes || [], pricePerNight: input.pricePerNight, seasonalDiscounts: input.seasonalDiscounts || [], available: input.available !== false, ownerId: input.ownerId || actor, checkInTime: input.checkInTime, checkOutTime: input.checkOutTime, cancellationPolicy: input.cancellationPolicy, status: input.status || 'active', featured: input.featured || false, sortOrder: input.sortOrder || 0, createdBy: actor, updatedAt: time, createdAt: time } as Hotel; return this.saveHotel(hotel); }
-  async adminUpdateHotel(id: string, patch: Partial<Hotel>, actor: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, ...patch, id, updatedBy: actor, updatedAt: now() }); }
+  async adminCreateHotel(input: Partial<Hotel>, actor: string) { const time = now(); const hotel: Hotel = { id: randomUUID(), slug: input.slug!, name: input.name!, shortDescription: input.shortDescription, description: input.description, propertyType: input.propertyType || 'Hotel', address: input.address, city: input.city!, country: input.country || 'Bangladesh', area: input.area, latitude: input.latitude, longitude: input.longitude, phone: input.phone, email: input.email, website: input.website, starRating: input.starRating ?? 3, guestRating: input.guestRating, reviewCount: 0, amenities: input.amenities || [], facilities: input.facilities || [], images: normalizeHotelImages(input.images), roomTypes: input.roomTypes || [], pricePerNight: input.pricePerNight, seasonalDiscounts: input.seasonalDiscounts || [], available: input.available !== false, ownerId: input.ownerId || actor, checkInTime: input.checkInTime, checkOutTime: input.checkOutTime, cancellationPolicy: input.cancellationPolicy, status: input.status || 'active', featured: input.featured || false, sortOrder: input.sortOrder || 0, createdBy: actor, updatedAt: time, createdAt: time } as Hotel; return this.saveHotel(hotel); }
+  async adminUpdateHotel(id: string, patch: Partial<Hotel>, actor: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, ...patch, id, updatedBy: actor, updatedAt: now(), ...(patch.images ? { images: normalizeHotelImages(patch.images) } : {}) }); }
   async adminArchiveHotel(id: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, status: 'archived', updatedAt: now() }); }
   async adminRestoreHotel(id: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, status: 'active', deletedAt: undefined as any, updatedAt: now() }); }
   async adminDeleteHotel(id: string) { const bookings = await BookingModel.findOne({ hotelId: id }).lean(); if (bookings) throw new AppError(409, 'HOTEL_IN_USE', 'Archive this hotel instead — it is referenced by existing bookings'); return (await HotelModel.deleteOne({ id })).deletedCount === 1; }
 
   // ---- Admin: rooms ----
   async adminListRooms(hotelId: string) { return (await this.allRooms()).filter(room => room.hotelId === hotelId && !room.deletedAt).sort((a, b) => a.sortOrder - b.sortOrder).map(room => ({ ...room, images: optimizeImages(room.images, 200) })); }
-  async adminCreateRoom(hotelId: string, input: Partial<HotelRoom>, actor: string) { const time = now(); const room: HotelRoom = { id: randomUUID(), hotelId, name: input.name!, slug: input.slug!, description: input.description, images: input.images || [], size: input.size, bedType: input.bedType, numBeds: input.numBeds, maxAdults: input.maxAdults ?? 2, maxChildren: input.maxChildren ?? 1, maxGuests: input.maxGuests ?? 3, amenities: input.amenities || [], inventory: input.inventory ?? 5, pricePerNight: input.pricePerNight ?? 0, originalPrice: input.originalPrice, taxesPct: input.taxesPct ?? 0, serviceFee: input.serviceFee ?? 0, cancellationPolicy: input.cancellationPolicy, mealPlan: input.mealPlan, status: input.status || 'active', sortOrder: input.sortOrder || 0, createdBy: actor, updatedAt: time, createdAt: time } as HotelRoom; return this.saveRoom(room); }
-  async adminUpdateRoom(id: string, patch: Partial<HotelRoom>, actor: string) { const room = await this.oneRoom(id); if (!room) return undefined; return this.saveRoom({ ...room, ...patch, id, updatedBy: actor, updatedAt: now() }); }
+  async adminCreateRoom(hotelId: string, input: Partial<HotelRoom>, actor: string) { const time = now(); const room: HotelRoom = { id: randomUUID(), hotelId, name: input.name!, slug: input.slug!, description: input.description, images: normalizeHotelImages(input.images), size: input.size, bedType: input.bedType, numBeds: input.numBeds, maxAdults: input.maxAdults ?? 2, maxChildren: input.maxChildren ?? 1, maxGuests: input.maxGuests ?? 3, amenities: input.amenities || [], inventory: input.inventory ?? 5, pricePerNight: input.pricePerNight ?? 0, originalPrice: input.originalPrice, taxesPct: input.taxesPct ?? 0, serviceFee: input.serviceFee ?? 0, cancellationPolicy: input.cancellationPolicy, mealPlan: input.mealPlan, status: input.status || 'active', sortOrder: input.sortOrder || 0, createdBy: actor, updatedAt: time, createdAt: time } as HotelRoom; return this.saveRoom(room); }
+  async adminUpdateRoom(id: string, patch: Partial<HotelRoom>, actor: string) { const room = await this.oneRoom(id); if (!room) return undefined; return this.saveRoom({ ...room, ...patch, id, updatedBy: actor, updatedAt: now(), ...(patch.images ? { images: normalizeHotelImages(patch.images) } : {}) }); }
   async adminArchiveRoom(id: string) { const room = await this.oneRoom(id); if (!room) return undefined; return this.saveRoom({ ...room, status: 'archived', deletedAt: now(), updatedAt: now() }); }
 
   // ---- Admin: inventory ----

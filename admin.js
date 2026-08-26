@@ -31,6 +31,13 @@ function isRetiredNavItem(item) {
   return RETIRED_NAV_LABEL_PATTERN.test(String(item.label || ''));
 }
 const $admin = (path, options = {}, canRefresh = true) => window.SadikApi.request(path, options, canRefresh);
+/* CSP-safe image fallback: failed images (including hotel photos) become the branded placeholder. */
+document.addEventListener('error', event => {
+  const img = event.target;
+  if (!img || img.tagName !== 'IMG' || !img.hasAttribute('data-image-fallback') || img.dataset.fallbackApplied) return;
+  img.dataset.fallbackApplied = '1';
+  img.src = '/assets/hotel-placeholder.svg';
+}, true);
 
 function escapeAttr(value) { return escapeHtml(value).replace(/`/g, '&#96;'); }
 function formatDate(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }); }
@@ -219,6 +226,7 @@ async function loadNavigation() {
     const role = state.currentAdmin?.role;
     const vendor = ['hotel_owner', 'home_owner', 'travel_agent'].includes(role);
     if (vendor && item.route === '/admin/bookings') return false;
+    if (item.route === '/admin/live-support') return canUseChatInbox();
     const routeFine = routeFineMap[item.route];
     if (routeFine) return state.finePermissions.has(routeFine);
     if (item.permission) return hasPermission(item.permission) || hasFineNav(item.permission);
@@ -271,14 +279,14 @@ function updateNavigation(route) {
     const permission = link.dataset.permission;
     const navRoute = link.dataset.route;
     const routeFine = routeFineMap[navRoute];
-    const visible = state.isSuperAdmin || (routeFine ? state.finePermissions.has(routeFine) : (!permission || hasPermission(permission) || hasFineNav(permission)));
+    const visible = navRoute === '/admin/live-support' ? canUseChatInbox() : (state.isSuperAdmin || (routeFine ? state.finePermissions.has(routeFine) : (!permission || hasPermission(permission) || hasFineNav(permission))));
     link.hidden = !visible;
   });
 }
-function updateBreadcrumb(route) { const labels = { dashboard: 'Overview', bookings: 'Bookings', hotels: 'Hotels', homes: 'Homes & Villas', catalog: 'Catalogue', orders: 'Orders', coupons: 'Coupons', reviews: 'Reviews', tours: 'Tours', services: 'Service Visibility', content: 'Website Content', media: 'Media Library', customers: 'Customers', payments: 'Payments', notifications: 'SMS & Notifications', 'live-support': 'Live Support Inbox', support: 'Support Tickets', settings: 'Settings', 'travel-agents': 'Travel Agents', 'hotel-bookings': 'Hotel Bookings', admins: 'Admin Management', profile: 'Profile & Security', navigation: 'Navigation Manager', 'system-status': 'System Status', analytics: 'Analytics' }; const key = route.path.split('/')[0]; const detail = route.path.split('/')[1]; const text = labels[key] || key; const breadcrumb = $('#adminBreadcrumbs'); breadcrumb.innerHTML = `<span>Admin</span><strong>${escapeHtml(text)}${detail && key !== 'bookings' && key !== 'customers' ? ` · ${escapeHtml(detail)}` : ''}</strong>`; }
+function updateBreadcrumb(route) { const labels = { dashboard: 'Overview', bookings: 'Bookings', hotels: 'Hotels', homes: 'Homes & Villas', catalog: 'Catalogue', orders: 'Orders', coupons: 'Coupons', reviews: 'Reviews', tours: 'Tours', services: 'Service Visibility', content: 'Website Content', media: 'Media Library', customers: 'Customers', payments: 'Payments', notifications: 'SMS & Notifications', 'live-support': 'Live Chat', support: 'Support Tickets', settings: 'Settings', 'travel-agents': 'Travel Agents', 'hotel-bookings': 'Hotel Bookings', admins: 'Admin Management', profile: 'Profile & Security', navigation: 'Navigation Manager', 'system-status': 'System Status', analytics: 'Analytics' }; const key = route.path.split('/')[0]; const detail = route.path.split('/')[1]; const text = labels[key] || key; const breadcrumb = $('#adminBreadcrumbs'); breadcrumb.innerHTML = `<span>Admin</span><strong>${escapeHtml(text)}${detail && key !== 'bookings' && key !== 'customers' ? ` · ${escapeHtml(detail)}` : ''}</strong>`; }
 
 function showApp() { closeSidebar(); $('#adminAuthScreen').hidden = true; $('#adminApp').hidden = false; $('#adminSidebar')?.setAttribute('aria-hidden', String(isMobileView())); document.body.classList.add('admin-logged-in'); }
-async function loadWorkspace(fromLogin = false) { try { const response = await $admin('/admin/me'); state.currentAdmin = response.user; state.permissions = new Set(response.permissions || []); state.finePermissions = new Set(response.finePermissions || []); state.isSuperAdmin = response.isSuperAdmin === true || state.currentAdmin?.role === 'super_admin'; state.lastUrl = currentHref(); $('#profileAvatar').innerHTML = response.user.avatarUrl ? `<img src="${escapeAttr(response.user.avatarUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%" />` : escapeHtml(initials(response.user)); $('#profileName').textContent = displayName(response.user); $('#profileRole').textContent = roleLabel(response.user.role); showApp(); await loadNavigation(); if (!routeAllowed(currentRoute().path)) { const first = $('#adminNav a[data-route]'); if (first?.dataset.route) history.replaceState({}, '', first.dataset.route); } if (fromLogin) { $('#adminLoginCard').classList.add('auth-success'); await new Promise(resolve => setTimeout(resolve, 420)); } updateNavigation(currentRoute()); await renderRoute(); await refreshNotificationBadge(); ensureSupportSocket(); } catch (error) { if (error.status !== 401) toast(error.message || 'Unable to load admin workspace.', 'error'); } }
+async function loadWorkspace(fromLogin = false) { try { const response = await $admin('/admin/me'); state.currentAdmin = response.user; state.permissions = new Set(response.permissions || []); state.finePermissions = new Set(response.finePermissions || []); state.isSuperAdmin = response.isSuperAdmin === true || state.currentAdmin?.role === 'super_admin'; state.lastUrl = currentHref(); $('#profileAvatar').innerHTML = response.user.avatarUrl ? `<img src="${escapeAttr(response.user.avatarUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%" />` : escapeHtml(initials(response.user)); $('#profileName').textContent = displayName(response.user); $('#profileRole').textContent = roleLabel(response.user.role); showApp(); await loadNavigation(); if (!routeAllowed(currentRoute().path)) { const first = $('#adminNav a[data-route]'); if (first?.dataset.route) history.replaceState({}, '', first.dataset.route); } if (fromLogin) { $('#adminLoginCard').classList.add('auth-success'); await new Promise(resolve => setTimeout(resolve, 420)); } updateNavigation(currentRoute()); await renderRoute(); await refreshNotificationBadge(); if (canUseChatInbox()) void ensureChatRealtime().catch(() => undefined); } catch (error) { if (error.status !== 401) toast(error.message || 'Unable to load admin workspace.', 'error'); } }
 
 function pageHeader(eyebrow, title, description, actions = '') { return `<div class="page-header"><div class="page-header-copy"><span class="admin-eyebrow">${escapeHtml(eyebrow)}</span><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p></div><div class="page-actions">${actions}</div></div>`; }
 function cardHeader(title, description = '', actions = '') { return `<div class="card-header"><div><h2>${escapeHtml(title)}</h2>${description ? `<p>${escapeHtml(description)}</p>` : ''}</div>${actions}</div>`; }
@@ -493,40 +501,312 @@ async function refreshNotificationBadge() {
     badge.hidden = unread === 0;
   } catch { /* badge refresh is best effort */ }
 }
-function ensureSupportSocket() {
-  if (state.chatSocket || !window.io || !state.finePermissions?.has('support.view')) return state.chatSocket;
-  const socket = window.io({ path: '/socket.io', transports: ['websocket', 'polling'], reconnectionAttempts: 5, timeout: 10000 });
-  state.chatSocket = socket;
-  // The live inbox must keep working even if the realtime socket never connects
-  // (e.g. the deploy does not expose WebSocket upgrades). Fail soft: the REST
-  // endpoints already load conversations and send replies when the socket is down.
-  let socketErrorLogged = false;
-  socket.on('connect_error', error => { if (!socketErrorLogged) { socketErrorLogged = true; console.warn('Live support socket unavailable — inbox falls back to REST.', error?.message || error); } });
-  socket.on('connect_timeout', () => { if (!socketErrorLogged) { socketErrorLogged = true; console.warn('Live support socket connection timed out — inbox falls back to REST.'); } });
-  socket.io.on('reconnect_failed', () => { console.warn('Live support socket reconnect failed — inbox continues on REST only.'); });
-  const joinInbox = () => socket.emit('admin_join_inbox', {}, result => { if (result?.ok) { state.liveUnread = (result.conversations || []).reduce((sum, item) => sum + Number(item.adminUnread || 0), 0); updateLiveSupportBadge(0); const route = currentRoute(); const chatId = route.path === 'live-support' ? route.query.get('chat') : ''; if (chatId) socket.emit('join_chat_room', { sessionId: chatId }, () => undefined); } });
-  socket.on('connect', joinInbox);
-  socket.on('conversation_created', conversation => { updateLiveSupportBadge(Number(conversation.adminUnread || 1)); supportSound(); toast(`New live chat from ${conversation.name}`, 'success'); if (currentRoute().path === 'live-support') setTimeout(() => void renderRoute(), 80); });
-  socket.on('conversation_updated', conversation => { const route = currentRoute(); const isOpen = route.path === 'live-support' && route.query.get('chat') === conversation.id; if (Number(conversation.adminUnread || 0) > 0 && !isOpen) { updateLiveSupportBadge(1); supportSound(); } if (isOpen) void $admin(`/admin/live-chat/${conversation.id}`).catch(() => undefined); else if (route.path === 'live-support') setTimeout(() => void renderRoute(), 80); });
-  socket.on('chat_message', message => { const route = currentRoute(); if (route.path !== 'live-support' || route.query.get('chat') !== message.ticketId) return; const stream = $('#liveChatStream'); if (stream && !stream.querySelector(`[data-message-id="${CSS.escape(message.id)}"]`)) { stream.insertAdjacentHTML('beforeend', liveMessageMarkup(message)); stream.scrollTop = stream.scrollHeight; if (message.authorType === 'customer') supportSound(); } });
-  return socket;
+/* ---------- Messenger Live Chat (Firebase Realtime Database) ----------
+   Hotel owners land here to answer their own hotels' conversations; support
+   staff see every thread. The conversation list and message stream are driven
+   by real-time listeners (Realtime Database onValue/onChildAdded when Firebase
+   is configured, Socket.IO events otherwise) — never polling. */
+const adminChat = {
+  booted: false,
+  conversations: new Map(),
+  messages: new Map(),
+  activeId: null,
+  conversation: null,
+  inboxUnsubscribe: null,
+  conversationUnsubscribe: null,
+  typing: new Map(),
+  presence: new Map(),
+  filter: 'all',
+  renderedIds: new Set()
+};
+
+function canUseChatInbox() {
+  if (state.isSuperAdmin) return true;
+  const role = state.currentAdmin?.role;
+  if (['hotel_owner', 'home_owner', 'travel_agent'].includes(role)) return true;
+  return state.finePermissions?.has('support.view') || false;
 }
-function liveMessageMarkup(message) { const mine = message.authorType === 'admin'; return `<article class="live-message ${mine ? 'is-admin' : 'is-visitor'}" data-message-id="${escapeAttr(message.id)}"><div><strong>${mine ? 'You' : 'Visitor'}</strong><small>${escapeHtml(formatDate(message.createdAt))}</small></div><p>${escapeHtml(message.message)}</p></article>`; }
-async function renderLiveSupport() {
+
+function chatInitials(name) { return String(name || '?').replace(/[^a-zA-Z0-9 ]/g, '').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase() || '?'; }
+function adminChatAvatar(profile, extra = '') {
+  if (profile?.photoUrl) return `<span class="live-avatar ${extra}"><img src="${escapeAttr(profile.photoUrl)}" alt="" /></span>`;
+  return `<span class="live-avatar ${extra}">${escapeHtml(chatInitials(profile?.name))}</span>`;
+}
+function chatContextLabel(conversation) {
+  if (conversation?.type === 'hotel') return conversation.label || 'Hotel chat';
+  if (conversation?.type === 'support') return 'Support';
+  return conversation?.label || conversation?.type || 'Chat';
+}
+function chatOtherProfile(conversation) {
+  const profiles = conversation?.profiles || {};
+  const others = Object.values(profiles).filter(profile => profile.uid !== window.SadikChat?.viewer?.uid);
+  const customer = others.find(profile => profile.kind === 'customer' || profile.kind === 'guest');
+  return customer || others[0] || { uid: 'support-team', name: 'Sadik Travels Support', roleLabel: 'Support Team' };
+}
+function chatRelativeTime(value) {
+  const time = Number(value || 0);
+  if (!time) return '';
+  const diff = Date.now() - time;
+  if (diff < 60_000) return 'now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
+  return new Date(time).toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+function chatClock(value) { const date = new Date(Number(value || 0)); return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+
+function adminChatUnreadTotal() {
+  const mine = window.SadikChat?.viewer?.uid;
+  let total = 0;
+  adminChat.conversations.forEach(conversation => {
+    if (conversation.id === adminChat.activeId) return;
+    total += Number(conversation.unread?.[mine] || 0);
+  });
+  return total;
+}
+function refreshChatBadge(previousTotals) {
+  const mine = window.SadikChat?.viewer?.uid;
+  let grew = false;
+  adminChat.conversations.forEach(conversation => {
+    const unread = Number(conversation.unread?.[mine] || 0);
+    if (unread > (previousTotals?.get(conversation.id) || 0)) grew = true;
+  });
+  state.liveUnread = adminChatUnreadTotal();
+  updateLiveSupportBadge(0);
+  return grew;
+}
+
+function ensureChatRealtime() {
+  if (adminChat.booted || !window.SadikChat) return Promise.resolve(false);
+  adminChat.booted = true;
+  return window.SadikChat.ready().then(() => {
+    if (adminChat.inboxUnsubscribe) return true;
+    let previousTotals = new Map();
+    adminChat.inboxUnsubscribe = window.SadikChat.watchInbox(list => {
+      adminChat.conversations.clear();
+      (list || []).forEach(conversation => adminChat.conversations.set(conversation.id, conversation));
+      const grew = refreshChatBadge(previousTotals);
+      previousTotals = new Map([...adminChat.conversations.values()].map(conversation => [conversation.id, Number(conversation.unread?.[window.SadikChat?.viewer?.uid] || 0)]));
+      if (grew) supportSound();
+      if (currentRoute().path === 'live-support') {
+        renderChatThreadList();
+        if (adminChat.activeId && adminChat.conversation) renderLiveChatHeader();
+      }
+    });
+    return true;
+  }).catch(error => { adminChat.booted = false; throw error; });
+}
+
+function chatVisibleConversations() {
+  const items = [...adminChat.conversations.values()].sort((a, b) => (b.lastMessage?.sentAt || b.updatedAt || 0) - (a.lastMessage?.sentAt || a.updatedAt || 0));
+  if (adminChat.filter === 'hotel') return items.filter(conversation => conversation.type === 'hotel');
+  if (adminChat.filter === 'support') return items.filter(conversation => conversation.type !== 'hotel');
+  return items;
+}
+
+function chatThreadRow(conversation) {
   const selectedId = currentRoute().query.get('chat') || '';
-  const [inbox, detail] = await Promise.all([safeRequest('/admin/live-chat'), selectedId ? safeRequest(`/admin/live-chat/${selectedId}`) : Promise.resolve(null)]);
-  if (isError(inbox)) return renderError(inbox.__error, '/admin/live-support');
-  if (detail && isError(detail)) return renderError(detail.__error, '/admin/live-support');
-  const conversations = inbox.conversations || [];
-  const active = detail?.conversation;
-  state.liveUnread = conversations.reduce((sum, conversation) => sum + (conversation.id === selectedId ? 0 : Number(conversation.adminUnread || 0)), 0); updateLiveSupportBadge(0);
-  const left = conversations.length ? conversations.map(conversation => `<a class="live-thread-row ${conversation.id === selectedId ? 'is-active' : ''}" href="/admin/live-support?chat=${escapeAttr(conversation.id)}" data-route="/admin/live-support?chat=${escapeAttr(conversation.id)}"><span class="live-avatar">${escapeHtml(initials({ fullName: conversation.name }))}</span><span class="live-thread-copy"><span><strong>${escapeHtml(conversation.name)}</strong><small>${escapeHtml(formatDate(conversation.lastMessageAt || conversation.updatedAt))}</small></span><b>${escapeHtml(conversation.subject)}</b><em>${escapeHtml(conversation.email || conversation.mobile || '')}</em></span>${conversation.adminUnread ? `<span class="live-unread">${conversation.adminUnread > 99 ? '99+' : conversation.adminUnread}</span>` : ''}</a>`).join('') : emptyState('No live chats', 'New visitor conversations appear here instantly.', 'message');
-  const right = active ? `<div class="live-chat-head"><div><h2>${escapeHtml(active.name)}</h2><p>${escapeHtml(active.subject)} · ${escapeHtml(active.email || active.mobile || '')}</p></div>${statusPill(active.status)}</div><div class="live-chat-stream" id="liveChatStream" aria-live="polite">${(detail.messages || []).map(liveMessageMarkup).join('') || emptyState('Conversation ready', 'Reply to welcome the visitor.', 'message')}</div><form class="live-reply" id="liveReplyForm"><label class="sr-only" for="liveReplyText">Reply</label><textarea id="liveReplyText" maxlength="4000" rows="3" placeholder="Write a reply…" required></textarea><button class="admin-primary" type="submit">Send reply</button></form>` : `<div class="live-chat-empty">${emptyState('Select a conversation', 'Choose a visitor thread to view the transcript and reply in real time.', 'headset')}</div>`;
-  $('#adminOutlet').innerHTML = pageHeader('Customer care', 'Live Support Inbox', 'Real-time visitor conversations, unread alerts and persisted transcripts.', '<button class="admin-secondary" data-action="refresh-page">Refresh</button>') + `<section class="live-support-layout"><aside class="live-thread-pane"><div class="live-pane-title"><strong>Conversations</strong><span>${conversations.length}</span></div><div class="live-thread-list">${left}</div></aside><section class="live-chat-pane">${right}</section></section>`;
-  const stream = $('#liveChatStream'); if (stream) stream.scrollTop = stream.scrollHeight;
-  const socket = ensureSupportSocket();
-  if (active && socket) socket.emit('join_chat_room', { sessionId: active.id }, result => { if (!result?.ok) toast(result?.error?.message || 'Unable to join this chat.', 'error'); });
-  $('#liveReplyForm')?.addEventListener('submit', async event => { event.preventDefault(); const message = $('#liveReplyText').value.trim(); if (!message) return; const button = event.submitter; setLoading(button, true, 'Sending…'); try { if (socket?.connected) { const result = await new Promise(resolve => socket.emit('admin_reply', { sessionId: active.id, message }, resolve)); if (!result?.ok) throw new Error(result?.error?.message || 'Unable to send reply'); if (result.message) { const stream = $('#liveChatStream'); if (stream && !stream.querySelector(`[data-message-id=\"${CSS.escape(result.message.id)}\"]`)) { stream.insertAdjacentHTML('beforeend', liveMessageMarkup(result.message)); stream.scrollTop = stream.scrollHeight; } } } else { const response = await $admin(`/admin/live-chat/${active.id}/messages`, { method: 'POST', body: JSON.stringify({ message }) }); if (response.message) { const stream = $('#liveChatStream'); if (stream && !stream.querySelector(`[data-message-id=\"${CSS.escape(response.message.id)}\"]`)) { stream.insertAdjacentHTML('beforeend', liveMessageMarkup(response.message)); stream.scrollTop = stream.scrollHeight; } } } $('#liveReplyText').value = ''; } catch (error) { toast(error.message || 'Unable to send reply.', 'error'); } finally { setLoading(button, false); } });
+  const other = chatOtherProfile(conversation);
+  const mine = window.SadikChat?.viewer?.uid;
+  const unread = Number(conversation.unread?.[mine] || 0);
+  const online = conversation.participants ? Object.keys(conversation.participants).some(uid => uid !== mine && adminChat.presence.get(uid)?.online) : false;
+  const preview = conversation.lastMessage?.text ? `${conversation.lastMessage.senderId === mine ? 'You: ' : ''}${conversation.lastMessage.text.slice(0, 80)}` : 'New conversation';
+  return `<a class="live-thread-row ${conversation.id === selectedId ? 'is-active' : ''}" href="/admin/live-support?chat=${escapeAttr(conversation.id)}" data-route="/admin/live-support?chat=${escapeAttr(conversation.id)}">
+    <span class="live-avatar-wrap">${adminChatAvatar(other)}${online ? '<i class="live-online-dot"></i>' : ''}</span>
+    <span class="live-thread-copy">
+      <span><strong>${escapeHtml(other.name || 'Customer')}</strong><small>${escapeHtml(chatRelativeTime(conversation.lastMessage?.sentAt || conversation.updatedAt))}</small></span>
+      <b>${escapeHtml(chatContextLabel(conversation))}</b>
+      <em>${escapeHtml(preview)}</em>
+    </span>
+    ${unread ? `<span class="live-unread">${unread > 99 ? '99+' : unread}</span>` : ''}
+  </a>`;
+}
+
+function renderChatThreadList() {
+  const list = $('#liveThreadList');
+  if (!list) return;
+  const items = chatVisibleConversations();
+  list.innerHTML = items.length ? items.map(chatThreadRow).join('') : emptyState(adminChat.filter === 'hotel' ? 'No hotel chats yet' : 'No conversations yet', 'Customer conversations appear here instantly when they start.', 'message');
+  const count = $('#liveThreadCount');
+  if (count) count.textContent = String(items.length);
+}
+
+function chatMessageNode(message) {
+  const mine = message.senderId === window.SadikChat?.viewer?.uid;
+  const conversation = adminChat.conversation;
+  const other = chatOtherProfile(conversation);
+  const profiles = conversation?.profiles || {};
+  const author = mine ? null : (profiles[message.senderId] || other);
+  const reads = conversation?.reads || {};
+  const otherReadAt = Math.max(0, ...Object.entries(reads).filter(([uid]) => uid !== window.SadikChat?.viewer?.uid).map(([, at]) => Number(at) || 0));
+  const receipt = mine ? (otherReadAt >= Number(message.sentAt || 0) ? '<span class="chat-receipt read" title="Read">✓✓</span>' : '<span class="chat-receipt" title="Sent">✓</span>') : '';
+  const roleLabel = author ? `<small>${escapeHtml(author.roleLabel || (author.kind === 'staff' ? 'Staff' : 'Customer'))}</small>` : '';
+  return `<article class="live-message ${mine ? 'is-admin' : 'is-visitor'}" data-message-id="${escapeAttr(message.id)}">
+    <div><strong>${mine ? 'You' : escapeHtml(author?.name || 'Customer')}</strong>${roleLabel}<small>${escapeHtml(chatClock(message.sentAt))}</small></div>
+    <p>${escapeHtml(message.text)}</p>
+    ${mine ? `<i class="chat-message-meta">${receipt}</i>` : ''}
+  </article>`;
+}
+
+function appendLiveMessage(message) {
+  if (!message?.id || adminChat.activeId !== message.conversationId) return;
+  if (adminChat.renderedIds.has(message.id)) return;
+  adminChat.renderedIds.add(message.id);
+  adminChat.messages.set(message.id, message);
+  const stream = $('#liveChatStream');
+  if (stream) {
+    stream.querySelector('.live-chat-empty-placeholder')?.remove();
+    stream.insertAdjacentHTML('beforeend', chatMessageNode(message));
+    stream.scrollTop = stream.scrollHeight;
+    if (message.senderId !== window.SadikChat?.viewer?.uid) supportSound();
+    void window.SadikChat.markRead(message.conversationId);
+  }
+}
+
+function renderLiveMessages() {
+  const stream = $('#liveChatStream');
+  if (!stream) return;
+  const ordered = [...adminChat.messages.values()].sort((a, b) => (a.sentAt || 0) - (b.sentAt || 0));
+  adminChat.renderedIds = new Set(ordered.map(message => message.id));
+  stream.innerHTML = ordered.length ? ordered.map(chatMessageNode).join('') : `<div class="live-chat-empty-placeholder">${emptyState('Conversation ready', 'Reply to welcome the guest — messages arrive instantly.', 'message')}</div>`;
+  stream.scrollTop = stream.scrollHeight;
+}
+
+function chatHeaderStatusText(other) {
+  const typing = [...adminChat.typing.values()].some(entry => Date.now() - entry.at < 6000);
+  if (typing) return `${escapeHtml(other.name || 'Guest')} is typing…`;
+  const presence = adminChat.presence.get(other.uid);
+  if (presence?.online) return '● Online';
+  if (presence?.lastSeen) return `Last seen ${chatRelativeTime(presence.lastSeen)} ago`;
+  const stateLabel = window.SadikChat?.connectionState;
+  return stateLabel === 'online' ? 'Realtime connected' : stateLabel === 'offline' ? 'Reconnecting…' : 'Connecting…';
+}
+
+function renderLiveChatHeader() {
+  const conversation = adminChat.conversation;
+  const header = $('#liveChatHeader');
+  if (!header || !conversation) return;
+  const other = chatOtherProfile(conversation);
+  header.innerHTML = `${adminChatAvatar(other)}
+    <div class="live-chat-identity">
+      <h2>${escapeHtml(other.name || 'Customer')}</h2>
+      <p>${escapeHtml(chatContextLabel(conversation))}${other.roleLabel ? ` · ${escapeHtml(other.roleLabel)}` : ''}${other.contact ? ` · ${escapeHtml(other.contact)}` : ''}</p>
+    </div>
+    <span class="live-chat-status" id="liveChatStatus">${chatHeaderStatusText(other)}</span>`;
+}
+
+function watchAdminConversation(conversationId) {
+  adminChat.conversationUnsubscribe?.();
+  adminChat.conversationUnsubscribe = null;
+  adminChat.messages.clear();
+  adminChat.typing.clear();
+  adminChat.renderedIds.clear();
+  adminChat.activeId = conversationId;
+  adminChat.conversation = adminChat.conversations.get(conversationId) || null;
+  adminChat.conversationUnsubscribe = window.SadikChat.watchConversation(conversationId, {
+    onHistory(messages) {
+      adminChat.messages.clear();
+      (messages || []).forEach(message => adminChat.messages.set(message.id, message));
+      if (adminChat.activeId === conversationId) renderLiveMessages();
+    },
+    onMessage: message => appendLiveMessage(message),
+    onConversation(conversation) {
+      adminChat.conversation = { ...(adminChat.conversation || {}), ...conversation };
+      adminChat.conversations.set(conversationId, adminChat.conversation);
+      if (adminChat.activeId === conversationId) renderLiveChatHeader();
+      renderChatThreadList();
+    },
+    onRead() { if (adminChat.activeId === conversationId) renderLiveMessages(); },
+    onTyping(entries) {
+      adminChat.typing.clear();
+      (entries || []).forEach(entry => adminChat.typing.set(entry.uid, entry));
+      if (adminChat.activeId === conversationId) {
+        const status = $('#liveChatStatus');
+        if (status) status.textContent = chatHeaderStatusText(chatOtherProfile(adminChat.conversation));
+        setTimeout(() => { if (adminChat.activeId === conversationId && adminChat.typing.size) { const node = $('#liveChatStatus'); if (node) node.textContent = chatHeaderStatusText(chatOtherProfile(adminChat.conversation)); } }, 6500);
+      }
+    },
+    onPresence(payload) {
+      if (!payload?.uid) return;
+      adminChat.presence.set(payload.uid, { online: payload.online === true, lastSeen: payload.lastSeen });
+      renderChatThreadList();
+      if (adminChat.activeId === conversationId) renderLiveChatHeader();
+    },
+    onError(error) { toast(error?.message || 'Unable to open that conversation.', 'error'); }
+  });
+}
+
+async function openAdminConversation(conversationId) {
+  try {
+    const payload = await window.SadikChat.openExisting(conversationId);
+    adminChat.conversation = payload.conversation;
+    adminChat.conversations.set(conversationId, payload.conversation);
+    watchAdminConversation(conversationId);
+    (payload.messages || []).forEach(message => adminChat.messages.set(message.id, message));
+    renderLiveChatHeader();
+    renderLiveMessages();
+  } catch (error) { toast(error.message || 'Unable to open that conversation.', 'error'); }
+}
+
+function bindAdminComposer() {
+  const form = $('#liveReplyForm');
+  const textarea = $('#liveReplyText');
+  let typingActive = false;
+  textarea?.addEventListener('input', () => {
+    if (!adminChat.activeId) return;
+    if (!typingActive && textarea.value.trim()) { typingActive = true; void window.SadikChat.setTyping(adminChat.activeId, true); }
+    if (typingActive && !textarea.value.trim()) { typingActive = false; void window.SadikChat.setTyping(adminChat.activeId, false); }
+  });
+  form?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const message = textarea.value.trim();
+    if (!message || !adminChat.activeId) return;
+    const button = event.submitter;
+    setLoading(button, true, 'Sending…');
+    if (typingActive) { typingActive = false; void window.SadikChat.setTyping(adminChat.activeId, false); }
+    try {
+      const sent = await window.SadikChat.sendMessage(adminChat.activeId, message, adminChat.conversation);
+      textarea.value = '';
+      if (sent) appendLiveMessage(sent);
+      textarea.focus();
+    } catch (error) { toast(error.message || 'Unable to send the reply.', 'error'); }
+    finally { setLoading(button, false); }
+  });
+}
+
+async function renderLiveSupport() {
+  if (!window.SadikChat) return renderError(new Error('Real-time chat client failed to load.'), '/admin');
+  try { await ensureChatRealtime(); } catch (error) { return renderError(error, '/admin/live-support'); }
+  if (!canUseChatInbox()) {
+    $('#adminOutlet').innerHTML = pageHeader('Customer care', 'Live Chat', 'Real-time customer conversations.', '') + `<section class="admin-card">${emptyState('Chat access required', 'A Super Admin can enable the Live Chat module for your account.', 'lock')}</section>`;
+    return;
+  }
+  const selectedId = currentRoute().query.get('chat') || '';
+  const isSupport = window.SadikChat.viewer?.supportStaff === true || state.isSuperAdmin;
+  const filterTabs = isSupport ? `<div class="live-filter-tabs">
+      <button type="button" class="${adminChat.filter === 'all' ? 'active' : ''}" data-chat-filter="all">All</button>
+      <button type="button" class="${adminChat.filter === 'hotel' ? 'active' : ''}" data-chat-filter="hotel">Hotel chats</button>
+      <button type="button" class="${adminChat.filter === 'support' ? 'active' : ''}" data-chat-filter="support">Support</button>
+    </div>` : '';
+  $('#adminOutlet').innerHTML = pageHeader('Customer care', 'Live Chat', 'Messenger-style, real-time customer conversations. Hotel chats are answered by their owners; support threads reach the team.', '<button class="admin-secondary" data-action="refresh-page">Refresh</button>')
+    + `<section class="live-support-layout"><aside class="live-thread-pane"><div class="live-pane-title"><strong>Conversations</strong><span id="liveThreadCount">0</span></div>${filterTabs}<div class="live-thread-list" id="liveThreadList"><div class="loading-state"><span class="spinner"></span>Connecting to realtime chat…</div></div></aside><section class="live-chat-pane"><div class="live-chat-empty">${emptyState('Select a conversation', 'Choose a thread on the left — new messages stream in instantly.', 'headset')}</div></section></section>`;
+  renderChatThreadList();
+  $$('[data-chat-filter]').forEach(button => button.addEventListener('click', () => { adminChat.filter = button.dataset.chatFilter; renderChatThreadList(); $$('.live-filter-tabs .active').forEach(node => node.classList.remove('active')); button.classList.add('active'); }));
+  if (selectedId) {
+    await openAdminConversation(selectedId);
+    $('#adminOutlet .live-chat-pane')?.replaceChildren();
+    const pane = $('#adminOutlet .live-chat-pane');
+    if (pane) {
+      pane.innerHTML = `<div class="live-chat-head" id="liveChatHeader"></div><div class="live-chat-stream" id="liveChatStream" aria-live="polite"></div><form class="live-reply" id="liveReplyForm"><label class="sr-only" for="liveReplyText">Reply</label><textarea id="liveReplyText" maxlength="4000" rows="3" placeholder="Write a reply… (Enter to send)" required></textarea><button class="admin-primary" type="submit">Send reply</button></form>`;
+      renderLiveChatHeader();
+      renderLiveMessages();
+      bindAdminComposer();
+      $('#liveReplyText')?.focus();
+    }
+  }
+  if (!adminChat.connectionListenerBound) {
+    adminChat.connectionListenerBound = true;
+    window.SadikChat.onConnectionState(() => { if (adminChat.activeId) renderLiveChatHeader(); });
+  }
 }
 
 async function renderSupport() { const route = currentRoute(); const q = route.query.get('q') || ''; const status = route.query.get('status') || ''; const response = await safeRequest(`/admin/tickets?${new URLSearchParams({ ...(q ? { q } : {}), ...(status ? { status } : {}) })}`); if (isError(response)) return renderError(response.__error, '/admin/support'); const tickets = response.tickets || []; $('#adminOutlet').innerHTML = pageHeader('Customer care', 'Support tickets', 'Assign, reply to and resolve customer support requests.', '<button class="admin-secondary" data-action="refresh-page">Refresh</button>') + `<section class="admin-card"><form class="filter-bar" id="ticketFilterForm"><input class="filter-search" name="q" value="${escapeAttr(q)}" placeholder="Search ticket, customer or subject" /><select class="filter-select" name="status"><option value="">All statuses</option>${['open','pending','in_progress','waiting_customer','resolved','closed'].map(item => `<option value="${item}" ${item === status ? 'selected' : ''}>${item.replace(/_/g, ' ')}</option>`).join('')}</select><button class="admin-primary" type="submit">Search</button></form><div class="table-wrap"><table><thead><tr><th>Ticket</th><th>Customer</th><th>Subject</th><th>Priority</th><th>Status</th><th>Assigned</th><th>Updated</th><th></th></tr></thead><tbody>${tickets.length ? tickets.map(ticket => `<tr><td>${escapeHtml(ticket.id.slice(0, 12).toUpperCase())}</td><td>${escapeHtml(ticket.name)}<span class="table-secondary">${escapeHtml(ticket.email)} · ${escapeHtml(ticket.mobile)}</span></td><td>${escapeHtml(ticket.subject)}</td><td>${statusPill(ticket.priority)}</td><td>${statusPill(ticket.status)}</td><td>${escapeHtml(ticket.assignedToName || ticket.assignedTo || 'Unassigned')}</td><td>${escapeHtml(formatDate(ticket.updatedAt))}</td><td><a class="table-action" href="/admin/support/${escapeAttr(ticket.id)}" data-route="/admin/support/${escapeAttr(ticket.id)}">Open</a></td></tr>`).join('') : `<tr><td colspan="8">${emptyState('No support tickets', 'Customer support requests will appear when a traveller contacts Sadik Travels.', 'headset')}</td></tr>`}</tbody></table></div></section>`; $('#ticketFilterForm')?.addEventListener('submit', event => { event.preventDefault(); const data = new FormData(event.currentTarget); navigate(`/admin/support?${new URLSearchParams({ q: data.get('q') || '', status: data.get('status') || '' })}`); }); }
@@ -667,6 +947,9 @@ function routeAllowed(path) {
   const role = state.currentAdmin?.role;
   const vendor = ['hotel_owner', 'home_owner', 'travel_agent'].includes(role);
   if (vendor && (path === 'bookings' || path.startsWith('bookings/'))) return false;
+  // The Live Chat inbox is available to hotel owners for their own hotels;
+  // the server enforces the per-hotel scope, so the route only needs the role.
+  if (path === 'live-support' || path.startsWith('live-support/')) return canUseChatInbox();
   if (role === 'home_owner' && path === 'catalog' && currentRoute().query.get('type') === 'home') {
     return Boolean(state.finePermissions?.has('home.view'));
   }
@@ -711,7 +994,7 @@ async function renderHotels() {
   if (isError(response)) return renderError(response.__error, '/admin/hotels');
   const hotels = response.hotels || [];
   const rows = hotels.length ? hotels.map(hotel => `<tr>
-      <td><div class="media-thumb admin-image-wrapper">${hotel.images?.[0]?.url ? `<img src="${escapeAttr(hotel.images[0].url)}" alt=""/>` : `<span>${icon('hotel')}</span>`}</div></td>
+      <td><div class="media-thumb admin-image-wrapper"><img src="${escapeAttr(hotel.images?.[0]?.url || '/assets/hotel-placeholder.svg')}" alt="" data-image-fallback/></div></td>
       <td><a class="table-link" href="/admin/hotels/${escapeAttr(hotel.id)}" data-route="/admin/hotels/${escapeAttr(hotel.id)}"><span class="table-primary">${escapeHtml(hotel.name)}</span><span class="table-secondary">${escapeHtml(hotel.slug)}</span></a></td>
       <td>${escapeHtml(hotel.city)}<span class="table-secondary">${escapeHtml(hotel.country)}</span></td>
       <td>${escapeHtml(hotel.propertyType || 'Hotel')}</td>
@@ -738,8 +1021,23 @@ function bindHotelsPage(hotels) {
 }
 function seasonalDiscountsMarkup() { return `<div class="seasonal-discounts"><div class="seasonal-discounts-head"><span class="field-label"><span>Seasonal discounts</span></span><button class="admin-secondary" type="button" data-discount-add>+ Add discount</button></div><div id="seasonalDiscountRows">${seasonalDiscountState.map((discount, index) => `<div class="seasonal-discount-row"><input data-discount-name="${index}" aria-label="Discount name" placeholder="Summer offer" value="${escapeAttr(discount.name || '')}"/><input data-discount-start="${index}" type="date" aria-label="Start date" value="${escapeAttr(discount.startDate || '')}"/><input data-discount-end="${index}" type="date" aria-label="End date" value="${escapeAttr(discount.endDate || '')}"/><label><input data-discount-percentage="${index}" type="number" min="0" max="100" step="0.01" aria-label="Discount percentage" value="${escapeAttr(discount.percentage ?? 0)}"/><span>%</span></label><button class="image-remove" type="button" data-discount-remove="${index}" aria-label="Remove seasonal discount">×</button></div>`).join('') || '<p class="table-secondary">No seasonal discounts configured.</p>'}</div></div>`; }
 function bindSeasonalDiscounts() { $('[data-discount-add]')?.addEventListener('click', () => { seasonalDiscountState.push({ name: '', startDate: '', endDate: '', percentage: 0 }); $('#seasonalDiscountManager').innerHTML = seasonalDiscountsMarkup(); bindSeasonalDiscounts(); }); $$('[data-discount-remove]').forEach(button => button.addEventListener('click', () => { seasonalDiscountState.splice(Number(button.dataset.discountRemove), 1); $('#seasonalDiscountManager').innerHTML = seasonalDiscountsMarkup(); bindSeasonalDiscounts(); })); const sync = (selector, dataKey, field, number = false) => $$(selector).forEach(input => input.addEventListener('input', () => { seasonalDiscountState[Number(input.dataset[dataKey])][field] = number ? Number(input.value) : input.value; })); sync('[data-discount-name]', 'discountName', 'name'); sync('[data-discount-start]', 'discountStart', 'startDate'); sync('[data-discount-end]', 'discountEnd', 'endDate'); sync('[data-discount-percentage]', 'discountPercentage', 'percentage', true); }
-function hotelImagesMarkup() { return `<div class="image-manager"><div class="image-grid" id="hotelImageGrid">${hotelImageState.map((image, i) => `<div class="image-cell"><img src="${escapeAttr(image.url)}" alt=""/><button type="button" class="image-remove" data-img-remove="${i}" aria-label="Remove image">×</button></div>`).join('')}</div><label class="field-label"><span>Upload images (JPEG/PNG/WebP)</span><input id="hotelImageFile" type="file" accept="image/jpeg,image/png,image/webp" multiple/></label></div>`; }
-function bindHotelImages() { const grid = $('#hotelImageGrid'); $$('[data-img-remove]', grid).forEach(btn => btn.addEventListener('click', () => { hotelImageState.splice(Number(btn.dataset.imgRemove), 1); grid.closest('.image-manager').outerHTML = hotelImagesMarkup(); bindHotelImages(); })); $('#hotelImageFile')?.addEventListener('change', async event => { const files = [...event.target.files || []]; if (!files.length) return; for (const file of files) { try { const media = await uploadMediaFile(file, 'hotels', $('#hotelName')?.value || ''); hotelImageState.push({ url: media.secureUrl, publicId: media.publicId, mediaId: media.id }); } catch (error) { toast(error.message || 'Image upload failed.', 'error'); } } event.target.closest('.image-manager').outerHTML = hotelImagesMarkup(); bindHotelImages(); }); }
+function hotelImagesMarkup() { return `<div class="image-manager"><div class="image-grid" id="hotelImageGrid">${hotelImageState.map((image, i) => `<div class="image-cell${i === 0 ? ' is-primary' : ''}"><img src="${escapeAttr(image.url || '/assets/hotel-placeholder.svg')}" alt="" data-image-fallback/>${i === 0 ? '<span class="image-primary-badge">Primary</span>' : `<button type="button" class="image-primary" data-img-primary="${i}">Make primary</button>`}<button type="button" class="image-remove" data-img-remove="${i}" aria-label="Remove image">×</button></div>`).join('')}</div><p class="image-hint">The first image is the primary photo used on listing cards and search results. Upload once — images are stored permanently in Cloudinary and every replaced image gets a new URL, so guests always see the latest version.</p><label class="field-label"><span>Upload images (JPEG/PNG/WebP)</span><input id="hotelImageFile" type="file" accept="image/jpeg,image/png,image/webp" multiple/></label></div>`; }
+function bindHotelImages() {
+  const refresh = () => { const manager = $('#hotelImageGrid')?.closest('.image-manager'); if (manager) { manager.outerHTML = hotelImagesMarkup(); } bindHotelImages(); };
+  const grid = $('#hotelImageGrid');
+  $$('[data-img-remove]', grid).forEach(btn => btn.addEventListener('click', () => { hotelImageState.splice(Number(btn.dataset.imgRemove), 1); refresh(); }));
+  $$('[data-img-primary]', grid).forEach(btn => btn.addEventListener('click', () => { const index = Number(btn.dataset.imgPrimary); const [image] = hotelImageState.splice(index, 1); if (image) hotelImageState.unshift(image); refresh(); }));
+  $('#hotelImageFile')?.addEventListener('change', async event => {
+    const files = [...event.target.files || []];
+    if (!files.length) return;
+    for (const file of files) {
+      try { const media = await uploadMediaFile(file, 'hotels', $('#hotelName')?.value || ''); hotelImageState.push({ url: media.secureUrl, publicId: media.publicId, mediaId: media.id, ...(media.altText ? { alt: media.altText } : {}) }); }
+      catch (error) { toast(error.message || 'Image upload failed.', 'error'); }
+    }
+    event.target.value = '';
+    refresh();
+  });
+}
 function hotelFormMarkup(hotel = {}) {
   return `<div class="modal-heading"><span class="admin-eyebrow">Hotel catalogue</span><h2>${hotel.id ? 'Edit hotel' : 'Add hotel'}</h2><p>Only active hotels appear on the public website.</p></div>
   <form id="hotelForm"><input type="hidden" id="hotelId" value="${escapeAttr(hotel.id || '')}"/>
