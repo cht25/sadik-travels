@@ -1,8 +1,8 @@
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction, RequestHandler } from 'express';
 
 const counters = new Map<string, { count: number; resetAt: number }>();
 
-export function rateLimit(name: string, limit: number, windowSeconds: number) {
+export function rateLimit(name: string, limit: number, windowSeconds: number): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     const key = `${name}:${req.ip}`;
     const current = counters.get(key) ?? { count: 0, resetAt: Date.now() + windowSeconds * 1000 };

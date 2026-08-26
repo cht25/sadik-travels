@@ -330,11 +330,13 @@ if (!testMongoUri) {
     const timeout = setTimeout(() => reject(new Error(`Socket acknowledgement timed out: ${event}`)), 5000);
     socket.emit(event, payload, (result: T) => { clearTimeout(timeout); resolve(result); });
   });
+  type ChatAckPayload = { ok: boolean; supportStaff?: boolean; [key: string]: unknown };
+
   const connected = (socket: Socket) => new Promise<void>((resolve, reject) => {
     if (socket.connected) return resolve();
     const timeout = setTimeout(() => reject(new Error('Socket connection timed out')), 5000);
     socket.once('connect', () => { clearTimeout(timeout); resolve(); });
-    socket.once('connect_error', error => { clearTimeout(timeout); reject(error); });
+    socket.once('connect_error', (error: Error) => { clearTimeout(timeout); reject(error); });
   });
 
   test('admin authentication, MongoDB catalogue, travel agents, live chat, and notifications work end to end', async () => {
@@ -362,17 +364,17 @@ if (!testMongoUri) {
       visitorSocket = createSocket(base, { transports: ['websocket'], auth: { identity: chatIdentity } });
       adminSocket = createSocket(base, { transports: ['websocket'], extraHeaders: { cookie: adminCookie }, auth: { identity: chatIdentity } });
       await Promise.all([connected(visitorSocket), connected(adminSocket)]);
-      const visitorHello = await socketAck<any>(visitorSocket, 'chat:hello', {});
+      const visitorHello = await socketAck<ChatAckPayload>(visitorSocket, 'chat:hello', {});
       assert.equal(visitorHello.ok, true);
-      const visitorJoin = await socketAck<any>(visitorSocket, 'chat:join', { conversationId });
+      const visitorJoin = await socketAck<ChatAckPayload>(visitorSocket, 'chat:join', { conversationId });
       assert.equal(visitorJoin.ok, true);
-      const adminHello = await socketAck<any>(adminSocket, 'chat:hello', {});
+      const adminHello = await socketAck<ChatAckPayload>(adminSocket, 'chat:hello', {});
       assert.equal(adminHello.ok, true);
       assert.equal(adminHello.supportStaff, true, 'the super admin must receive the support inbox');
-      const adminJoin = await socketAck<any>(adminSocket, 'chat:join', { conversationId });
+      const adminJoin = await socketAck<ChatAckPayload>(adminSocket, 'chat:join', { conversationId });
       assert.equal(adminJoin.ok, true);
-      assert.equal((await socketAck<any>(visitorSocket, 'chat:send', { conversationId, text: 'Is a room available this weekend?' })).ok, true);
-      assert.equal((await socketAck<any>(adminSocket, 'chat:send', { conversationId, text: 'Yes, we can help with current availability.' })).ok, true);
+      assert.equal((await socketAck<ChatAckPayload>(visitorSocket, 'chat:send', { conversationId, text: 'Is a room available this weekend?' })).ok, true);
+      assert.equal((await socketAck<ChatAckPayload>(adminSocket, 'chat:send', { conversationId, text: 'Yes, we can help with current availability.' })).ok, true);
       const transcript = await (await fetch(`${base}/api/v1/chat/conversations/${conversationId}/messages`, { headers: { 'x-chat-identity': chatIdentity } })).json();
       assert.deepEqual(transcript.messages.map((message: any) => message.senderRole), ['customer', 'support']);
 
