@@ -74,12 +74,13 @@ async function main() {
   app.get('/api/v1/site/firebase-config', (_req, res) => res.json({ configured: false, firebase: null }));
   app.get('/api/v1/site/content', (_req, res) => res.json({ content: [] }));
   app.get('/api/v1/site/agents', (_req, res) => res.json({ agents: [] }));
-  app.get('/api/v1/hotels', (_req, res) => res.json({ success: true, hotels: hotels.map(hotel => ({ ...hotel, images: hotel.images, priceFrom: 3500, starRating: 4 })) }));
+  const hotelSlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  app.get('/api/v1/hotels', (_req, res) => res.json({ success: true, hotels: hotels.map(hotel => ({ ...hotel, slug: hotelSlug(hotel.name), shortDescription: `Demo property in ${hotel.city}.`, images: hotel.images, priceFrom: 3500, starRating: 4, guestRating: 4.5, amenities: ['AC', 'Free WiFi'] })) }));
   app.get('/api/v1/hotels/destinations', (_req, res) => res.json({ destinations: [{ city: "Cox's Bazar", count: hotels.length }] }));
   app.get('/api/v1/hotels/:slug', (req, res) => {
     const hotel = hotels.find(candidate => candidate.id === req.params.slug || candidate.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') === String(req.params.slug).toLowerCase());
     if (!hotel) return res.status(404).json({ error: { code: 'HOTEL_NOT_FOUND', message: 'Hotel not found' } });
-    const slug = hotel.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const slug = hotelSlug(hotel.name);
     res.json({ success: true, hotel: { ...hotel, slug, starRating: 4, guestRating: 4.5, reviewCount: 12, images: (hotel.images || []).map(url => ({ url: typeof url === 'string' ? url : url.url, alt: hotel.name })), rooms: [{ id: 'deluxe', name: 'Deluxe Double Room', size: 320, bedType: '1 double bed', maxGuests: 2, numBeds: 1, pricePerNight: 3500, originalPrice: 4200, available: 5, amenities: ['AC', 'Free WiFi', 'Breakfast'], images: [] }, { id: 'premium', name: 'Premium Sea View', size: 420, bedType: '1 king bed', maxGuests: 3, numBeds: 1, pricePerNight: 5500, available: 3, amenities: ['AC', 'Balcony', 'Sea view'], images: [] }] } });
   });
 
