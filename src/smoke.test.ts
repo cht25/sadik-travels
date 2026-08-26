@@ -46,6 +46,48 @@ test('vendor RBAC is deny-by-default and accepts only explicitly assigned module
   assert.equal(hasFinePermission({ role: 'super_admin' as const }, 'hotel.delete'), true);
 });
 
+test('admin granular permissions enforce exact access and dynamic updates', () => {
+  // 1. Admin created with Manage Tours, Manage Hotels, Manage Bookings
+  const adminUser = {
+    role: 'admin' as const,
+    permissions: ['tour.view', 'tour.create', 'hotel.view', 'hotel.create', 'booking.view', 'booking.update']
+  };
+  assert.equal(hasFinePermission(adminUser, 'tour.view'), true);
+  assert.equal(hasFinePermission(adminUser, 'hotel.view'), true);
+  assert.equal(hasFinePermission(adminUser, 'booking.view'), true);
+  assert.equal(hasFinePermission(adminUser, 'customer.view'), false);
+  assert.equal(hasFinePermission(adminUser, 'settings.edit'), false);
+  assert.equal(hasFinePermission(adminUser, 'admin.manage'), false);
+
+  // 2. Permission revocation immediately removes access
+  const revokedAdmin = {
+    ...adminUser,
+    permissions: adminUser.permissions.filter(p => p !== 'hotel.view' && p !== 'hotel.create')
+  };
+  assert.equal(hasFinePermission(revokedAdmin, 'hotel.view'), false);
+  assert.equal(hasFinePermission(revokedAdmin, 'tour.view'), true);
+  assert.equal(hasFinePermission(revokedAdmin, 'booking.view'), true);
+
+  // 3. Permission re-grant immediately restores access
+  const regrantedAdmin = {
+    ...revokedAdmin,
+    permissions: [...revokedAdmin.permissions, 'hotel.view']
+  };
+  assert.equal(hasFinePermission(regrantedAdmin, 'hotel.view'), true);
+
+  // 4. Hotel owner with hotel permissions
+  const hotelOwnerUser = {
+    role: 'hotel_owner' as const,
+    permissions: ['hotel.view', 'hotel.update', 'room.view', 'room.create', 'room.update', 'booking.view']
+  };
+  assert.equal(hasFinePermission(hotelOwnerUser, 'hotel.view'), true);
+  assert.equal(hasFinePermission(hotelOwnerUser, 'room.view'), true);
+  assert.equal(hasFinePermission(hotelOwnerUser, 'booking.view'), true);
+  assert.equal(hasFinePermission(hotelOwnerUser, 'tour.view'), false);
+  assert.equal(hasFinePermission(hotelOwnerUser, 'customer.view'), false);
+  assert.equal(hasFinePermission(hotelOwnerUser, 'admin.manage'), false);
+});
+
 test('live-chat room tokens are hashed and timing-safe verified', () => {
   const token = 'visitor-session-token-with-more-than-32-characters';
   const hash = hashChatToken(token);
