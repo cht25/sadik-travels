@@ -99,6 +99,10 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>) {
   }
 }
 
+type ChatConversationLike = { id?: unknown; participants?: string[]; [key: string]: unknown };
+type ChatMessageLike = { text?: unknown; senderRole?: unknown; conversationId?: unknown; [key: string]: unknown };
+type ChatAckPayload = { ok: boolean; conversations?: ChatConversationLike[]; conversation?: ChatConversationLike; message?: ChatMessageLike; messages?: ChatMessageLike[]; [key: string]: unknown };
+
 const socketAck = <T>(socket: Socket, event: string, payload: unknown) => new Promise<T>((resolve, reject) => {
   const timeout = setTimeout(() => reject(new Error(`Socket acknowledgement timed out: ${event}`)), 5000);
   socket.emit(event, payload, (result: T) => { clearTimeout(timeout); resolve(result); });
@@ -108,7 +112,7 @@ const connected = (socket: Socket) => new Promise<void>((resolve, reject) => {
   if (socket.connected) return resolve();
   const timeout = setTimeout(() => reject(new Error('Socket connection timed out')), 5000);
   socket.once('connect', () => { clearTimeout(timeout); resolve(); });
-  socket.once('connect_error', error => { clearTimeout(timeout); reject(error); });
+  socket.once('connect_error', (error: Error) => { clearTimeout(timeout); reject(error); });
 });
 
 const waitFor = async <T>(poll: () => T | undefined | Promise<T | undefined>, label: string): Promise<T> => {
@@ -202,27 +206,27 @@ test('messages stream instantly both ways between customer and hotel owner, with
       const ownerEvents: any[] = [];
       ownerSocket.on('chat:message', payload => ownerEvents.push(payload.message));
 
-      const helloOwner = await socketAck<any>(ownerSocket, 'chat:hello', {});
+      const helloOwner = await socketAck<ChatAckPayload>(ownerSocket, 'chat:hello', {});
       assert.equal(helloOwner.ok, true);
-      assert.equal(helloOwner.conversations.some((item: any) => item.id === conversation.id), true, 'owner inbox must include the conversation over the socket');
+      assert.equal((helloOwner.conversations ?? []).some(item => item.id === conversation.id), true, 'owner inbox must include the conversation over the socket');
 
       // Owner opens the conversation (as the admin console does), then the
       // customer joins and sends — the owner must receive it instantly.
-      const joinOwner = await socketAck<any>(ownerSocket, 'chat:join', { conversationId: conversation.id });
+      const joinOwner = await socketAck<ChatAckPayload>(ownerSocket, 'chat:join', { conversationId: conversation.id });
       assert.equal(joinOwner.ok, true);
-      assert.equal(joinOwner.conversation.participants.includes(chatUidForUser(ownerA.id, 'staff')), true);
+      assert.equal((joinOwner.conversation?.participants ?? []).includes(chatUidForUser(ownerA.id, 'staff')), true);
 
-      const joinCustomer = await socketAck<any>(customerSocket, 'chat:join', { conversationId: conversation.id });
+      const joinCustomer = await socketAck<ChatAckPayload>(customerSocket, 'chat:join', { conversationId: conversation.id });
       assert.equal(joinCustomer.ok, true);
-      const send = await socketAck<any>(customerSocket, 'chat:send', { conversationId: conversation.id, text: 'Hello, I want to know about rooms.' });
+      const send = await socketAck<ChatAckPayload>(customerSocket, 'chat:send', { conversationId: conversation.id, text: 'Hello, I want to know about rooms.' });
       assert.equal(send.ok, true);
       const received = await waitFor(() => ownerEvents.find(message => message.text === 'Hello, I want to know about rooms.'), 'owner to receive the customer message');
       assert.equal(received.senderRole, 'customer');
 
       // Owner replies — customer must receive it instantly
-      const reply = await socketAck<any>(ownerSocket, 'chat:send', { conversationId: conversation.id, text: 'Hello! Deluxe rooms are available.' });
+      const reply = await socketAck<ChatAckPayload>(ownerSocket, 'chat:send', { conversationId: conversation.id, text: 'Hello! Deluxe rooms are available.' });
       assert.equal(reply.ok, true);
-      assert.equal(reply.message.senderRole, 'hotel_owner');
+      assert.equal(reply.message?.senderRole, 'hotel_owner');
       const customerReceived = await waitFor(() => customerEvents.find(message => message.text === 'Hello! Deluxe rooms are available.'), 'customer to receive the owner reply');
       assert.equal(customerReceived.conversationId, conversation.id);
 
@@ -241,7 +245,7 @@ test('messages stream instantly both ways between customer and hotel owner, with
       const thread = ownerInboxPayload.conversations.find((item: any) => item.id === conversation.id);
       assert.equal(Number(thread.unread[chatUidForUser(ownerA.id, 'staff')] || 0) >= 1, true, 'owner must have an unread count');
 
-      const readAck = await socketAck<any>(ownerSocket, 'chat:read', { conversationId: conversation.id });
+      const readAck = await socketAck<ChatAckPayload>(ownerSocket, 'chat:read', { conversationId: conversation.id });
       assert.equal(readAck.ok, true);
       const readEvent = await new Promise<any>(resolve => customerSocket.once('chat:read', resolve));
       assert.equal(readEvent.uid, chatUidForUser(ownerA.id, 'staff'));
@@ -272,10 +276,10 @@ test('transcripts persist across reconnects and history loads in order', async (
     const socket = createSocket(base, { transports: ['websocket'], extraHeaders: { cookie: `${ACCESS_COOKIE}=${encodeURIComponent(ownerCookie.accessToken)}` } });
     try {
       await connected(socket);
-      const joined = await socketAck<any>(socket, 'chat:join', { conversationId: conversation.id });
+      const joined = await socketAck<ChatAckPayload>(socket, 'chat:join', { conversationId: conversation.id });
       assert.equal(joined.ok, true);
-      assert.deepEqual(joined.messages.map((message: any) => message.text), ['first message', 'second message', 'third message']);
-      assert.deepEqual(joined.messages.map((message: any) => message.senderRole), ['customer', 'customer', 'customer']);
+      assert.deepEqual((joined.messages ?? []).map(message => message.text), ['first message', 'second message', 'third message']);
+      assert.deepEqual((joined.messages ?? []).map(message => message.senderRole), ['customer', 'customer', 'customer']);
     } finally {
       socket.disconnect();
     }
