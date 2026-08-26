@@ -17,7 +17,7 @@
     try { response = await fetch(`${baseUrl}${relativePath}`, requestOptions); } catch (error) { if (error?.name === 'AbortError') { const timeoutError = new Error('The request timed out. Please try again.'); timeoutError.code = 'REQUEST_TIMEOUT'; throw timeoutError; } throw new Error('Network error. Please check your connection and try again.'); } finally { clearTimeout(timeout); }
     let payload = {};
     try { payload = await response.json(); } catch { /* empty 204 response */ }
-    const skipRefresh = path.includes('/auth/') || path.includes('/admin/me');
+    const skipRefresh = path.includes('/auth/refresh') || path.includes('/auth/logout') || path.includes('/admin/me');
     if (response.status === 401 && canRefresh && !skipRefresh) {
       try { await request('/auth/refresh', { method: 'POST' }, false); return request(path, options, false); } catch { /* keep original auth error */ }
     }
