@@ -352,11 +352,37 @@ export function buildApp() {
     if (req.user!.role === 'super_admin') return res.json({ navigation });
     const coarse = new Set(permissionsFor(req.user).map(permission => permission.replace(':', '_')));
     const fine = new Set(effectiveFinePermissions(req.user));
-    const routePermission: Record<string, string> = { '/admin/hotels': 'hotel.view', '/admin/hotel-bookings': 'booking.view', '/admin/live-support': 'support.view', '/admin/travel-agents': 'agent.view', '/admin/tours': 'tour.view' };
+    const routePermission: Record<string, string> = {
+      '/admin/hotels': 'hotel.view',
+      '/admin/hotel-bookings': 'booking.view',
+      '/admin/live-support': 'support.view',
+      '/admin/travel-agents': 'agent.view',
+      '/admin/tours': 'tour.view',
+      '/admin/catalog?type=home': 'home.view',
+      '/admin/catalog?type=holiday_package': 'catalog.view',
+      '/admin/catalog?type=destination': 'catalog.view',
+      '/admin/customers': 'customer.view',
+      '/admin/bookings': 'booking.view',
+      '/admin/payments': 'payment.view',
+      '/admin/support': 'support.view',
+      '/admin/notifications': 'notifications.send',
+      '/admin/content': 'content.view',
+      '/admin/media': 'media.view',
+      '/admin/navigation': 'navigation.manage',
+      '/admin/settings': 'settings.view',
+      '/admin/system-status': 'dashboard.view',
+      '/admin/profile': 'dashboard.view',
+      '/admin': 'dashboard.view'
+    };
+    const vendor = ['hotel_owner', 'home_owner', 'travel_agent'].includes(req.user!.role);
     const allowed = navigation.filter(item => {
-      const vendor = ['hotel_owner', 'home_owner', 'travel_agent'].includes(req.user!.role);
-      if (['/admin/hotels', '/admin/hotel-bookings'].includes(item.route) && req.user!.role !== 'hotel_owner') return false;
-      if (item.route === '/admin/bookings' && vendor) return false;
+      if (item.route === '/admin/admins') return false;
+      if (vendor) {
+        if (item.route === '/admin/bookings') return false;
+        if (req.user!.role === 'hotel_owner' && !['/admin/hotels', '/admin/hotel-bookings', '/admin/profile', '/admin'].includes(item.route)) return false;
+        if (req.user!.role === 'home_owner' && !['/admin/catalog?type=home', '/admin/profile', '/admin'].includes(item.route)) return false;
+        if (req.user!.role === 'travel_agent' && !['/admin/travel-agents', '/admin/profile', '/admin'].includes(item.route)) return false;
+      }
       const routeFine = routePermission[item.route];
       const configured = String(item.permission || '');
       return !configured || fine.has(configured.replace(/_/g, '.')) || Boolean(routeFine && fine.has(routeFine)) || (!vendor && coarse.has(configured));

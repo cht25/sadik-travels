@@ -47,7 +47,13 @@ function mediaFolderFor(type) { return ({ banner: 'banners', tour: 'tours', hote
 function isError(value) { return value && value.__error; }
 function markDirty(value = true) { state.unsaved = value; }
 function resetDirty() { state.unsaved = false; }
-function hasPermission(permission) { return state.permissions.has(permission); }
+function hasPermission(permission) {
+  if (state.isSuperAdmin) return true;
+  if (state.permissions.has(permission)) return true;
+  const fineKey = String(permission || '').replace(/_/g, '.').replace(/:/g, '.');
+  if (state.finePermissions && state.finePermissions.has(fineKey)) return true;
+  return false;
+}
 function roleLabel(role) { return String(role || '').replace(/_/g, ' '); }
 
 function toast(message, type = '') { const region = $('#adminToast'); if (!region) return; const node = document.createElement('div'); node.className = `admin-toast ${type}`; node.textContent = message; region.appendChild(node); setTimeout(() => node.remove(), 4200); }
@@ -168,15 +174,48 @@ function bindAuth() {
   });
 }
 
+const routeFineMap = {
+  '/admin/hotels': 'hotel.view',
+  '/admin/hotel-bookings': 'booking.view',
+  '/admin/live-support': 'support.view',
+  '/admin/travel-agents': 'agent.view',
+  '/admin/tours': 'tour.view',
+  '/admin/catalog?type=home': 'home.view',
+  '/admin/catalog?type=holiday_package': 'catalog.view',
+  '/admin/catalog?type=destination': 'catalog.view',
+  '/admin/customers': 'customer.view',
+  '/admin/bookings': 'booking.view',
+  '/admin/payments': 'payment.view',
+  '/admin/support': 'support.view',
+  '/admin/notifications': 'notifications.send',
+  '/admin/content': 'content.view',
+  '/admin/media': 'media.view',
+  '/admin/navigation': 'navigation.manage',
+  '/admin/settings': 'settings.view',
+  '/admin/system-status': 'dashboard.view',
+  '/admin/profile': 'dashboard.view',
+  '/admin': 'dashboard.view'
+};
+
 function hasFineNav(value){ return value && state.finePermissions && state.finePermissions.has(String(value).replace(/_/g,'.')); }
 async function loadNavigation() { const response = await safeRequest('/admin/navigation'); if (isError(response)) return false; const rawItems = response.navigation || []; const byRoute = new Map(); rawItems.forEach(item => { const key = String(item.route || '').trim(); const current = byRoute.get(key); if (!current || Number(item.sortOrder || 0) < Number(current.sortOrder || 0)) byRoute.set(key, item); }); const items = [...byRoute.values()]; const grouped = new Map(); items.filter(item => {
       if (isRetiredNavItem(item)) return false;
       if (!item.visible || !item.enabled) return false;
       if (state.isSuperAdmin) return true;
-      if (!item.permission || hasPermission(item.permission) || hasFineNav(item.permission) || hasFineNav(item.route)) return true;
-      if (['/admin/hotels','/admin/hotel-bookings'].includes(item.route) && !['super_admin','hotel_owner'].includes(state.currentAdmin?.role)) return false;
-      const routeFine = { '/admin/hotels':'hotel.view', '/admin/hotel-bookings':'booking.view', '/admin/live-support':'support.view', '/admin/travel-agents':'agent.view', '/admin/tours':'tour.view' }[item.route];
-      return routeFine ? state.finePermissions.has(routeFine) : false;
+      if (item.route === '/admin/admins') return false;
+      const role = state.currentAdmin?.role;
+      const vendor = ['hotel_owner', 'home_owner', 'travel_agent'].includes(role);
+      if (vendor) {
+        if (item.route === '/admin/bookings') return false;
+        if (role === 'hotel_owner' && !['/admin/hotels', '/admin/hotel-bookings', '/admin/profile', '/admin'].includes(item.route)) return false;
+        if (role === 'home_owner' && !['/admin/catalog?type=home', '/admin/profile', '/admin'].includes(item.route)) return false;
+        if (role === 'travel_agent' && !['/admin/travel-agents', '/admin/profile', '/admin'].includes(item.route)) return false;
+      }
+      const routeFine = routeFineMap[item.route];
+      if (routeFine && state.finePermissions.has(routeFine)) return true;
+      if (item.permission && (hasPermission(item.permission) || hasFineNav(item.permission))) return true;
+      if (!item.permission && !routeFine) return true;
+      return false;
     }).sort((a,b)=>a.sortOrder-b.sortOrder).forEach(item => { if(!grouped.has(item.groupName)) grouped.set(item.groupName,[]); grouped.get(item.groupName).push(item); }); const nav=$('#adminNav'); if(!nav)return true; nav.innerHTML=[...grouped.entries()].map(([group,entries])=>`<div class="nav-group" data-nav-group="${escapeAttr(group)}"><p>${escapeHtml(group)}</p>${entries.map(item=>`<a href="${escapeAttr(item.route)}" data-route="${escapeAttr(item.route)}" data-permission="${escapeAttr(item.permission||'')}" data-nav-id="${escapeAttr(item.id)}"><span data-icon="${escapeAttr(item.icon)}"></span><span>${escapeHtml(item.label)}</span></a>`).join('')}</div>`).join(''); hydrateIcons(nav); if (!state.isSuperAdmin) $$('#adminNav a[data-route="/admin/admins"]').forEach(link => link.remove()); return true; }
 function isMobileView() { return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches; }
 function currentHref() { return `${location.pathname}${location.search}`; }
@@ -211,7 +250,13 @@ function updateNavigation(route) {
     if (score > bestScore) { bestScore = score; best = link; }
   }
   $$('#adminNav a[data-route]').forEach(link => link.classList.toggle('active', link === best));
-  $$('#adminNav [data-permission]').forEach(link => { const permission = link.dataset.permission; const routeFine = { '/admin/hotels':'hotel.view', '/admin/hotel-bookings':'booking.view', '/admin/live-support':'support.view', '/admin/travel-agents':'agent.view', '/admin/tours':'tour.view' }[link.dataset.route]; link.hidden = Boolean(permission) && !hasPermission(permission) && !hasFineNav(permission) && !(routeFine && state.finePermissions.has(routeFine)); });
+  $$('#adminNav [data-permission]').forEach(link => {
+    const permission = link.dataset.permission;
+    const navRoute = link.dataset.route;
+    const routeFine = routeFineMap[navRoute];
+    const visible = state.isSuperAdmin || (routeFine ? state.finePermissions.has(routeFine) : (!permission || hasPermission(permission) || hasFineNav(permission)));
+    link.hidden = !visible;
+  });
 }
 function updateBreadcrumb(route) { const labels = { dashboard: 'Overview', bookings: 'Bookings', hotels: 'Hotels', homes: 'Homes & Villas', catalog: 'Catalogue', orders: 'Orders', coupons: 'Coupons', reviews: 'Reviews', tours: 'Tours', services: 'Service Visibility', content: 'Website Content', media: 'Media Library', customers: 'Customers', payments: 'Payments', notifications: 'SMS & Notifications', 'live-support': 'Live Support Inbox', support: 'Support Tickets', settings: 'Settings', 'travel-agents': 'Travel Agents', 'hotel-bookings': 'Hotel Bookings', admins: 'Admin Management', profile: 'Profile & Security', navigation: 'Navigation Manager', 'system-status': 'System Status', analytics: 'Analytics' }; const key = route.path.split('/')[0]; const detail = route.path.split('/')[1]; const text = labels[key] || key; const breadcrumb = $('#adminBreadcrumbs'); breadcrumb.innerHTML = `<span>Admin</span><strong>${escapeHtml(text)}${detail && key !== 'bookings' && key !== 'customers' ? ` · ${escapeHtml(detail)}` : ''}</strong>`; }
 
@@ -575,18 +620,27 @@ function requiredPermissionForRoute(path) {
 }
 function routeAllowed(path) {
   if (state.isSuperAdmin) return true;
-  const isHotelPath = path === 'hotels' || path.startsWith('hotels/') || path === 'hotel-bookings' || path.startsWith('hotel-bookings/');
-  if (isHotelPath) {
-    // Mirrors requireHotelManager on the backend: hotel inventory is open only
-    // to Super Admins and Hotel Owners. A plain admin must not reach a page
-    // whose API calls are guaranteed to return HOTEL_ROLE_REQUIRED.
-    return state.currentAdmin?.role === 'hotel_owner';
-  }
-  if ((path === 'bookings' || path.startsWith('bookings/')) && ['hotel_owner', 'home_owner', 'travel_agent'].includes(state.currentAdmin?.role)) return false;
-  if (path === 'catalog' && state.currentAdmin?.role === 'home_owner') return state.finePermissions?.has('home.view');
   if (path === 'admins' || path.startsWith('admins/')) return false;
+  const role = state.currentAdmin?.role;
+  const vendor = ['hotel_owner', 'home_owner', 'travel_agent'].includes(role);
+  if (vendor) {
+    if (path === 'bookings' || path.startsWith('bookings/')) return false;
+    if (role === 'hotel_owner') {
+      if (path === 'hotels' || path.startsWith('hotels/')) return Boolean(state.finePermissions?.has('hotel.view'));
+      if (path === 'hotel-bookings' || path.startsWith('hotel-bookings/')) return Boolean(state.finePermissions?.has('booking.view'));
+      if (!['hotels', 'hotel-bookings', 'dashboard', 'profile'].includes(path.split('/')[0])) return false;
+    }
+    if (role === 'home_owner') {
+      if (path === 'catalog' && currentRoute().query.get('type') === 'home') return Boolean(state.finePermissions?.has('home.view'));
+      if (!['catalog', 'dashboard', 'profile'].includes(path.split('/')[0])) return false;
+    }
+    if (role === 'travel_agent') {
+      if (path === 'travel-agents' || path.startsWith('travel-agents/')) return Boolean(state.finePermissions?.has('agent.view'));
+      if (!['travel-agents', 'dashboard', 'profile'].includes(path.split('/')[0])) return false;
+    }
+  }
   const required = requiredPermissionForRoute(path);
-  return !required || state.finePermissions?.has(required);
+  return !required || Boolean(state.finePermissions?.has(required));
 }
 
 async function renderRouteNow() { const outlet = $('#adminOutlet'); if (!outlet || $('#adminApp').hidden) return; const requestId = ++state.routeRequest; const route = currentRoute(); state.lastUrl = currentHref(); const legacyRedirect = LEGACY_ADMIN_ROUTE_REDIRECTS[route.path]; if (legacyRedirect && currentHref() !== legacyRedirect) { history.replaceState({}, '', legacyRedirect); state.lastUrl = legacyRedirect; return renderRouteNow(); } updateNavigation(route); updateBreadcrumb(route); if (!routeAllowed(route.path)) { outlet.innerHTML = pageHeader('Access control', 'Access restricted', 'This module has not been assigned to your account by a Super Admin.', '') + `<section class="admin-card">${emptyState('Permission required', 'You cannot access this route. Ask a Super Admin to assign the required module permission.', 'lock')}</section>`; return; } outlet.innerHTML = loadingState(); outlet.focus({ preventScroll: true }); try { let renderer; const commerceRenderer = window.AdminCommerce?.resolve(route.path); if (commerceRenderer) renderer = commerceRenderer; else if (route.path === 'dashboard') renderer = renderDashboard; else if (route.path === 'analytics') renderer = renderAnalytics; else if (route.path === 'hotels') renderer = renderHotels; else if (route.path.startsWith('hotels/')) renderer = () => renderHotelAdminDetail(route.path.split('/')[1]); else if (route.path === 'hotel-bookings') renderer = renderHotelBookings; else if (route.path === 'admins') renderer = renderAdmins; else if (route.path.startsWith('hotel-bookings/')) renderer = () => renderHotelBookingDetail(route.path.split('/')[1]); else if (route.path === 'bookings') renderer = route.path.split('/').length > 1 ? () => renderBookingDetail(route.path.split('/')[1]) : renderBookings; else if (route.path.startsWith('bookings/')) renderer = () => renderBookingDetail(route.path.split('/')[1]); else if (route.path === 'services') renderer = renderServices; else if (route.path === 'tours') renderer = renderTours; else if (route.path === 'content') renderer = renderContent; else if (route.path === 'media') renderer = renderMedia; else if (route.path === 'travel-agents') renderer = renderTravelAgents; else if (route.path === 'customers') renderer = renderCustomers; else if (route.path.startsWith('customers/')) renderer = () => renderCustomerDetail(route.path.split('/')[1]); else if (route.path === 'payments') renderer = renderPayments; else if (route.path === 'notifications') renderer = renderNotifications; else if (route.path === 'live-support') renderer = renderLiveSupport; else if (route.path === 'support') renderer = renderSupport; else if (route.path.startsWith('support/')) renderer = () => renderSupportDetail(route.path.split('/')[1]); else if (route.path === 'settings') renderer = renderSettings; else if (route.path === 'system-status') renderer = renderSystemStatus; else if (route.path === 'profile') renderer = renderProfile; else if (route.path === 'navigation') renderer = renderNavigation; else renderer = renderAdminNotFound; await renderer(); if (requestId !== state.routeRequest) return; hydrateIcons(outlet); } catch (error) { if (requestId === state.routeRequest) outlet.innerHTML = renderError(error, '/admin'); } }
@@ -626,7 +680,7 @@ async function renderHotels() {
   if (isError(response)) return renderError(response.__error, '/admin/hotels');
   const hotels = response.hotels || [];
   const rows = hotels.length ? hotels.map(hotel => `<tr>
-      <td><div class="media-thumb">${hotel.images?.[0]?.url ? `<img src="${escapeAttr(hotel.images[0].url)}" alt=""/>` : `<span>${icon('hotel')}</span>`}</div></td>
+      <td><div class="media-thumb admin-image-wrapper">${hotel.images?.[0]?.url ? `<img src="${escapeAttr(hotel.images[0].url)}" alt=""/>` : `<span>${icon('hotel')}</span>`}</div></td>
       <td><a class="table-link" href="/admin/hotels/${escapeAttr(hotel.id)}" data-route="/admin/hotels/${escapeAttr(hotel.id)}"><span class="table-primary">${escapeHtml(hotel.name)}</span><span class="table-secondary">${escapeHtml(hotel.slug)}</span></a></td>
       <td>${escapeHtml(hotel.city)}<span class="table-secondary">${escapeHtml(hotel.country)}</span></td>
       <td>${escapeHtml(hotel.propertyType || 'Hotel')}</td>
@@ -825,7 +879,7 @@ async function renderAdmins() {
   if (isError(response)) return renderError(response.__error, '/admin/admins');
   const admins = response.admins || [];
   const rows = admins.length ? admins.map(admin => `<tr>
-    <td><div class="media-thumb">${admin.avatarUrl ? `<img src="${escapeAttr(admin.avatarUrl)}" alt=""/>` : `<span>${escapeHtml(initials(admin))}</span>`}</div></td>
+    <td><div class="media-thumb admin-image-wrapper">${admin.avatarUrl ? `<img src="${escapeAttr(admin.avatarUrl)}" alt=""/>` : `<span>${escapeHtml(initials(admin))}</span>`}</div></td>
     <td><span class="table-primary">${escapeHtml(displayName(admin))}</span><span class="table-secondary">${escapeHtml(admin.email || '')}</span>${admin.id === state.currentAdmin?.id ? '<span class="table-secondary">· You</span>' : ''}</td>
     <td>${escapeHtml(admin.phone || '—')}</td>
     <td>${roleBadge(admin.role)}</td>
@@ -868,8 +922,20 @@ async function openAdminEditor(admin, focusPermissions = false) {
   adminAvatarUrl = admin?.avatarUrl || '';
   const isNew = !admin;
   if (!isNew) {
-    adminSelectedPerms = new Set(Array.isArray(admin.permissions) ? admin.permissions : (admin.effectiveFine || []));
-    if (!Array.isArray(admin.permissions) && !admin.effectiveFine) { try { const detail = await safeRequest(`/admin/admins/${admin.id}`); if (!isError(detail)) adminSelectedPerms = new Set(detail.effectiveFine || (detail.admin.permissions || [])); } catch {} }
+    if (Array.isArray(admin.permissions)) {
+      adminSelectedPerms = new Set(admin.permissions);
+    } else {
+      try {
+        const detail = await safeRequest(`/admin/admins/${admin.id}`);
+        if (!isError(detail)) {
+          adminSelectedPerms = new Set(Array.isArray(detail.admin?.permissions) ? detail.admin.permissions : (detail.effectiveFine || []));
+        } else {
+          adminSelectedPerms = new Set(admin.effectiveFine || []);
+        }
+      } catch {
+        adminSelectedPerms = new Set(admin.effectiveFine || []);
+      }
+    }
   } else { adminSelectedPerms = new Set(); }
   const targetIsSuper = admin?.role === 'super_admin';
   const accountFields = `<div class="form-grid">
@@ -900,6 +966,9 @@ async function openAdminEditor(admin, focusPermissions = false) {
         } else {
           await $admin(`/admin/admins/${admin.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
           toast('Admin updated. Permissions saved.', 'success');
+          if (admin.id === state.currentAdmin?.id) {
+            await loadWorkspace(false);
+          }
         }
         resetDirty(); closeModal(); await renderRoute();
       } catch (error) { toast(error.message || 'Unable to save admin.', 'error'); if (status) status.textContent = ''; }

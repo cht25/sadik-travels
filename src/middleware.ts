@@ -80,12 +80,12 @@ export function requireInternalOperator(store: Store, key: string): RequestHandl
   };
 }
 
-/** Hotel inventory is intentionally restricted to the two platform roles that own it. */
+/** Hotel inventory is restricted to platform operators and hotel owners. */
 export function requireHotelManager(store: Store, key: string): RequestHandler {
   return async (req, _res, next) => {
     try {
       const user = await authenticate(store, req, true);
-      if (!['super_admin', 'hotel_owner'].includes(user.role)) throw new AppError(403, 'HOTEL_ROLE_REQUIRED', 'Hotel management is available only to Super Admins and Hotel Owners');
+      if (['home_owner', 'travel_agent'].includes(user.role)) throw new AppError(403, 'HOTEL_ROLE_REQUIRED', 'Hotel management is not available to this vendor account');
       if (!hasFinePermission(user, key)) throw new AppError(403, 'PERMISSION_DENIED', `Permission required: ${key}`);
       next();
     } catch (error) { next(error); }
