@@ -107,7 +107,7 @@ const InventoryModel = makeModel('SadikRoomInventory', 'room_inventory', {
 
 const BookingModel = makeModel('SadikHotelBooking', 'hotel_bookings', {
   bookingNumber: { type: String, unique: true, index: true }, userId: { type: String, index: true }, hotelId: { type: String, index: true },
-  checkIn: { type: String, index: true }, checkOut: String, nights: Number, rooms: [mixed],
+  checkIn: { type: String }, checkOut: String, nights: Number, rooms: [mixed],
   primaryGuest: mixed, roomGuests: [mixed], specialRequests: String, priceBreakdown: mixed,
   paymentMethod: String, paymentStatus: { type: String, index: true }, status: { type: String, index: true },
   cancellationPolicy: cancellationSchema(), cancelledAt: String, refund: mixed, hotelSnapshot: mixed,
