@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" role="img" aria-label="Sadik Travels property image placeholder">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eaf0ff"/>
+      <stop offset="0.55" stop-color="#dfe9ff"/>
+      <stop offset="1" stop-color="#f8f1e1"/>
+    </linearGradient>
+    <linearGradient id="building" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9db8ee"/>
+      <stop offset="1" stop-color="#6f93e0"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="500" fill="url(#bg)"/>
+  <circle cx="660" cy="96" r="46" fill="#f6c453" opacity="0.85"/>
+  <g opacity="0.92">
+    <rect x="300" y="150" width="200" height="190" rx="10" fill="url(#building)"/>
+    <rect x="510" y="210" width="120" height="130" rx="8" fill="#b9ccf2"/>
+    <rect x="170" y="230" width="120" height="110" rx="8" fill="#b9ccf2"/>
+    <g fill="#f5f8ff">
+      <rect x="325" y="175" width="34" height="30" rx="4"/><rect x="383" y="175" width="34" height="30" rx="4"/><rect x="441" y="175" width="34" height="30" rx="4"/>
+      <rect x="325" y="225" width="34" height="30" rx="4"/><rect x="383" y="225" width="34" height="30" rx="4"/><rect x="441" y="225" width="34" height="30" rx="4"/>
+      <rect x="325" y="275" width="34" height="30" rx="4"/><rect x="383" y="275" width="34" height="30" rx="4"/><rect x="441" y="275" width="34" height="30" rx="4"/>
+      <rect x="533" y="232" width="26" height="24" rx="3"/><rect x="580" y="232" width="26" height="24" rx="3"/>
+      <rect x="533" y="276" width="26" height="24" rx="3"/><rect x="580" y="276" width="26" height="24" rx="3"/>
+      <rect x="192" y="252" width="26" height="24" rx="3"/><rect x="239" y="252" width="26" height="24" rx="3"/>
+      <rect x="192" y="296" width="26" height="24" rx="3"/><rect x="239" y="296" width="26" height="24" rx="3"/>
+    </g>
+    <rect x="130" y="340" width="540" height="10" rx="5" fill="#8fa9dd"/>
+    <rect x="250" y="330" width="16" height="20" fill="#5f7fc4"/><rect x="400" y="330" width="16" height="20" fill="#5f7fc4"/><rect x="550" y="330" width="16" height="20" fill="#5f7fc4"/>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif" text-anchor="middle">
+    <text x="400" y="404" font-size="30" font-weight="800" fill="#0b2a97" letter-spacing="6">SADIK TRAVELS</text>
+    <text x="400" y="436" font-size="17" fill="#51617a" letter-spacing="2">PROPERTY IMAGE COMING SOON</text>
+  </g>
+</svg>

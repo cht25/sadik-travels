@@ -31,6 +31,13 @@ function isRetiredNavItem(item) {
   return RETIRED_NAV_LABEL_PATTERN.test(String(item.label || ''));
 }
 const $admin = (path, options = {}, canRefresh = true) => window.SadikApi.request(path, options, canRefresh);
+/* CSP-safe image fallback: failed images (including hotel photos) become the branded placeholder. */
+document.addEventListener('error', event => {
+  const img = event.target;
+  if (!img || img.tagName !== 'IMG' || !img.hasAttribute('data-image-fallback') || img.dataset.fallbackApplied) return;
+  img.dataset.fallbackApplied = '1';
+  img.src = '/assets/hotel-placeholder.svg';
+}, true);
 
 function escapeAttr(value) { return escapeHtml(value).replace(/`/g, '&#96;'); }
 function formatDate(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }); }
@@ -987,7 +994,7 @@ async function renderHotels() {
   if (isError(response)) return renderError(response.__error, '/admin/hotels');
   const hotels = response.hotels || [];
   const rows = hotels.length ? hotels.map(hotel => `<tr>
-      <td><div class="media-thumb admin-image-wrapper">${hotel.images?.[0]?.url ? `<img src="${escapeAttr(hotel.images[0].url)}" alt=""/>` : `<span>${icon('hotel')}</span>`}</div></td>
+      <td><div class="media-thumb admin-image-wrapper"><img src="${escapeAttr(hotel.images?.[0]?.url || '/assets/hotel-placeholder.svg')}" alt="" data-image-fallback/></div></td>
       <td><a class="table-link" href="/admin/hotels/${escapeAttr(hotel.id)}" data-route="/admin/hotels/${escapeAttr(hotel.id)}"><span class="table-primary">${escapeHtml(hotel.name)}</span><span class="table-secondary">${escapeHtml(hotel.slug)}</span></a></td>
       <td>${escapeHtml(hotel.city)}<span class="table-secondary">${escapeHtml(hotel.country)}</span></td>
       <td>${escapeHtml(hotel.propertyType || 'Hotel')}</td>
@@ -1014,8 +1021,23 @@ function bindHotelsPage(hotels) {
 }
 function seasonalDiscountsMarkup() { return `<div class="seasonal-discounts"><div class="seasonal-discounts-head"><span class="field-label"><span>Seasonal discounts</span></span><button class="admin-secondary" type="button" data-discount-add>+ Add discount</button></div><div id="seasonalDiscountRows">${seasonalDiscountState.map((discount, index) => `<div class="seasonal-discount-row"><input data-discount-name="${index}" aria-label="Discount name" placeholder="Summer offer" value="${escapeAttr(discount.name || '')}"/><input data-discount-start="${index}" type="date" aria-label="Start date" value="${escapeAttr(discount.startDate || '')}"/><input data-discount-end="${index}" type="date" aria-label="End date" value="${escapeAttr(discount.endDate || '')}"/><label><input data-discount-percentage="${index}" type="number" min="0" max="100" step="0.01" aria-label="Discount percentage" value="${escapeAttr(discount.percentage ?? 0)}"/><span>%</span></label><button class="image-remove" type="button" data-discount-remove="${index}" aria-label="Remove seasonal discount">×</button></div>`).join('') || '<p class="table-secondary">No seasonal discounts configured.</p>'}</div></div>`; }
 function bindSeasonalDiscounts() { $('[data-discount-add]')?.addEventListener('click', () => { seasonalDiscountState.push({ name: '', startDate: '', endDate: '', percentage: 0 }); $('#seasonalDiscountManager').innerHTML = seasonalDiscountsMarkup(); bindSeasonalDiscounts(); }); $$('[data-discount-remove]').forEach(button => button.addEventListener('click', () => { seasonalDiscountState.splice(Number(button.dataset.discountRemove), 1); $('#seasonalDiscountManager').innerHTML = seasonalDiscountsMarkup(); bindSeasonalDiscounts(); })); const sync = (selector, dataKey, field, number = false) => $$(selector).forEach(input => input.addEventListener('input', () => { seasonalDiscountState[Number(input.dataset[dataKey])][field] = number ? Number(input.value) : input.value; })); sync('[data-discount-name]', 'discountName', 'name'); sync('[data-discount-start]', 'discountStart', 'startDate'); sync('[data-discount-end]', 'discountEnd', 'endDate'); sync('[data-discount-percentage]', 'discountPercentage', 'percentage', true); }
-function hotelImagesMarkup() { return `<div class="image-manager"><div class="image-grid" id="hotelImageGrid">${hotelImageState.map((image, i) => `<div class="image-cell"><img src="${escapeAttr(image.url)}" alt=""/><button type="button" class="image-remove" data-img-remove="${i}" aria-label="Remove image">×</button></div>`).join('')}</div><label class="field-label"><span>Upload images (JPEG/PNG/WebP)</span><input id="hotelImageFile" type="file" accept="image/jpeg,image/png,image/webp" multiple/></label></div>`; }
-function bindHotelImages() { const grid = $('#hotelImageGrid'); $$('[data-img-remove]', grid).forEach(btn => btn.addEventListener('click', () => { hotelImageState.splice(Number(btn.dataset.imgRemove), 1); grid.closest('.image-manager').outerHTML = hotelImagesMarkup(); bindHotelImages(); })); $('#hotelImageFile')?.addEventListener('change', async event => { const files = [...event.target.files || []]; if (!files.length) return; for (const file of files) { try { const media = await uploadMediaFile(file, 'hotels', $('#hotelName')?.value || ''); hotelImageState.push({ url: media.secureUrl, publicId: media.publicId, mediaId: media.id }); } catch (error) { toast(error.message || 'Image upload failed.', 'error'); } } event.target.closest('.image-manager').outerHTML = hotelImagesMarkup(); bindHotelImages(); }); }
+function hotelImagesMarkup() { return `<div class="image-manager"><div class="image-grid" id="hotelImageGrid">${hotelImageState.map((image, i) => `<div class="image-cell${i === 0 ? ' is-primary' : ''}"><img src="${escapeAttr(image.url || '/assets/hotel-placeholder.svg')}" alt="" data-image-fallback/>${i === 0 ? '<span class="image-primary-badge">Primary</span>' : `<button type="button" class="image-primary" data-img-primary="${i}">Make primary</button>`}<button type="button" class="image-remove" data-img-remove="${i}" aria-label="Remove image">×</button></div>`).join('')}</div><p class="image-hint">The first image is the primary photo used on listing cards and search results. Upload once — images are stored permanently in Cloudinary and every replaced image gets a new URL, so guests always see the latest version.</p><label class="field-label"><span>Upload images (JPEG/PNG/WebP)</span><input id="hotelImageFile" type="file" accept="image/jpeg,image/png,image/webp" multiple/></label></div>`; }
+function bindHotelImages() {
+  const refresh = () => { const manager = $('#hotelImageGrid')?.closest('.image-manager'); if (manager) { manager.outerHTML = hotelImagesMarkup(); } bindHotelImages(); };
+  const grid = $('#hotelImageGrid');
+  $$('[data-img-remove]', grid).forEach(btn => btn.addEventListener('click', () => { hotelImageState.splice(Number(btn.dataset.imgRemove), 1); refresh(); }));
+  $$('[data-img-primary]', grid).forEach(btn => btn.addEventListener('click', () => { const index = Number(btn.dataset.imgPrimary); const [image] = hotelImageState.splice(index, 1); if (image) hotelImageState.unshift(image); refresh(); }));
+  $('#hotelImageFile')?.addEventListener('change', async event => {
+    const files = [...event.target.files || []];
+    if (!files.length) return;
+    for (const file of files) {
+      try { const media = await uploadMediaFile(file, 'hotels', $('#hotelName')?.value || ''); hotelImageState.push({ url: media.secureUrl, publicId: media.publicId, mediaId: media.id, ...(media.altText ? { alt: media.altText } : {}) }); }
+      catch (error) { toast(error.message || 'Image upload failed.', 'error'); }
+    }
+    event.target.value = '';
+    refresh();
+  });
+}
 function hotelFormMarkup(hotel = {}) {
   return `<div class="modal-heading"><span class="admin-eyebrow">Hotel catalogue</span><h2>${hotel.id ? 'Edit hotel' : 'Add hotel'}</h2><p>Only active hotels appear on the public website.</p></div>
   <form id="hotelForm"><input type="hidden" id="hotelId" value="${escapeAttr(hotel.id || '')}"/>

@@ -376,6 +376,56 @@ if (!testMongoUri) {
       const transcript = await (await fetch(`${base}/api/v1/chat/conversations/${conversationId}/messages`, { headers: { 'x-chat-identity': chatIdentity } })).json();
       assert.deepEqual(transcript.messages.map((message: any) => message.senderRole), ['customer', 'support']);
 
+      // ---- Hotel marketplace: images, filters, pricing, availability, booking ----
+      const hotelSlug = `smoke-hotel-${Date.now()}`;
+      const createdHotel = await fetch(`${base}/api/v1/admin/hotels`, { method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' }, body: JSON.stringify({
+        slug: hotelSlug, name: 'Test Hotel Kolatoli', propertyType: 'Hotel', city: "Cox's Bazar", area: 'Kolatoli Road', starRating: 4,
+        amenities: ['Free Wi-Fi', 'Complimentary Breakfast'], shortDescription: 'Smoke-test property.',
+        // Mixed image shapes: legacy string row, insecure http URL, valid object, junk — the API must normalize all of it.
+        images: ['https://res.cloudinary.com/demo/image/upload/sample.jpg', { url: 'http://res.cloudinary.com/demo/image/upload/second.jpg' }, { url: 'https://res.cloudinary.com/demo/image/upload/third.jpg', publicId: 'demo/third', alt: 'Third' }, { url: '' }, 'not-a-url'],
+        pricePerNight: 3500, checkInTime: '14:00', checkOutTime: '12:00', status: 'active'
+      }) });
+      const { body: hotelPayload } = await responseJson(createdHotel);
+      assert.equal(createdHotel.status, 201);
+      assert.equal(hotelPayload.hotel.images.length, 3, 'image normalization must keep exactly the valid entries');
+      assert.equal(hotelPayload.hotel.images[0].url.startsWith('https://'), true, 'stored image URLs must be https');
+      assert.equal(hotelPayload.hotel.images[1].url.startsWith('https://'), true, 'http image URLs must be upgraded to https');
+
+      const roomCreated = await fetch(`${base}/api/v1/admin/hotels/${hotelPayload.hotel.id}/rooms`, { method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Deluxe Double', slug: `deluxe-${Date.now()}`, pricePerNight: 3500, originalPrice: 4200, maxAdults: 2, maxChildren: 1, maxGuests: 3, inventory: 5, taxesPct: 10, serviceFee: 200, status: 'active' }) });
+      const { body: roomPayload } = await responseJson(roomCreated);
+      assert.equal(roomCreated.status, 201);
+
+      const searchResults = await (await fetch(`${base}/api/v1/hotels?q=Kolatoli`)).json();
+      assert.equal(searchResults.hotels.some((hotel: any) => hotel.id === hotelPayload.hotel.id), true, 'search must find the persisted hotel');
+      assert.equal(typeof searchResults.hotels.find((hotel: any) => hotel.id === hotelPayload.hotel.id)?.priceFrom, 'number', 'listing must carry the real lowest room price');
+      assert.equal(searchResults.amenities.includes('Free Wi-Fi'), true, 'amenity facets must be derived from live data');
+      assert.equal(searchResults.areas.includes('Kolatoli Road'), true, 'area facets must be derived from live data');
+
+      const multiType = await (await fetch(`${base}/api/v1/hotels?propertyTypes=${encodeURIComponent('Hotel,Resort')}`)).json();
+      assert.equal(multiType.hotels.some((hotel: any) => hotel.id === hotelPayload.hotel.id), true, 'multi property-type filter must match (was broken: comma value matched nothing)');
+      const singleType = await (await fetch(`${base}/api/v1/hotels?propertyTypes=Resort`)).json();
+      assert.equal(singleType.hotels.some((hotel: any) => hotel.id === hotelPayload.hotel.id), false, 'property-type filter must exclude non-matching types');
+      const exactStars = await (await fetch(`${base}/api/v1/hotels?starRatings=4`)).json();
+      assert.equal(exactStars.hotels.some((hotel: any) => hotel.id === hotelPayload.hotel.id), true, 'exact 4-star filter must include the hotel');
+      assert.equal(exactStars.hotels.every((hotel: any) => Math.round(hotel.starRating) === 4), true, 'exact star filter must return only 4-star hotels');
+      const areaOr = await (await fetch(`${base}/api/v1/hotels?areas=${encodeURIComponent('Kolatoli Road,Inani Beach')}`)).json();
+      assert.equal(areaOr.hotels.some((hotel: any) => hotel.id === hotelPayload.hotel.id), true, 'multi-area OR filter must include the hotel');
+      const amenityAnd = await (await fetch(`${base}/api/v1/hotels?amenities=${encodeURIComponent('Free Wi-Fi,Complimentary Breakfast')}`)).json();
+      assert.equal(amenityAnd.hotels.some((hotel: any) => hotel.id === hotelPayload.hotel.id), true, 'amenity AND filter must include the hotel');
+      const priceBand = await (await fetch(`${base}/api/v1/hotels?minPrice=3000&maxPrice=4000`)).json();
+      assert.equal(priceBand.hotels.some((hotel: any) => hotel.id === hotelPayload.hotel.id), true, 'price band filter must include the hotel');
+
+      const checkIn = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+      const checkOut = new Date(Date.now() + 9 * 86400000).toISOString().slice(0, 10);
+      const quoteResponse = await fetch(`${base}/api/v1/hotels/price-quote`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ hotelId: hotelPayload.hotel.id, checkIn, checkOut, rooms: [{ roomId: roomPayload.room.id, quantity: 1, adults: 2, children: 0 }] }) });
+      const { body: quote } = await responseJson(quoteResponse);
+      assert.equal(quoteResponse.status, 200);
+      assert.equal(quote.breakdown.nights, 2, 'nights must be the real date difference');
+      const expectedRoomTotal = 3500 * 2;
+      assert.equal(quote.breakdown.roomTotal, expectedRoomTotal, 'server must recalculate the room total from persisted prices');
+      assert.equal(quote.breakdown.taxes, Math.round(expectedRoomTotal * 0.10), 'taxes must derive from the persisted tax rate');
+      assert.equal(quote.breakdown.serviceFee, 400, 'service fee must follow the persisted room fee');
+
       const createdTour = await fetch(`${base}/api/v1/admin/tours`, { method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' }, body: JSON.stringify({ slug: `umrah-smoke-${Date.now()}`, title: 'Umrah Smoke Package', country: 'Saudi Arabia', tourType: 'Umrah', destinations: ['Makkah', 'Madinah'], durationDays: 10, durationNights: 9, description: 'Published package for the smoke test.', imageUrl: '', metadata: {}, priceBdt: 125000, status: 'published', featured: true }) });
       const { body: tourPayload } = await responseJson(createdTour);
       assert.equal(createdTour.status, 201);
@@ -402,6 +452,19 @@ if (!testMongoUri) {
       const paymentStart = await fetch(`${base}/api/v1/payments/intents`, { method: 'POST', headers: { cookie: customerCookie, 'content-type': 'application/json' }, body: JSON.stringify({ bookingId: bookingPayload.booking.id, amount: 1, currency: 'USD' }) });
       assert.equal(paymentStart.status, 503); // Provider is intentionally absent in test.
       assert.equal((await store.listAdminPayments({ q: bookingPayload.booking.id })).payments[0].amount, 250000);
+
+      // Hotel booking end-to-end: server-derived amount (client price fields don't exist by design).
+      const hotelBooking = await fetch(`${base}/api/v1/hotels/bookings`, { method: 'POST', headers: { cookie: customerCookie, 'content-type': 'application/json' }, body: JSON.stringify({ hotelId: hotelPayload.hotel.id, checkIn, checkOut, rooms: [{ roomId: roomPayload.room.id, quantity: 1, adults: 2, children: 0 }], primaryGuest: { firstName: 'Rahim', lastName: 'Uddin', email: 'rahim@example.com', phone: '+8801711223344' }, paymentMethod: 'pay_later' }) });
+      const { body: hotelBookingPayload } = await responseJson(hotelBooking);
+      assert.equal(hotelBooking.status, 201);
+      assert.equal(hotelBookingPayload.booking.priceBreakdown.roomTotal, expectedRoomTotal, 'booking must store the server-calculated total');
+      assert.equal(hotelBookingPayload.booking.nights, 2);
+      // Availability must now reflect the reservation.
+      const afterBooking = await (await fetch(`${base}/api/v1/hotels/${hotelSlug}?checkIn=${checkIn}&checkOut=${checkOut}`)).json();
+      const bookedRoom = afterBooking.hotel.rooms.find((room: any) => room.id === roomPayload.room.id);
+      assert.equal(bookedRoom.available, 4, 'one room of inventory must be consumed by the booking');
+      // Owner-facing chat integration: hotel id + owner on the conversation (deep assertions in chat.test.js).
+      assert.equal(hotelPayload.hotel.ownerId, adminLogin.user.id, 'super-admin-created hotels default to the creator as owner');
 
       assert.equal((await fetch(`${base}/api/v1/admin/notifications`, { method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' }, body: JSON.stringify({ userId: customerLogin.user.id, title: 'Booking Update', message: 'Your booking has been updated successfully.', channels: ['in_app'] }) })).status, 201);
       const notifications = await (await fetch(`${base}/api/v1/notifications`, { headers: { cookie: customerCookie } })).json();

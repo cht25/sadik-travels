@@ -1719,7 +1719,20 @@ const HOTEL_AMENITIES = ['Free Wi-Fi', 'Swimming Pool', 'Gym', 'Couple-Friendly'
 const HOTEL_NEIGHBORHOODS = { "Cox's Bazar": ['Kolatoli Road', 'Inani Beach', 'Laboni Beach', 'Himchari'], Dhaka: ['Gulshan', 'Banani', 'Dhanmondi', 'Uttara'] };
 const REVIEW_BUCKETS = [{ id: '4.25', label: '8.5+ Excellent', min: 4.25 }, { id: '4', label: '8.0+ Very good', min: 4 }, { id: '3.5', label: '7.0+ Good', min: 3.5 }];
 const HOTEL_CHECKOUT_KEY = 'sadikHotelCheckout';
-const hotelSearchState = { destination: '', checkIn: '', checkOut: '', adults: 2, children: 0, rooms: 1, minPrice: '', maxPrice: '', minStarRating: '', minGuestRating: '', area: '', neighborhoods: [], propertyType: [], amenities: [], freeCancellation: false, sort: 'recommended', page: 1 };
+const hotelSearchState = { destination: '', checkIn: '', checkOut: '', adults: 2, children: 0, rooms: 1, minPrice: '', maxPrice: '', minStarRating: '', starRatings: [], minGuestRating: '', area: '', areas: [], neighborhoods: [], propertyType: [], amenities: [], freeCancellation: false, sort: 'recommended', page: 1 };
+/* Branded fallback so a missing/failing image never renders as a broken icon. */
+const HOTEL_PLACEHOLDER = '/assets/hotel-placeholder.svg';
+const hotelImageSrc = (hotel) => hotel?.thumbnail || hotel?.images?.[0]?.url || hotel?.imageUrl || '';
+const hotelNightsBetween = (checkIn, checkOut) => Math.max(1, Math.round((new Date(`${checkOut}T00:00:00`) - new Date(`${checkIn}T00:00:00`)) / 86400000));
+const hotelImageTag = (src, alt, attrs = '') => `<img src="${escapeHtml(src || HOTEL_PLACEHOLDER)}" alt="${escapeHtml(alt || '')}" loading="lazy" ${attrs} />`;
+/* CSP-safe global fallback: any hotel image that fails to load (deleted asset,
+   stale URL, offline file) is swapped for the branded placeholder exactly once. */
+document.addEventListener('error', event => {
+  const img = event.target;
+  if (!img || img.tagName !== 'IMG' || img.dataset.fallbackApplied) return;
+  img.dataset.fallbackApplied = '1';
+  img.src = HOTEL_PLACEHOLDER;
+}, true);
 const hotelMoney = (value) => `৳${Number(value || 0).toLocaleString('en-BD')}`;
 const tourMoney = (value) => `BDT ${Number(value || 0).toLocaleString('en-BD')}`;
 const hotelStars = (rating) => { const n = Math.max(0, Math.min(5, Math.round(Number(rating || 0)))); return Array.from({ length: n }, () => icon('i-star')).join(''); };
@@ -1730,7 +1743,13 @@ function hotelReadQuery(query) {
   return {
     destination: query.get('destination') || '', checkIn: query.get('checkIn') || isoDateFromToday(1), checkOut: query.get('checkOut') || isoDateFromToday(2),
     adults: Number(query.get('adults')) || 2, children: Number(query.get('children')) || 0, rooms: Number(query.get('rooms')) || 1,
+    q: query.get('q') || '',
     minPrice: query.get('minPrice') || '', maxPrice: query.get('maxPrice') || '', minStarRating: query.get('minStarRating') || '',
+    starRatings: query.get('starRatings') ? query.get('starRatings').split(',').map(Number).filter(Number.isFinite) : [],
+    minGuestRating: query.get('minGuestRating') || '',
+    area: query.get('area') || '',
+    areas: query.get('areas') ? query.get('areas').split(',').filter(Boolean) : [],
+    neighborhoods: query.get('neighborhoods') ? query.get('neighborhoods').split(',').filter(Boolean) : [],
     propertyType: query.get('propertyType') ? query.get('propertyType').split(',').filter(Boolean) : [],
     amenities: query.get('amenities') ? query.get('amenities').split(',').filter(Boolean) : [],
     freeCancellation: query.get('freeCancellation') === 'true', sort: query.get('sort') || 'recommended', page: Number(query.get('page')) || 1
@@ -1741,13 +1760,16 @@ function hotelBuildUrl(params) {
   if (params.destination) p.set('destination', params.destination);
   p.set('checkIn', params.checkIn); p.set('checkOut', params.checkOut);
   p.set('adults', params.adults); p.set('children', params.children); p.set('rooms', params.rooms);
+  if (params.q) p.set('q', params.q);
   if (params.minPrice) p.set('minPrice', params.minPrice);
   if (params.maxPrice) p.set('maxPrice', params.maxPrice);
   if (params.minStarRating) p.set('minStarRating', params.minStarRating);
+  if (params.starRatings?.length) p.set('starRatings', params.starRatings.join(','));
   if (params.minGuestRating) p.set('minGuestRating', params.minGuestRating);
   if (params.area) p.set('area', params.area);
+  if (params.areas?.length) p.set('areas', params.areas.join(','));
   if (params.neighborhoods?.length) p.set('neighborhoods', params.neighborhoods.join(','));
-  if (params.propertyType?.length) p.set('propertyType', params.propertyType.join(','));
+  if (params.propertyType?.length) p.set('propertyTypes', params.propertyType.join(','));
   if (params.amenities?.length) p.set('amenities', params.amenities.join(','));
   if (params.freeCancellation) p.set('freeCancellation', 'true');
   if (params.sort && params.sort !== 'recommended') p.set('sort', params.sort);
@@ -1799,7 +1821,7 @@ function hotelStepper(label, id, value, min, max) {
   return `<div class="guest-stepper"><div><strong>${escapeHtml(label)}</strong></div><div class="stepper"><button type="button" data-step-target="${id}" data-dir="-1">−</button><output id="${id}" data-value="${value}"><span id="${id}Val">${value}</span></output><button type="button" data-step-target="${id}" data-dir="1">+</button></div></div>`;
 }
 function hotelCardHtml(hotel, search) {
-  const img = hotel.thumbnail || hotel.images?.[0]?.url;
+  const img = hotelImageSrc(hotel);
   const photoCount = hotel.images?.length || 0;
   const rating = hotel.guestRating || hotel.starRating || 0;
   const reviews = hotel.reviewCount || 0;
@@ -1807,11 +1829,13 @@ function hotelCardHtml(hotel, search) {
   const amenities = (hotel.amenities || []).slice(0, 4).map(a => `<span class="hotel-chip">${escapeHtml(a)}</span>`).join('');
   const hasDiscount = typeof hotel.priceFrom === 'number' && typeof hotel.originalPriceFrom === 'number' && hotel.originalPriceFrom > hotel.priceFrom;
   const discountPct = hasDiscount ? Math.round((1 - hotel.priceFrom / hotel.originalPriceFrom) * 100) : 0;
-  return `<article class="hotel-card" data-hotel-slug="${escapeHtml(hotel.slug)}">
+  const datesSelected = Boolean(search?.checkIn && search?.checkOut);
+  const soldOutForDates = datesSelected && Number(hotel.availableRooms) === 0;
+  return `<article class="hotel-card${soldOutForDates ? ' is-soldout' : ''}" data-hotel-slug="${escapeHtml(hotel.slug)}">
     <a class="hotel-card-media" href="${escapeHtml(detailHref)}" data-public-route="${escapeHtml(detailHref)}" data-gallery="${escapeHtml(hotel.slug)}">
-      ${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(hotel.name)}" loading="lazy" />` : `<div class="hotel-card-noimg">${icon('i-images')}</div>`}
+      ${hotelImageTag(img, hotel.name)}
       ${photoCount > 1 ? `<span class="hotel-card-photos">${icon('i-images')} ${photoCount}</span>` : ''}
-      ${hotel.availableRooms === 0 ? '<span class="hotel-card-soldout">Sold out</span>' : ''}
+      ${soldOutForDates ? `<span class="hotel-card-soldout">Not available ${escapeHtml(hotelNightWord(hotelNightsBetween(search.checkIn, search.checkOut)))}</span>` : ''}
     </a>
     <div class="hotel-card-body">
       <div class="hotel-card-head">
@@ -1853,17 +1877,12 @@ async function renderHotelSearch(root, query) {
   const nights = Math.max(1, Math.round((new Date(`${search.checkOut}T00:00:00`) - new Date(`${search.checkIn}T00:00:00`)) / 86400000));
   trackAnalytics('search', { type: 'hotel', destination: search.destination, nights, adults: search.adults });
   root.innerHTML = publicPageHeader('Stays', 'Hotels', 'Find your stay with Sadik Travels.', '') + `
-    <div class="hotel-search-bar">
-      <div class="hotel-search-summary">
-        <strong>${escapeHtml(search.destination || 'All destinations')}</strong>
-        <span>${formatDate(search.checkIn)} → ${formatDate(search.checkOut)}</span>
-        <span>${hotelNightWord(nights)} · ${search.rooms} room${search.rooms > 1 ? 's' : ''} · ${hotelGuestsWord(search.adults, search.children)}</span>
-      </div>
-      <button type="button" class="btn btn-outline" id="hotelModifyBtn">${icon('i-sliders')} Modify search</button>
-    </div>
-    <div id="hotelModifySlot"></div>
+    <section class="public-page-card hotel-search-panel">
+      <div class="hotel-landing-search">${hotelCompactSearchForm(search)}</div>
+      <div class="hotel-search-meta"><span>${icon('i-calendar')} ${formatDate(search.checkIn)} → ${formatDate(search.checkOut)}</span><span>${hotelNightWord(nights)}</span><span>${search.rooms} room${search.rooms > 1 ? 's' : ''} · ${hotelGuestsWord(search.adults, search.children)}</span></div>
+    </section>
     <div class="hotel-results-layout">
-      <aside class="hotel-filters" id="hotelFilters"><div class="public-public-loading"><span class="spinner"></span>Loading filters…</div></aside>
+      <aside class="hotel-filters" id="hotelFiltersPane"><div id="hotelFilters"><div class="public-public-loading"><span class="spinner"></span>Loading filters…</div></div></aside>
       <div class="hotel-results-main">
         <div class="hotel-results-toolbar">
           <span id="hotelResultsCount" class="hotel-count">Searching…</span>
@@ -1879,13 +1898,13 @@ async function renderHotelSearch(root, query) {
     <div class="mobile-sheet" id="hotelMobileSheet"><div><small>Filters &amp; book</small><strong id="hotelSheetCount">Searching…</strong></div><div style="display:flex;gap:8px"><button type="button" class="btn btn-outline" id="hotelSheetFilters">Filters</button></div></div>`;
   wrapPublicRouteContent(root);
   $('#hotelSort').value = search.sort;
-  let facetData = { propertyTypes: [], cities: [] };
+  let facetData = { propertyTypes: [], areas: [], amenities: [], starRatings: [], priceBounds: {} };
   const loadResults = async () => {
     const grid = $('#hotelResultsGrid'); grid.innerHTML = Array.from({ length: 4 }, () => `<div class="hotel-card-skeleton"></div>`).join('');
     try {
       const params = { ...search, propertyType: search.propertyType, amenities: search.amenities };
       const r = await apiRequest(`/hotels?${hotelBuildUrl(params)}`);
-      facetData = { propertyTypes: r.propertyTypes || [], cities: r.cities || [], areas: r.areas || [], priceBounds: r.priceBounds || {} };
+      facetData = { propertyTypes: r.propertyTypes || [], cities: r.cities || [], areas: r.areas || [], amenities: r.amenities || [], starRatings: r.starRatings || [], priceBounds: r.priceBounds || {} };
       const hint = $('#liveFilterHint'); if (hint) hint.textContent = `${r.total} stays`;
       $('#hotelResultsCount').textContent = `${r.total} hotel${r.total === 1 ? '' : 's'} found`;
       const sheet = $('#hotelSheetCount'); if (sheet) sheet.textContent = `${r.total} stay${r.total === 1 ? '' : 's'}`;
@@ -1893,33 +1912,72 @@ async function renderHotelSearch(root, query) {
       renderHotelPagination(r);
       renderHotelFilters(facetData);
       $$('#hotelResultsGrid [data-gallery]').forEach(el => el.addEventListener('click', async e => { e.preventDefault(); try { const detail = await apiRequest(`/hotels/${encodeURIComponent(el.dataset.gallery)}`); hotelGalleryModal(detail.hotel.images); } catch {} }));
-      $('#hotelClearFilters')?.addEventListener('click', () => { ['minPrice', 'maxPrice', 'minStarRating'].forEach(k => hotelSearchState[k] = ''); hotelSearchState.propertyType = []; hotelSearchState.amenities = []; hotelSearchState.freeCancellation = false; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); });
+      $('#hotelClearFilters')?.addEventListener('click', () => { ['minPrice', 'maxPrice', 'minStarRating', 'minGuestRating', 'q'].forEach(k => hotelSearchState[k] = ''); hotelSearchState.propertyType = []; hotelSearchState.amenities = []; hotelSearchState.starRatings = []; hotelSearchState.areas = []; hotelSearchState.neighborhoods = []; hotelSearchState.area = ''; hotelSearchState.freeCancellation = false; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); });
     } catch (error) { grid.innerHTML = publicErrorState(error.message || 'Hotel search is unavailable. Please try again.'); }
   };
   const renderHotelFilters = (facets) => {
     const node = $('#hotelFilters');
-    const starOptions = [5, 4, 3, 2, 1];
-    const priceMax = search.maxPrice || 25000;
-    const hoods = HOTEL_NEIGHBORHOODS[search.destination] || facets.areas || [];
-    node.innerHTML = `<div class="filter-group"><h4>Price per night <span class="filter-count" id="liveFilterHint"></span></h4><div class="filter-price"><label>Min<input type="number" id="fMinPrice" value="${escapeHtml(search.minPrice)}" placeholder="0" min="0" /></label><label>Max<input type="number" id="fMaxPrice" value="${escapeHtml(search.maxPrice)}" placeholder="25000" min="0" /></label></div><div class="range-wrap"><input type="range" id="fPriceSlider" min="0" max="${Number(facets.priceBounds?.max || 25000)}" value="${escapeHtml(search.maxPrice || facets.priceBounds?.max || 25000)}" /></div></div>
+    const propertyTypes = facets.propertyTypes?.length ? facets.propertyTypes : [];
+    const areas = facets.areas?.length ? facets.areas : [];
+    const amenities = facets.amenities?.length ? facets.amenities : [];
+    const starOptions = facets.starRatings?.length ? facets.starRatings : [5, 4, 3, 2, 1];
+    const bounds = facets.priceBounds || {};
+    const priceMaxBound = Number(bounds.max) > 0 ? Math.ceil(Number(bounds.max)) : 25000;
+    const priceMinBound = Number(bounds.min) >= 0 ? Math.floor(Number(bounds.min)) : 0;
+    const anyFilterActive = Boolean(search.q || search.minPrice || search.maxPrice || search.starRatings?.length || search.minGuestRating || search.areas?.length || search.propertyType?.length || search.amenities?.length || search.freeCancellation);
+    node.innerHTML = `<div class="filter-head"><strong>Filters &amp; Sort</strong>${anyFilterActive ? '<button type="button" class="filter-clear" id="hotelClearFiltersSide">Clear All</button>' : ''}</div>
+      <div class="filter-group"><h4>Search hotel name / area</h4><input type="search" class="filter-search" id="fNameSearch" value="${escapeHtml(search.q || '')}" placeholder="e.g. Royal, Kolatoli…" /></div>
+      <div class="filter-group"><h4>Sort by</h4><div class="filter-checks">${[['recommended', 'Recommended'], ['price_asc', 'Price: Low to High'], ['price_desc', 'Price: High to Low'], ['rating', 'Rating']].map(([value, label]) => `<label class="check-pill"><input type="radio" name="fSort" data-sort-radio="${value}" ${search.sort === value ? 'checked' : ''} /><span>${label}</span></label>`).join('')}</div></div>
+      <div class="filter-group"><h4>Price / night <small class="filter-hint">BDT ${priceMinBound.toLocaleString('en-BD')} – ${priceMaxBound.toLocaleString('en-BD')}</small></h4><div class="filter-price"><label>Min<input type="number" id="fMinPrice" value="${escapeHtml(search.minPrice)}" placeholder="${priceMinBound}" min="0" /></label><label>Max<input type="number" id="fMaxPrice" value="${escapeHtml(search.maxPrice)}" placeholder="${priceMaxBound}" min="0" /></label></div><div class="range-wrap"><input type="range" id="fPriceSlider" min="${priceMinBound}" max="${priceMaxBound}" value="${escapeHtml(search.maxPrice || priceMaxBound)}" /></div></div>
+      ${propertyTypes.length ? `<div class="filter-group"><h4>Property type</h4><div class="filter-checks">${propertyTypes.map(t => `<label class="check-pill"><input type="checkbox" data-ptype="${escapeHtml(t)}" ${search.propertyType.includes(t) ? 'checked' : ''} /><span>${escapeHtml(t)}</span></label>`).join('')}</div></div>` : ''}
+      ${areas.length ? `<div class="filter-group"><h4>Area</h4><div class="filter-checks filter-scroll">${areas.map(a => `<label class="check-pill"><input type="checkbox" data-area="${escapeHtml(a)}" ${(search.areas || []).includes(a) || search.area === a ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>` : ''}
+      ${amenities.length ? `<div class="filter-group"><h4>Amenities</h4><div class="filter-checks filter-scroll">${amenities.map(a => `<label class="check-pill"><input type="checkbox" data-amenity="${escapeHtml(a)}" ${search.amenities.includes(a) ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>` : ''}
+      ${starOptions.length ? `<div class="filter-group"><h4>Star rating</h4><div class="filter-checks">${starOptions.map(stars => `<label class="check-pill"><input type="checkbox" data-star="${stars}" ${search.starRatings.includes(Number(stars)) ? 'checked' : ''} /><span>${hotelStars(stars)} ${stars} star${stars === 1 ? '' : 's'}</span></label>`).join('')}</div></div>` : ''}
       <div class="filter-group"><h4>Guest score</h4><div class="filter-checks">${REVIEW_BUCKETS.map(b => `<label class="check-pill"><input type="radio" name="guestScore" data-score="${b.min}" ${Number(search.minGuestRating) === b.min ? 'checked' : ''} /><span>${escapeHtml(b.label)}</span></label>`).join('')}</div></div>
-      ${hoods.length ? `<div class="filter-group"><h4>Neighborhoods</h4><div class="filter-checks">${hoods.map(a => `<label class="check-pill"><input type="checkbox" data-hood="${escapeHtml(a)}" ${(search.neighborhoods || []).includes(a) || search.area === a ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>` : ''}
-      <div class="filter-group"><h4>Star rating</h4><div class="filter-checks">${starOptions.map(s => `<label class="check-pill"><input type="checkbox" data-star="${s}" ${Number(search.minStarRating) === s ? 'checked' : ''} /><span>${hotelStars(s)} ${s}★</span></label>`).join('')}</div></div>
-      ${facets.propertyTypes.length ? `<div class="filter-group"><h4>Property type</h4><div class="filter-checks">${facets.propertyTypes.map(t => `<label class="check-pill"><input type="checkbox" data-ptype="${escapeHtml(t)}" ${search.propertyType.includes(t) ? 'checked' : ''} /><span>${escapeHtml(t)}</span></label>`).join('')}</div></div>` : ''}
-      <div class="filter-group"><h4>Amenities</h4><div class="filter-checks">${HOTEL_AMENITIES.map(a => `<label class="check-pill"><input type="checkbox" data-amenity="${escapeHtml(a)}" ${search.amenities.includes(a) ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>
       <div class="filter-group"><label class="check-pill"><input type="checkbox" id="fFreeCancel" ${search.freeCancellation ? 'checked' : ''} /><span>Free cancellation</span></label></div>
-      <button type="button" class="btn btn-outline full-btn" id="hotelClearFiltersSide">Clear all</button>`;
-    const apply = () => { hotelSearchState.minPrice = $('#fMinPrice').value; hotelSearchState.maxPrice = $('#fMaxPrice').value; hotelSearchState.propertyType = $$('[data-ptype]:checked').map(i => i.dataset.ptype); hotelSearchState.amenities = $$('[data-amenity]:checked').map(i => i.dataset.amenity); const star = $$('[data-star]:checked').map(i => Number(i.dataset.star)); hotelSearchState.minStarRating = star.length ? String(Math.min(...star)) : ''; hotelSearchState.minGuestRating = $$('[data-score]:checked')[0]?.dataset.score || ''; hotelSearchState.neighborhoods = $$('[data-hood]:checked').map(i => i.dataset.hood); hotelSearchState.area = hotelSearchState.neighborhoods[0] || ''; hotelSearchState.freeCancellation = $('#fFreeCancel').checked; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); };
+      <button type="button" class="btn btn-outline full-btn" id="hotelClearFiltersSide2">Clear All</button>`;
+    const clearAll = () => { ['minPrice', 'maxPrice', 'minStarRating', 'minGuestRating', 'q'].forEach(k => hotelSearchState[k] = ''); hotelSearchState.propertyType = []; hotelSearchState.amenities = []; hotelSearchState.starRatings = []; hotelSearchState.areas = []; hotelSearchState.neighborhoods = []; hotelSearchState.area = ''; hotelSearchState.freeCancellation = false; hotelSearchState.sort = 'recommended'; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); };
+    const apply = () => {
+      hotelSearchState.q = $('#fNameSearch')?.value.trim() || '';
+      hotelSearchState.minPrice = $('#fMinPrice')?.value || '';
+      hotelSearchState.maxPrice = $('#fMaxPrice')?.value || '';
+      hotelSearchState.propertyType = $$('[data-ptype]:checked').map(i => i.dataset.ptype);
+      hotelSearchState.amenities = $$('[data-amenity]:checked').map(i => i.dataset.amenity);
+      hotelSearchState.starRatings = $$('[data-star]:checked').map(i => Number(i.dataset.star));
+      hotelSearchState.areas = $$('[data-area]:checked').map(i => i.dataset.area);
+      hotelSearchState.neighborhoods = [];
+      hotelSearchState.area = '';
+      hotelSearchState.minGuestRating = $$('[data-score]:checked')[0]?.dataset.score || '';
+      hotelSearchState.freeCancellation = $('#fFreeCancel')?.checked || false;
+      hotelSearchState.sort = $$('[data-sort-radio]:checked')[0]?.dataset.sortRadio || hotelSearchState.sort || 'recommended';
+      hotelSearchState.page = 1;
+      publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`);
+    };
+    let nameTimer;
+    $('#fNameSearch')?.addEventListener('input', () => { clearTimeout(nameTimer); nameTimer = setTimeout(apply, 350); });
     node.querySelectorAll('input[type=checkbox], input[type=number], input[type=radio], input[type=range]').forEach(i => i.addEventListener('change', apply));
-    $('#fPriceSlider')?.addEventListener('input', () => { $('#fMaxPrice').value = $('#fPriceSlider').value; });
     $('#fMinPrice')?.addEventListener('blur', apply); $('#fMaxPrice')?.addEventListener('blur', apply);
-    $('#hotelClearFiltersSide')?.addEventListener('click', () => { ['minPrice', 'maxPrice', 'minStarRating'].forEach(k => hotelSearchState[k] = ''); hotelSearchState.propertyType = []; hotelSearchState.amenities = []; hotelSearchState.freeCancellation = false; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); });
+    $('#fPriceSlider')?.addEventListener('input', () => { $('#fMaxPrice').value = $('#fPriceSlider').value; });
+    $('#fPriceSlider')?.addEventListener('change', apply);
+    $('#hotelClearFiltersSide')?.addEventListener('click', clearAll);
+    $('#hotelClearFiltersSide2')?.addEventListener('click', clearAll);
   };
   const renderHotelPagination = (r) => { const node = $('#hotelPagination'); if (r.pageCount <= 1) { node.innerHTML = ''; return; } node.innerHTML = `${r.page > 1 ? `<button class="btn btn-outline" data-page="${r.page - 1}">← Prev</button>` : ''}<span>Page ${r.page} of ${r.pageCount}</span>${r.page < r.pageCount ? `<button class="btn btn-outline" data-page="${r.page + 1}">Next →</button>` : ''}`; $$('[data-page]', node).forEach(b => b.addEventListener('click', () => { hotelSearchState.page = Number(b.dataset.page); publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); })); };
   $('#hotelSort').addEventListener('change', e => { hotelSearchState.sort = e.target.value; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); });
-  let modifyOpen = false;
-  $('#hotelModifyBtn').addEventListener('click', () => { modifyOpen = !modifyOpen; const slot = $('#hotelModifySlot'); if (modifyOpen) { slot.innerHTML = `<section class="public-page-card"><div class="hotel-landing-search">${hotelCompactSearchForm(search)}</div></section>`; bindHotelModifyForm(search); } else { slot.innerHTML = ''; } });
-  $('#hotelFiltersToggle').addEventListener('click', () => { const node = $('#hotelFilters'); openModal($('#genericModal')); $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-sliders')}</div><h2 id="modalTitle">Filters</h2></div><div id="mobileFiltersSlot"></div><button type="button" class="btn btn-primary full-btn" data-close-modal>Show results</button>`; const orig = node; $('#mobileFiltersSlot').innerHTML = orig.innerHTML; orig.style.display = 'none'; $$('#mobileFiltersSlot input').forEach(i => i.addEventListener('change', () => { const target = $(`#hotelFilters #${i.id}`) || $(`#hotelFilters [data-amenity="${i.dataset.amenity}"]`) || $(`#hotelFilters [data-ptype="${i.dataset.ptype}"]`) || $(`#hotelFilters [data-star="${i.dataset.star}"]`); if (target) target.checked = i.checked; })); $$('#modalContent [data-close-modal]').forEach(b => b.addEventListener('click', () => { closeModal($('#genericModal')); orig.style.display = ''; })); });
+  bindHotelModifyForm(search);
+  // Mobile/tablet: the live sidebar is MOVED into the sheet so there is a
+  // single source of truth — changes apply immediately through navigation,
+  // and the sidebar returns to its pane when the sheet closes.
+  const openFilterSheet = () => {
+    const node = $('#hotelFilters');
+    if (!node) return;
+    openModal($('#genericModal'));
+    $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-sliders')}</div><h2 id="modalTitle">Filters &amp; Sort</h2></div><div id="mobileFiltersSlot"></div><button type="button" class="btn btn-primary full-btn" data-close-modal>Show results</button>`;
+    $('#mobileFiltersSlot').appendChild(node);
+    $('#modalContent [data-close-modal]')?.addEventListener('click', () => { const pane = $('#hotelFiltersPane'); if (pane && !pane.contains(node)) pane.appendChild(node); });
+  };
+  $('#hotelFiltersToggle')?.addEventListener('click', openFilterSheet);
+  $('#hotelSheetFilters')?.addEventListener('click', openFilterSheet);
   await loadResults();
 }
 function roomSelectionFromStore(hotelId) { try { const raw = sessionStorage.getItem(HOTEL_CHECKOUT_KEY); const data = raw ? JSON.parse(raw) : null; return data && data.hotelId === hotelId ? data : null; } catch { return null; } }
@@ -1937,15 +1995,18 @@ async function renderHotelDetail(root, slug, query) {
   document.title = `${hotel.name} | Sadik Travels`;
   setSeo({ title: hotel.name, description: hotel.shortDescription || `${hotel.name} in ${hotel.city}. Book with Sadik Travels.`, canonical: `/hotels/${hotel.slug}`, image: hotel.images?.[0]?.url, jsonLd: { '@context': 'https://schema.org', '@type': 'Hotel', name: hotel.name, address: { '@type': 'PostalAddress', addressLocality: hotel.city, addressCountry: hotel.country }, starRating: { '@type': 'Rating', ratingValue: hotel.starRating }, ...(hotel.priceFrom ? { priceRange: `৳${hotel.priceFrom}` } : {}) } });
   trackAnalytics('hotel_view', { slug: hotel.slug, city: hotel.city });
-  const mainImg = hotel.images?.[0]?.url;
+  const images = hotel.images?.length ? hotel.images : [];
+  const mainImg = images[0]?.url || '';
+  const allSoldOut = Boolean((search.checkIn && search.checkOut) && hotel.rooms?.length && hotel.rooms.every(room => Number(room.available) <= 0));
   const selection = roomSelectionFromStore(hotel.id) || { hotelId: hotel.id, slug: hotel.slug, hotelName: hotel.name, hotelCity: hotel.city, hotelImage: mainImg, checkIn: search.checkIn, checkOut: search.checkOut, nights, rooms: [] };
   const renderDetail = () => {
     root.innerHTML = hotelBreadcrumb([{ label: 'Home', href: '/' }, { label: 'Hotels', href: '/hotels' }, { label: hotel.city, href: `/hotels/search?destination=${encodeURIComponent(hotel.city)}` }, { label: hotel.name, href: `/hotels/${hotel.slug}` }]) + `
       <div class="hotel-detail">
         <div class="hotel-detail-media">
-          <button class="hotel-detail-hero" data-gallery-open><img src="${escapeHtml(mainImg || '')}" alt="${escapeHtml(hotel.name)}" />${hotel.images?.length ? `<span class="hotel-detail-photos">${icon('i-images')} ${hotel.images.length} photo${hotel.images.length === 1 ? '' : 's'}</span>` : ''}</button>
-          <div class="hotel-detail-thumbs">${(hotel.images || []).slice(1, 5).map(img => `<button type="button" class="hotel-detail-thumb" data-thumb="${escapeHtml(img.url)}"><img src="${escapeHtml(img.url)}" alt="${escapeHtml(img.alt || hotel.name)}" loading="lazy" /></button>`).join('')}</div>
+          <button class="hotel-detail-hero" data-gallery-open ${images.length ? '' : 'disabled'}>${hotelImageTag(mainImg, hotel.name)}${images.length ? `<span class="hotel-detail-photos">${icon('i-images')} ${images.length} photo${images.length === 1 ? '' : 's'}</span>` : `<span class="hotel-detail-photos">${icon('i-images')} Photos coming soon</span>`}</button>
+          <div class="hotel-detail-thumbs">${images.slice(1, 4).map(img => `<button type="button" class="hotel-detail-thumb" data-thumb="${escapeHtml(img.url)}"><img src="${escapeHtml(img.url)}" alt="${escapeHtml(img.alt || hotel.name)}" loading="lazy" /></button>`).join('')}${images.length > 4 ? `<button type="button" class="hotel-detail-thumb hotel-detail-viewall" data-gallery-open>+${images.length - 4} more</button>` : images.length ? '' : `<div class="hotel-detail-thumb is-empty">${icon('i-images')}</div>`}</div>
         </div>
+        ${allSoldOut ? `<div class="hotel-soldout-banner">${icon('i-info')} Not available for the selected dates (${formatDate(search.checkIn)} → ${formatDate(search.checkOut)}). Try different dates or <a href="/hotels/search?${escapeHtml(hotelBuildUrl({ ...search, destination: hotel.city }))}" data-public-route="/hotels/search?${escapeHtml(hotelBuildUrl({ ...search, destination: hotel.city }))}">browse other hotels</a>.</div>` : ''}
         <div class="hotel-detail-info">
           <div class="hotel-detail-head">
             <div><div class="hotel-card-stars">${hotelStars(hotel.starRating)}</div><h1>${escapeHtml(hotel.name)}</h1><p class="hotel-card-loc">${icon('i-location')}${escapeHtml([hotel.address, hotel.area, hotel.city].filter(Boolean).join(', '))}</p></div>
@@ -1986,7 +2047,7 @@ async function renderHotelDetail(root, slug, query) {
     const img = room.images?.[0]?.url || hotel.images?.[0]?.url;
     const discountBadge = room.originalPrice && room.originalPrice > room.pricePerNight ? `<span class="room-discount">${Math.round((1 - room.pricePerNight / room.originalPrice) * 100)}% OFF</span>` : '';
     return `<article class="hotel-room-card${soldOut ? ' soldout' : ''}${selected ? ' selected' : ''}" data-room-id="${escapeHtml(room.id)}">
-      <div class="hotel-room-media">${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(room.name)}" loading="lazy" />` : `<div class="hotel-card-noimg">${icon('i-bed')}</div>`}</div>
+      <div class="hotel-room-media">${hotelImageTag(img, room.name)}</div>
       <div class="hotel-room-body">
         <div class="hotel-room-top">
           <div><h3>${escapeHtml(room.name)}</h3><p class="hotel-room-meta">${[room.size ? `${room.size} sq ft` : '', room.bedType, `${room.maxGuests} guest${room.maxGuests === 1 ? '' : 's'}`, room.numBeds ? `${room.numBeds} bed${room.numBeds === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}</p></div>
@@ -2101,7 +2162,7 @@ async function renderMyBookings(root) {
       <div class="bookings-list">${filtered.length ? filtered.map(b => {
         const href = `/booking/${b.id}`;
         return `<a class="booking-row" href="${escapeHtml(href)}" data-public-route="${escapeHtml(href)}">
-          <div class="booking-row-media">${b.hotelSnapshot?.image ? `<img src="${escapeHtml(b.hotelSnapshot.image)}" alt="" loading="lazy" />` : `<div class="hotel-card-noimg">${icon('i-hotel')}</div>`}</div>
+          <div class="booking-row-media">${hotelImageTag(b.hotelSnapshot?.image, booking?.hotelSnapshot?.name || '')}</div>
           <div class="booking-row-main"><strong>${escapeHtml(b.hotelSnapshot?.name || 'Hotel')}</strong><small>${escapeHtml(b.bookingNumber)} · ${formatDate(b.checkIn)} → ${formatDate(b.checkOut)}</small><span>${b.rooms.length} room${b.rooms.length > 1 ? 's' : ''} · ${hotelGuestsWord(b.rooms.reduce((s, r) => s + r.adults, 0), b.rooms.reduce((s, r) => s + r.children, 0))}</span></div>
           <div class="booking-row-side"><strong>${hotelMoney(b.priceBreakdown.total)}</strong><span class="hotel-status hotel-status-${escapeHtml(b.status)}">${escapeHtml(b.status.replace(/_/g, ' '))}</span></div>
         </a>`;

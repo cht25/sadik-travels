@@ -58,6 +58,39 @@ Every production storefront route works on refresh and direct access:
 Admin deep links render the same console shell, then a frontend route guard and
 backend middleware independently enforce the account’s assigned permission.
 
+### Hotel marketplace
+
+`src/hotel-store.ts` and `src/hotel-routes.ts` implement the public hotel
+marketplace:
+
+- **Images** — the canonical representation is
+  `hotel.images = [{ url, publicId?, mediaId?, alt? }]`. Admin uploads go to
+  Cloudinary through the media library; every save and every read passes
+  through `normalizeHotelImages`, which repairs legacy string rows, upgrades
+  insecure `http://` URLs, and drops empty entries — so an image URL in the
+  database is always a usable `https://` URL and a missing/failed image
+  renders the branded Sadik Travels placeholder, never a broken icon. The
+  first image is the primary photo (re-orderable from Admin → Hotel → Images
+  via "Make primary") and feeds listing cards, search results, the details
+  hero and booking snapshots. Replaced images get new Cloudinary public ids,
+  so guests always see the latest version without manual cache clearing.
+  Card and hero containers use fixed `aspect-ratio` boxes with
+  `object-fit: cover`, so unusual upload dimensions can never stretch the UI.
+- **Search & filters** — the public `/hotels/search` page derives its filter
+  options from live data (property types, areas, amenities, star levels and
+  price bounds are returned as facets by `GET /api/v1/hotels`). Filters are
+  server-side and combinable: multi property types (OR), multi areas (OR),
+  exact star levels (OR), amenities (AND), price band over the real lowest
+  bookable nightly price, guest score, free cancellation, name/area search,
+  and date-aware availability (hotels with no room for the selected dates are
+  hidden and flagged). Sorting: recommended, price ↑/↓, rating.
+- **Pricing & availability** — listing prices come from persisted room prices
+  (`priceFrom`), nightly seasonal discounts included. `POST
+  /api/v1/hotels/price-quote` and booking creation recalculate everything
+  server-side from the database (never trusting browser values), validate
+  occupancy against room capacity and atomically reserve per-date inventory
+  with rollback on overbooking.
+
 ## Commerce engine
 
 `src/commerce-store.ts` and `src/commerce-routes.ts` add the catalogue and
