@@ -1722,14 +1722,50 @@ const HOTEL_CHECKOUT_KEY = 'sadikHotelCheckout';
 const hotelSearchState = { destination: '', checkIn: '', checkOut: '', adults: 2, children: 0, rooms: 1, minPrice: '', maxPrice: '', minStarRating: '', starRatings: [], minGuestRating: '', area: '', areas: [], neighborhoods: [], propertyType: [], amenities: [], freeCancellation: false, sort: 'recommended', page: 1 };
 /* Branded fallback so a missing/failing image never renders as a broken icon. */
 const HOTEL_PLACEHOLDER = '/assets/hotel-placeholder.svg';
-const hotelImageSrc = (hotel) => hotel?.thumbnail || hotel?.images?.[0]?.url || hotel?.imageUrl || '';
+function extractImageUrl(entry) {
+  if (!entry) return '';
+  if (typeof entry === 'string') return entry.trim();
+  if (typeof entry === 'object') {
+    const obj = entry;
+    return (obj.url || obj.secureUrl || obj.secure_url || obj.imageUrl || obj.image_url || obj.src || obj.path || '').trim();
+  }
+  return '';
+}
+function hotelHasValidImage(hotel) {
+  if (!hotel) return false;
+  if (hotel.thumbnail && String(hotel.thumbnail).trim()) return true;
+  if (Array.isArray(hotel.images) && hotel.images.length) {
+    for (const img of hotel.images) {
+      const u = extractImageUrl(img);
+      if (u && /^(https?:\/\/|\/\/|data:image\/|\/)/i.test(u)) return true;
+    }
+  }
+  const fallback = extractImageUrl(hotel.imageUrl) || extractImageUrl(hotel.image) || extractImageUrl(hotel.heroImage);
+  return Boolean(fallback && /^(https?:\/\/|\/\/|data:image\/|\/)/i.test(fallback));
+}
+const hotelImageSrc = (hotel) => {
+  if (!hotel) return '';
+  if (hotel.thumbnail && String(hotel.thumbnail).trim()) return String(hotel.thumbnail).trim();
+  if (Array.isArray(hotel.images) && hotel.images.length) {
+    const first = extractImageUrl(hotel.images[0]);
+    if (first) return first;
+  }
+  return extractImageUrl(hotel.imageUrl) || extractImageUrl(hotel.image) || extractImageUrl(hotel.heroImage) || '';
+};
 const hotelNightsBetween = (checkIn, checkOut) => Math.max(1, Math.round((new Date(`${checkOut}T00:00:00`) - new Date(`${checkIn}T00:00:00`)) / 86400000));
-const hotelImageTag = (src, alt, attrs = '') => `<img src="${escapeHtml(src || HOTEL_PLACEHOLDER)}" alt="${escapeHtml(alt || '')}" loading="lazy" ${attrs} />`;
-/* CSP-safe global fallback: any hotel image that fails to load (deleted asset,
-   stale URL, offline file) is swapped for the branded placeholder exactly once. */
+const hotelImageTag = (src, alt, attrs = '') => {
+  const valid = src && String(src).trim() && !String(src).includes('hotel-placeholder');
+  if (!valid) {
+    return `<div class="hotel-img-fallback" role="img" aria-label="${escapeHtml(alt || 'Hotel image')}"><img src="${HOTEL_PLACEHOLDER}" alt="${escapeHtml(alt || '')}" loading="lazy" ${attrs} data-fallback-applied="1" /></div>`;
+  }
+  return `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt || '')}" loading="lazy" onerror="if(!this.dataset.fallbackApplied){this.dataset.fallbackApplied='1';this.src='${HOTEL_PLACEHOLDER}';}" ${attrs} />`;
+};
 document.addEventListener('error', event => {
   const img = event.target;
   if (!img || img.tagName !== 'IMG' || img.dataset.fallbackApplied) return;
+  if (!img.closest('.hotel-card, .hotel-detail, .booking-row, .receipt-card, .hs-card')) return;
+  const src = img.getAttribute('src') || '';
+  if (!src || src.includes('hotel-placeholder.svg')) return;
   img.dataset.fallbackApplied = '1';
   img.src = HOTEL_PLACEHOLDER;
 }, true);
@@ -1794,35 +1830,112 @@ function hotelGalleryModal(images, startIndex = 0) {
   const bindGallery = () => { $('#modalContent .gallery-prev')?.addEventListener('click', () => { index = (index - 1 + images.length) % images.length; render(); }); $('#modalContent .gallery-next')?.addEventListener('click', () => { index = (index + 1) % images.length; render(); }); $$('#modalContent [data-close-modal]').forEach(b => b.addEventListener('click', () => closeModal($('#genericModal')))); };
   openModal($('#genericModal')); render();
 }
-function hotelCompactSearchForm(values, onSubmitNavigate) {
+function hotelCompactSearchForm(values) {
   return `<form class="hotel-modify-form" id="hotelModifyForm">
     <div class="hotel-modify-grid">
-      <label class="hm-field"><span>Destination</span><input id="hmDestination" value="${escapeHtml(values.destination || '')}" placeholder="City or hotel" autocomplete="off" /><div class="hm-suggestions" id="hmSuggestions"></div></label>
-      <label class="hm-field"><span>Check-in</span><input id="hmCheckIn" type="date" value="${escapeHtml(values.checkIn || '')}" min="${isoDateFromToday(0)}" /></label>
-      <label class="hm-field"><span>Check-out</span><input id="hmCheckOut" type="date" value="${escapeHtml(values.checkOut || '')}" min="${isoDateFromToday(1)}" /></label>
-      <label class="hm-field"><span>Guests & rooms</span><input id="hmGuests" value="${escapeHtml(`${values.adults || 2} adults, ${values.children || 0} children, ${values.rooms || 1} room${(values.rooms || 1) > 1 ? 's' : ''}`)} readonly /></label>
+      <label class="hm-field hm-field-location"><span>${icon('i-location')} Location</span><input id="hmDestination" value="${escapeHtml(values.destination || '')}" placeholder="Cox's Bazar, Dhaka, Sylhet…" autocomplete="off" /><div class="hm-suggestions" id="hmSuggestions"></div></label>
+      <label class="hm-field"><span>${icon('i-calendar')} Check-in</span><input id="hmCheckIn" type="date" value="${escapeHtml(values.checkIn || '')}" min="${isoDateFromToday(0)}" /></label>
+      <label class="hm-field"><span>${icon('i-calendar')} Check-out</span><input id="hmCheckOut" type="date" value="${escapeHtml(values.checkOut || '')}" min="${isoDateFromToday(1)}" /></label>
+      <label class="hm-field hm-field-guests"><span>${icon('i-user')} Guests</span><input id="hmGuests" value="${escapeHtml(`${values.adults || 2} adults${(values.children || 0) ? `, ${values.children} children` : ''}`)}" readonly /></label>
+      <label class="hm-field hm-field-rooms"><span>${icon('i-bed')} Rooms</span><input id="hmRooms" value="${escapeHtml(`${values.rooms || 1} room${(values.rooms || 1) > 1 ? 's' : ''}`)}" readonly /></label>
+      <button type="submit" class="btn btn-primary hotel-search-btn">${icon('i-search')} Search</button>
     </div>
-    <button type="submit" class="btn btn-primary">${icon('i-search')} Update search</button>
   </form>`;
 }
 function bindHotelModifyForm(values) {
-  const form = $('#hotelModifyForm'); if (!form) return;
+  const form = $('#hotelModifyForm');
+  if (!form) return;
   let adults = values.adults || 2, children = values.children || 0, rooms = values.rooms || 1;
   const guestsInput = $('#hmGuests');
-  const updateGuests = () => { guestsInput.value = `${adults} adults, ${children} children, ${rooms} room${rooms > 1 ? 's' : ''}`; };
-  guestsInput?.addEventListener('click', () => { openModal($('#genericModal')); $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-user')}</div><h2 id="modalTitle">Guests & rooms</h2></div>${hotelStepper('Rooms', 'gRooms', rooms, 1, 8)}${hotelStepper('Adults', 'gAdults', adults, 1, 20)}${hotelStepper('Children', 'gChildren', children, 0, 10)}<button class="btn btn-primary full-btn" type="button" id="gDone">Done</button>`; const sync = () => { rooms = Number($('#gRooms').dataset.value); adults = Number($('#gAdults').dataset.value); children = Number($('#gChildren').dataset.value); }; $$('[data-step-target]').forEach(s => s.addEventListener('click', () => { const target = s.dataset.stepTarget; const dir = Number(s.dataset.dir); const map = { gRooms: [1, 8], gAdults: [1, 20], gChildren: [0, 10] }; const [min, max] = map[target]; let val = Number($(`#${target}`).dataset.value) + dir; val = Math.max(min, Math.min(max, val)); $(`#${target}`).dataset.value = val; $(`#${target}Val`).textContent = val; sync(); })); $('#gDone')?.addEventListener('click', () => { sync(); updateGuests(); closeModal($('#genericModal')); }); });
-  // destination autocomplete
-  const destInput = $('#hmDestination'); const sugg = $('#hmSuggestions'); let timer;
-  destInput?.addEventListener('input', () => { clearTimeout(timer); const q = destInput.value.trim(); if (q.length < 1) { sugg.classList.remove('open'); return; } timer = setTimeout(async () => { try { const r = await apiRequest(`/hotels/destinations?q=${encodeURIComponent(q)}`); sugg.innerHTML = (r.destinations || []).map(d => `<button type="button" class="hm-suggestion" data-city="${escapeHtml(d.city)}"><strong>${escapeHtml(d.city)}</strong><small>${escapeHtml(d.country)} · ${d.hotels} hotel${d.hotels === 1 ? '' : 's'}</small></button>`).join(''); sugg.classList.toggle('open', (r.destinations || []).length > 0); $$('.hm-suggestion', sugg).forEach(b => b.addEventListener('click', () => { destInput.value = b.dataset.city; sugg.classList.remove('open'); })); } catch {} }, 250); });
-  document.addEventListener('click', e => { if (!e.target.closest('#hmDestination') && !e.target.closest('#hmSuggestions')) sugg?.classList.remove('open'); });
-  form.addEventListener('submit', e => { e.preventDefault(); const ci = $('#hmCheckIn').value, co = $('#hmCheckOut').value; if (!ci || !co) { showToast('Select check-in and check-out dates.', 'error'); return; } if (co <= ci) { showToast('Check-out must be after check-in.', 'error'); return; } publicNavigate(`/hotels/search?${hotelBuildUrl({ destination: destInput.value.trim(), checkIn: ci, checkOut: co, adults, children, rooms })}`); });
+  const roomsInput = $('#hmRooms');
+  const updateGuests = () => {
+    if (guestsInput) guestsInput.value = `${adults} adults${children ? `, ${children} children` : ''}`;
+    if (roomsInput) roomsInput.value = `${rooms} room${rooms > 1 ? 's' : ''}`;
+  };
+  const openGuestModal = () => {
+    openModal($('#genericModal'));
+    $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-user')}</div><h2 id="modalTitle">Guests & rooms</h2><p>Select number of guests and rooms</p></div>
+      <div class="guest-modal-body">
+        ${hotelStepper('Rooms', 'gRooms', rooms, 1, 8)}
+        ${hotelStepper('Adults', 'gAdults', adults, 1, 20)}
+        ${hotelStepper('Children', 'gChildren', children, 0, 10)}
+      </div>
+      <button class="btn btn-primary full-btn" type="button" id="gDone">Done</button>`;
+    const sync = () => {
+      const rEl = document.getElementById('gRooms');
+      const aEl = document.getElementById('gAdults');
+      const cEl = document.getElementById('gChildren');
+      if (rEl) rooms = Number(rEl.dataset.value);
+      if (aEl) adults = Number(aEl.dataset.value);
+      if (cEl) children = Number(cEl.dataset.value);
+    };
+    $$('[data-step-target]').forEach(s => s.addEventListener('click', () => {
+      const target = s.dataset.stepTarget;
+      const dir = Number(s.dataset.dir);
+      const map = { gRooms: [1, 8], gAdults: [1, 20], gChildren: [0, 10] };
+      const [min, max] = map[target] || [0, 10];
+      const out = document.getElementById(target);
+      if (!out) return;
+      let val = Number(out.dataset.value) + dir;
+      val = Math.max(min, Math.min(max, val));
+      out.dataset.value = val;
+      const valEl = document.getElementById(target + 'Val');
+      if (valEl) valEl.textContent = val;
+      sync();
+    }));
+    $('#gDone')?.addEventListener('click', () => {
+      sync();
+      updateGuests();
+      closeModal($('#genericModal'));
+    });
+  };
+  guestsInput?.addEventListener('click', openGuestModal);
+  roomsInput?.addEventListener('click', openGuestModal);
+
+  const destInput = $('#hmDestination');
+  const sugg = $('#hmSuggestions');
+  let timer;
+  destInput?.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = destInput.value.trim();
+    if (q.length < 1) {
+      if (sugg) sugg.classList.remove('open');
+      return;
+    }
+    timer = setTimeout(async () => {
+      try {
+        const r = await apiRequest(`/hotels/destinations?q=${encodeURIComponent(q)}`);
+        if (!sugg) return;
+        sugg.innerHTML = (r.destinations || []).map(d => `<button type="button" class="hm-suggestion" data-city="${escapeHtml(d.city)}"><strong>${escapeHtml(d.city)}</strong><small>${escapeHtml(d.country)} · ${d.hotels} hotel${d.hotels === 1 ? '' : 's'}</small></button>`).join('');
+        sugg.classList.toggle('open', (r.destinations || []).length > 0);
+        $$('.hm-suggestion', sugg).forEach(b => b.addEventListener('click', () => {
+          destInput.value = b.dataset.city;
+          sugg.classList.remove('open');
+        }));
+      } catch {}
+    }, 250);
+  });
+  document.addEventListener('click', e => {
+    const target = e.target;
+    if (!target.closest || !target.closest('#hmDestination') && !target.closest('#hmSuggestions')) {
+      if (sugg) sugg.classList.remove('open');
+    }
+  });
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    const ci = $('#hmCheckIn')?.value, co = $('#hmCheckOut')?.value;
+    if (!ci || !co) { showToast('Select check-in and check-out dates.', 'error'); return; }
+    if (co <= ci) { showToast('Check-out must be after check-in.', 'error'); return; }
+    publicNavigate(`/hotels/search?${hotelBuildUrl({ destination: destInput?.value.trim() || '', checkIn: ci, checkOut: co, adults, children, rooms })}`);
+  });
 }
 function hotelStepper(label, id, value, min, max) {
   return `<div class="guest-stepper"><div><strong>${escapeHtml(label)}</strong></div><div class="stepper"><button type="button" data-step-target="${id}" data-dir="-1">−</button><output id="${id}" data-value="${value}"><span id="${id}Val">${value}</span></output><button type="button" data-step-target="${id}" data-dir="1">+</button></div></div>`;
 }
 function hotelCardHtml(hotel, search) {
   const img = hotelImageSrc(hotel);
-  const photoCount = hotel.images?.length || 0;
+  const hasRealImage = hotelHasValidImage(hotel);
+  const photoCount = Array.isArray(hotel.images) ? hotel.images.length : 0;
   const rating = hotel.guestRating || hotel.starRating || 0;
   const reviews = hotel.reviewCount || 0;
   const detailHref = `/hotels/${encodeURIComponent(hotel.slug)}?${hotelBuildUrl({ ...search, page: 1 })}`;
@@ -1831,20 +1944,22 @@ function hotelCardHtml(hotel, search) {
   const discountPct = hasDiscount ? Math.round((1 - hotel.priceFrom / hotel.originalPriceFrom) * 100) : 0;
   const datesSelected = Boolean(search?.checkIn && search?.checkOut);
   const soldOutForDates = datesSelected && Number(hotel.availableRooms) === 0;
-  return `<article class="hotel-card${soldOutForDates ? ' is-soldout' : ''}" data-hotel-slug="${escapeHtml(hotel.slug)}">
-    <a class="hotel-card-media" href="${escapeHtml(detailHref)}" data-public-route="${escapeHtml(detailHref)}" data-gallery="${escapeHtml(hotel.slug)}">
+  const loc = [hotel.area, hotel.city].filter(Boolean).join(', ');
+  return `<article class="hotel-card${soldOutForDates ? ' is-soldout' : ''}${hasRealImage ? ' has-real-image' : ' no-real-image'}" data-hotel-slug="${escapeHtml(hotel.slug)}">
+    <a class="hotel-card-media" href="${escapeHtml(detailHref)}" data-public-route="${escapeHtml(detailHref)}">
       ${hotelImageTag(img, hotel.name)}
-      ${photoCount > 1 ? `<span class="hotel-card-photos">${icon('i-images')} ${photoCount}</span>` : ''}
+      ${hasRealImage && photoCount > 1 ? `<span class="hotel-card-photos">${icon('i-images')} ${photoCount}</span>` : ''}
+      ${!hasRealImage ? `<span class="hotel-card-badge-soon">Photos coming soon</span>` : ''}
       ${soldOutForDates ? `<span class="hotel-card-soldout">Not available ${escapeHtml(hotelNightWord(hotelNightsBetween(search.checkIn, search.checkOut)))}</span>` : ''}
     </a>
     <div class="hotel-card-body">
       <div class="hotel-card-head">
-        <div>
+        <div class="hotel-card-maininfo">
           <div class="hotel-card-stars">${hotelStars(hotel.starRating)}</div>
           <h3 class="hotel-card-name">${escapeHtml(hotel.name)}</h3>
-          <p class="hotel-card-loc">${icon('i-location')}${escapeHtml([hotel.area, hotel.city].filter(Boolean).join(', '))}</p>
+          <p class="hotel-card-loc">${icon('i-location')}${escapeHtml(loc || hotel.city || '')}</p>
         </div>
-        ${reviews > 0 ? `<div class="hotel-card-rating"><strong>${Number(rating).toFixed(1)}</strong><small>${escapeHtml(hotelRatingLabel(rating))}</small><em>${reviews} review${reviews === 1 ? '' : 's'}</em></div>` : `<div class="hotel-card-rating new"><small>New property</small></div>`}
+        ${reviews > 0 ? `<div class="hotel-card-rating"><strong>${Number(rating).toFixed(1)}</strong><small>${escapeHtml(hotelRatingLabel(rating))}</small><em>${reviews} review${reviews === 1 ? '' : 's'}</em></div>` : `<div class="hotel-card-rating new"><small>New</small></div>`}
       </div>
       <div class="hotel-card-amenities">${amenities || '<span class="hotel-chip muted">Verified property</span>'}</div>
       <div class="hotel-card-foot">
@@ -1853,11 +1968,11 @@ function hotelCardHtml(hotel, search) {
             <div class="hotel-price-row">
               ${hasDiscount ? `<span class="hotel-price-old">${hotelMoney(hotel.originalPriceFrom)}</span><span class="hotel-price-badge">−${discountPct}%</span>` : ''}
               <strong>${hotelMoney(hotel.priceFrom)}<span>/ night</span></strong>
-            </div>` : '<small class="muted">Price on request</small>'}
+            </div>
+            <small class="hotel-price-per">per night</small>` : '<small class="muted">Price on request</small>'}
         </div>
         <div class="hotel-card-actions">
-          <a class="btn btn-outline hotel-card-btn" href="${escapeHtml(detailHref)}" data-public-route="${escapeHtml(detailHref)}">View details</a>
-          <a class="btn btn-primary hotel-card-btn" href="${escapeHtml(detailHref)}" data-public-route="${escapeHtml(detailHref)}">View rooms</a>
+          <a class="btn btn-primary hotel-card-btn" href="${escapeHtml(detailHref)}" data-public-route="${escapeHtml(detailHref)}">View</a>
         </div>
       </div>
     </div>
@@ -1865,78 +1980,221 @@ function hotelCardHtml(hotel, search) {
 }
 async function renderHotelLanding(root) {
   document.title = 'Hotels | Sadik Travels';
-  root.innerHTML = publicPageHeader('Stays', 'Hotels', 'Search and book verified hotels, resorts and apartments with Sadik Travels.', '') + `<section class="public-page-card"><div class="hotel-landing-search">${hotelCompactSearchForm({ destination: '', checkIn: isoDateFromToday(1), checkOut: isoDateFromToday(2), adults: 2, children: 0, rooms: 1 })}</div></section>`;
+  const defaultSearch = { destination: '', checkIn: isoDateFromToday(1), checkOut: isoDateFromToday(2), adults: 2, children: 0, rooms: 1 };
+  root.innerHTML = `
+    <div class="hotel-marketplace hotel-landing">
+      ${hotelBreadcrumb([{ label: 'Home', href: '/' }, { label: 'Hotels' }])}
+      <section class="public-page-card hotel-search-top">
+        <div class="hotel-top-search">
+          <h2 class="hotel-landing-title">Find your perfect stay</h2>
+          <p class="hotel-landing-sub">Verified hotels, resorts and apartments across Bangladesh with instant booking</p>
+          <div class="hotel-top-search-main">${hotelCompactSearchForm(defaultSearch)}</div>
+        </div>
+      </section>
+      <section class="public-page-card">
+        <div class="section-heading">
+          <div><span class="hs-eyebrow">${icon('i-hotel')} Featured hotels</span><h2>Popular stays</h2><p>A selection of published Sadik Travels properties with real photos and live pricing.</p></div>
+          <a class="btn btn-outline" href="/hotels/search" data-public-route="/hotels/search">View all hotels</a>
+        </div>
+        <div class="hotel-results-grid" id="hotelLandingGrid"><div class="public-public-loading"><span class="spinner"></span>Loading featured hotels…</div></div>
+      </section>
+    </div>`;
   wrapPublicRouteContent(root);
-  const page = root.querySelector('.page-container') || root;
-  bindHotelModifyForm({ destination: '', checkIn: isoDateFromToday(1), checkOut: isoDateFromToday(2), adults: 2, children: 0, rooms: 1 });
-  try { const r = await apiRequest('/hotels?pageSize=6'); const featured = r.hotels || []; page.insertAdjacentHTML('beforeend', `<section class="public-page-card"><div class="section-heading"><div><span class="hs-eyebrow">${icon('i-hotel')} Featured hotels</span><h2>Popular stays</h2><p>A selection of published Sadik Travels properties.</p></div></div><div class="hotel-results-grid">${featured.length ? featured.map(h => hotelCardHtml(h, { checkIn: isoDateFromToday(1), checkOut: isoDateFromToday(2), adults: 2, children: 0, rooms: 1 })).join('') : publicEmptyState('No hotels published yet', 'Hotels will appear here after an administrator adds and publishes them.', '<a class="btn btn-primary" href="/" data-public-route="/">Back home</a>')}</div></section>`); } catch (error) { page.insertAdjacentHTML('beforeend', `<section class="public-page-card">${publicErrorState(error?.status === 503 ? 'Hotel results are temporarily unavailable. Please try again in a moment.' : 'Unable to load hotel results. Please try again.')}</section>`); root.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute()); }
+  bindHotelModifyForm(defaultSearch);
+  try {
+    const r = await apiRequest('/hotels?pageSize=9&sort=recommended');
+    const featured = r.hotels || [];
+    const grid = document.getElementById('hotelLandingGrid');
+    if (!grid) return;
+    if (featured.length) {
+      grid.innerHTML = featured.map(h => hotelCardHtml(h, defaultSearch)).join('');
+    } else {
+      grid.innerHTML = publicEmptyState('No hotels published yet', 'Hotels will appear here after an administrator adds and publishes them.', '<a class="btn btn-primary" href="/" data-public-route="/">Back home</a>');
+    }
+  } catch (error) {
+    const grid = document.getElementById('hotelLandingGrid');
+    if (grid) grid.innerHTML = publicErrorState(error?.status === 503 ? 'Hotel results are temporarily unavailable. Please try again in a moment.' : 'Unable to load hotel results. Please try again.');
+    root.querySelector('[data-public-retry]')?.addEventListener('click', () => void renderPublicRoute());
+  }
 }
 async function renderHotelSearch(root, query) {
-  document.title = 'Hotel search | Sadik Travels';
-  const search = hotelReadQuery(query); Object.assign(hotelSearchState, search);
+  document.title = 'Hotels | Sadik Travels';
+  const search = hotelReadQuery(query);
+  Object.assign(hotelSearchState, search);
   const nights = Math.max(1, Math.round((new Date(`${search.checkOut}T00:00:00`) - new Date(`${search.checkIn}T00:00:00`)) / 86400000));
   trackAnalytics('search', { type: 'hotel', destination: search.destination, nights, adults: search.adults });
-  root.innerHTML = publicPageHeader('Stays', 'Hotels', 'Find your stay with Sadik Travels.', '') + `
-    <section class="public-page-card hotel-search-panel">
-      <div class="hotel-landing-search">${hotelCompactSearchForm(search)}</div>
-      <div class="hotel-search-meta"><span>${icon('i-calendar')} ${formatDate(search.checkIn)} → ${formatDate(search.checkOut)}</span><span>${hotelNightWord(nights)}</span><span>${search.rooms} room${search.rooms > 1 ? 's' : ''} · ${hotelGuestsWord(search.adults, search.children)}</span></div>
-    </section>
-    <div class="hotel-results-layout">
-      <aside class="hotel-filters" id="hotelFiltersPane"><div id="hotelFilters"><div class="public-public-loading"><span class="spinner"></span>Loading filters…</div></div></aside>
-      <div class="hotel-results-main">
-        <div class="hotel-results-toolbar">
-          <span id="hotelResultsCount" class="hotel-count">Searching…</span>
-          <div class="hotel-toolbar-right">
-            <button type="button" class="btn btn-outline hotel-filters-toggle" id="hotelFiltersToggle">${icon('i-sliders')} Filters</button>
-            <label class="hotel-sort">Sort <select id="hotelSort"><option value="recommended">Recommended</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option><option value="rating">Top rated</option></select></label>
+
+  // Professional marketplace layout: top search bar + left filters + right results grid
+  root.innerHTML = `
+    <div class="hotel-marketplace">
+      ${hotelBreadcrumb([{ label: 'Home', href: '/' }, { label: 'Hotels', href: '/hotels' }, { label: search.destination || 'All Hotels' }])}
+      <section class="public-page-card hotel-search-top">
+        <div class="hotel-top-search">
+          <div class="hotel-top-search-main">${hotelCompactSearchForm(search)}</div>
+          <div class="hotel-search-meta">
+            <span>${icon('i-calendar')} ${formatDate(search.checkIn)} → ${formatDate(search.checkOut)}</span>
+            <span>${hotelNightWord(nights)}</span>
+            <span>${search.rooms} room${search.rooms > 1 ? 's' : ''} · ${hotelGuestsWord(search.adults, search.children)}</span>
           </div>
         </div>
-        <div class="hotel-results-grid" id="hotelResultsGrid"><div class="public-public-loading"><span class="spinner"></span>Searching hotels…</div></div>
-        <div class="hotel-pagination" id="hotelPagination"></div>
+      </section>
+      <div class="hotel-results-layout">
+        <aside class="hotel-filters" id="hotelFiltersPane">
+          <div id="hotelFilters" class="hotel-filters-inner">
+            <div class="public-public-loading"><span class="spinner"></span>Loading filters…</div>
+          </div>
+        </aside>
+        <div class="hotel-results-main">
+          <div class="hotel-results-toolbar">
+            <div class="hotel-results-count">
+              <strong id="hotelResultsCount">Searching…</strong>
+              <small id="hotelResultsHint">Finding verified stays</small>
+            </div>
+            <div class="hotel-toolbar-right">
+              <button type="button" class="btn btn-outline hotel-filters-toggle" id="hotelFiltersToggle">${icon('i-sliders')} Filters</button>
+              <label class="hotel-sort"><span>Sort by</span>
+                <select id="hotelSort">
+                  <option value="recommended">Recommended</option>
+                  <option value="price_asc">Price: Low to High</option>
+                  <option value="price_desc">Price: High to Low</option>
+                  <option value="rating">Rating</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="hotel-results-grid" id="hotelResultsGrid">
+            ${Array.from({ length: 6 }, () => `<div class="hotel-card-skeleton"></div>`).join('')}
+          </div>
+          <div class="hotel-pagination" id="hotelPagination"></div>
+        </div>
       </div>
-    </div>
-    <div class="mobile-sheet" id="hotelMobileSheet"><div><small>Filters &amp; book</small><strong id="hotelSheetCount">Searching…</strong></div><div style="display:flex;gap:8px"><button type="button" class="btn btn-outline" id="hotelSheetFilters">Filters</button></div></div>`;
+      <div class="mobile-sheet" id="hotelMobileSheet"><div><small>Filters &amp; book</small><strong id="hotelSheetCount">Searching…</strong></div><div style="display:flex;gap:8px"><button type="button" class="btn btn-outline" id="hotelSheetFilters">Filters</button></div></div>
+    </div>`;
+
   wrapPublicRouteContent(root);
-  $('#hotelSort').value = search.sort;
+  const sortEl = $('#hotelSort');
+  if (sortEl) sortEl.value = search.sort;
+
   let facetData = { propertyTypes: [], areas: [], amenities: [], starRatings: [], priceBounds: {} };
+
   const loadResults = async () => {
-    const grid = $('#hotelResultsGrid'); grid.innerHTML = Array.from({ length: 4 }, () => `<div class="hotel-card-skeleton"></div>`).join('');
+    const grid = $('#hotelResultsGrid');
+    if (grid) grid.innerHTML = Array.from({ length: 6 }, () => `<div class="hotel-card-skeleton"></div>`).join('');
     try {
-      const params = { ...search, propertyType: search.propertyType, amenities: search.amenities };
-      const r = await apiRequest(`/hotels?${hotelBuildUrl(params)}`);
-      facetData = { propertyTypes: r.propertyTypes || [], cities: r.cities || [], areas: r.areas || [], amenities: r.amenities || [], starRatings: r.starRatings || [], priceBounds: r.priceBounds || {} };
-      const hint = $('#liveFilterHint'); if (hint) hint.textContent = `${r.total} stays`;
-      $('#hotelResultsCount').textContent = `${r.total} hotel${r.total === 1 ? '' : 's'} found`;
-      const sheet = $('#hotelSheetCount'); if (sheet) sheet.textContent = `${r.total} stay${r.total === 1 ? '' : 's'}`;
-      grid.innerHTML = r.hotels.length ? r.hotels.map(h => hotelCardHtml(h, search)).join('') : publicEmptyState('No hotels found', 'Try changing your dates, destination, or filters.', `<button class="btn btn-outline" id="hotelClearFilters">Clear filters</button>`);
+      const r = await apiRequest(`/hotels?${hotelBuildUrl(search)}`);
+      facetData = {
+        propertyTypes: r.propertyTypes || [],
+        cities: r.cities || [],
+        areas: r.areas || [],
+        amenities: r.amenities || [],
+        starRatings: r.starRatings || [],
+        priceBounds: r.priceBounds || {}
+      };
+      const countEl = $('#hotelResultsCount');
+      const hintEl = $('#hotelResultsHint');
+      const sheetEl = $('#hotelSheetCount');
+      if (countEl) countEl.textContent = `${r.total} ${r.total === 1 ? 'property' : 'properties'} found`;
+      if (hintEl) hintEl.textContent = search.destination ? `in ${search.destination}` : 'across Bangladesh';
+      if (sheetEl) sheetEl.textContent = `${r.total} stay${r.total === 1 ? '' : 's'}`;
+
+      if (grid) {
+        if (r.hotels.length) {
+          grid.innerHTML = r.hotels.map(h => hotelCardHtml(h, search)).join('');
+        } else {
+          grid.innerHTML = publicEmptyState('No hotels found', 'Try changing your dates, destination, or filters.', `<button class="btn btn-outline" type="button" id="hotelClearFilters">Clear filters</button>`);
+        }
+      }
+
       renderHotelPagination(r);
       renderHotelFilters(facetData);
-      $$('#hotelResultsGrid [data-gallery]').forEach(el => el.addEventListener('click', async e => { e.preventDefault(); try { const detail = await apiRequest(`/hotels/${encodeURIComponent(el.dataset.gallery)}`); hotelGalleryModal(detail.hotel.images); } catch {} }));
-      $('#hotelClearFilters')?.addEventListener('click', () => { ['minPrice', 'maxPrice', 'minStarRating', 'minGuestRating', 'q'].forEach(k => hotelSearchState[k] = ''); hotelSearchState.propertyType = []; hotelSearchState.amenities = []; hotelSearchState.starRatings = []; hotelSearchState.areas = []; hotelSearchState.neighborhoods = []; hotelSearchState.area = ''; hotelSearchState.freeCancellation = false; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); });
-    } catch (error) { grid.innerHTML = publicErrorState(error.message || 'Hotel search is unavailable. Please try again.'); }
+
+      const clearBtn = $('#hotelClearFilters');
+      if (clearBtn) clearBtn.addEventListener('click', () => {
+        Object.assign(hotelSearchState, { q: '', minPrice: '', maxPrice: '', minStarRating: '', minGuestRating: '', starRatings: [], propertyType: [], amenities: [], areas: [], neighborhoods: [], area: '', freeCancellation: false, page: 1, sort: 'recommended' });
+        publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`);
+      });
+    } catch (error) {
+      const grid = $('#hotelResultsGrid');
+      if (grid) grid.innerHTML = publicErrorState(error.message || 'Hotel search is unavailable. Please try again.');
+    }
   };
+
   const renderHotelFilters = (facets) => {
     const node = $('#hotelFilters');
-    const propertyTypes = facets.propertyTypes?.length ? facets.propertyTypes : [];
-    const areas = facets.areas?.length ? facets.areas : [];
-    const amenities = facets.amenities?.length ? facets.amenities : [];
-    const starOptions = facets.starRatings?.length ? facets.starRatings : [5, 4, 3, 2, 1];
+    if (!node) return;
+    const propertyTypes = facets.propertyTypes || [];
+    const areas = facets.areas || [];
+    const amenities = facets.amenities || [];
+    const starOptions = facets.starRatings?.length ? facets.starRatings : [5,4,3,2,1];
     const bounds = facets.priceBounds || {};
     const priceMaxBound = Number(bounds.max) > 0 ? Math.ceil(Number(bounds.max)) : 25000;
     const priceMinBound = Number(bounds.min) >= 0 ? Math.floor(Number(bounds.min)) : 0;
-    const anyFilterActive = Boolean(search.q || search.minPrice || search.maxPrice || search.starRatings?.length || search.minGuestRating || search.areas?.length || search.propertyType?.length || search.amenities?.length || search.freeCancellation);
-    node.innerHTML = `<div class="filter-head"><strong>Filters &amp; Sort</strong>${anyFilterActive ? '<button type="button" class="filter-clear" id="hotelClearFiltersSide">Clear All</button>' : ''}</div>
-      <div class="filter-group"><h4>Search hotel name / area</h4><input type="search" class="filter-search" id="fNameSearch" value="${escapeHtml(search.q || '')}" placeholder="e.g. Royal, Kolatoli…" /></div>
-      <div class="filter-group"><h4>Sort by</h4><div class="filter-checks">${[['recommended', 'Recommended'], ['price_asc', 'Price: Low to High'], ['price_desc', 'Price: High to Low'], ['rating', 'Rating']].map(([value, label]) => `<label class="check-pill"><input type="radio" name="fSort" data-sort-radio="${value}" ${search.sort === value ? 'checked' : ''} /><span>${label}</span></label>`).join('')}</div></div>
-      <div class="filter-group"><h4>Price / night <small class="filter-hint">BDT ${priceMinBound.toLocaleString('en-BD')} – ${priceMaxBound.toLocaleString('en-BD')}</small></h4><div class="filter-price"><label>Min<input type="number" id="fMinPrice" value="${escapeHtml(search.minPrice)}" placeholder="${priceMinBound}" min="0" /></label><label>Max<input type="number" id="fMaxPrice" value="${escapeHtml(search.maxPrice)}" placeholder="${priceMaxBound}" min="0" /></label></div><div class="range-wrap"><input type="range" id="fPriceSlider" min="${priceMinBound}" max="${priceMaxBound}" value="${escapeHtml(search.maxPrice || priceMaxBound)}" /></div></div>
-      ${propertyTypes.length ? `<div class="filter-group"><h4>Property type</h4><div class="filter-checks">${propertyTypes.map(t => `<label class="check-pill"><input type="checkbox" data-ptype="${escapeHtml(t)}" ${search.propertyType.includes(t) ? 'checked' : ''} /><span>${escapeHtml(t)}</span></label>`).join('')}</div></div>` : ''}
+    const anyActive = Boolean(search.q || search.minPrice || search.maxPrice || search.starRatings?.length || search.minGuestRating || search.areas?.length || search.propertyType?.length || search.amenities?.length || search.freeCancellation);
+
+    // Build star rating options with visual stars
+    const starMarkup = starOptions.map(stars => {
+      const checked = search.starRatings.includes(Number(stars)) ? 'checked' : '';
+      return `<label class="check-pill"><input type="checkbox" data-star="${stars}" ${checked} /><span>${hotelStars(stars)} ${stars} star${stars === 1 ? '' : 's'}</span></label>`;
+    }).join('') || [5,4,3,2,1].map(s => `<label class="check-pill"><input type="checkbox" data-star="${s}" ${search.starRatings.includes(s) ? 'checked' : ''} /><span>${hotelStars(s)} ${s}</span></label>`).join('');
+
+    node.innerHTML = `
+      <div class="filter-head">
+        <div class="filter-head-left"><strong>${icon('i-sliders')} Filters &amp; Sort</strong></div>
+        ${anyActive ? '<button type="button" class="filter-clear" id="hotelClearFiltersSide">Clear All</button>' : '<span class="filter-count">${facets.amenities?.length || 0} filters</span>'}
+      </div>
+
+      <div class="filter-group">
+        <h4>Search hotel name / area</h4>
+        <div class="filter-search-wrap">
+          <input type="search" class="filter-search" id="fNameSearch" value="${escapeHtml(search.q || '')}" placeholder="Hotel The Cox Today, Kolatoli…" />
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <h4>Property Type</h4>
+        <div class="filter-checks">
+          ${propertyTypes.length ? propertyTypes.map(t => `<label class="check-pill"><input type="checkbox" data-ptype="${escapeHtml(t)}" ${search.propertyType.includes(t) ? 'checked' : ''} /><span>${escapeHtml(t)}</span></label>`).join('') : ['Hotel','Resort','Apartment'].map(t => `<label class="check-pill"><input type="checkbox" data-ptype="${t}" ${search.propertyType.includes(t) ? 'checked' : ''} /><span>${t}</span></label>`).join('')}
+        </div>
+      </div>
+
       ${areas.length ? `<div class="filter-group"><h4>Area</h4><div class="filter-checks filter-scroll">${areas.map(a => `<label class="check-pill"><input type="checkbox" data-area="${escapeHtml(a)}" ${(search.areas || []).includes(a) || search.area === a ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>` : ''}
-      ${amenities.length ? `<div class="filter-group"><h4>Amenities</h4><div class="filter-checks filter-scroll">${amenities.map(a => `<label class="check-pill"><input type="checkbox" data-amenity="${escapeHtml(a)}" ${search.amenities.includes(a) ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>` : ''}
-      ${starOptions.length ? `<div class="filter-group"><h4>Star rating</h4><div class="filter-checks">${starOptions.map(stars => `<label class="check-pill"><input type="checkbox" data-star="${stars}" ${search.starRatings.includes(Number(stars)) ? 'checked' : ''} /><span>${hotelStars(stars)} ${stars} star${stars === 1 ? '' : 's'}</span></label>`).join('')}</div></div>` : ''}
-      <div class="filter-group"><h4>Guest score</h4><div class="filter-checks">${REVIEW_BUCKETS.map(b => `<label class="check-pill"><input type="radio" name="guestScore" data-score="${b.min}" ${Number(search.minGuestRating) === b.min ? 'checked' : ''} /><span>${escapeHtml(b.label)}</span></label>`).join('')}</div></div>
-      <div class="filter-group"><label class="check-pill"><input type="checkbox" id="fFreeCancel" ${search.freeCancellation ? 'checked' : ''} /><span>Free cancellation</span></label></div>
-      <button type="button" class="btn btn-outline full-btn" id="hotelClearFiltersSide2">Clear All</button>`;
-    const clearAll = () => { ['minPrice', 'maxPrice', 'minStarRating', 'minGuestRating', 'q'].forEach(k => hotelSearchState[k] = ''); hotelSearchState.propertyType = []; hotelSearchState.amenities = []; hotelSearchState.starRatings = []; hotelSearchState.areas = []; hotelSearchState.neighborhoods = []; hotelSearchState.area = ''; hotelSearchState.freeCancellation = false; hotelSearchState.sort = 'recommended'; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); };
+
+      ${amenities.length ? `<div class="filter-group"><h4>Amenities</h4><div class="filter-checks filter-scroll">${amenities.map(a => `<label class="check-pill"><input type="checkbox" data-amenity="${escapeHtml(a)}" ${search.amenities.includes(a) ? 'checked' : ''} /><span>${escapeHtml(a)}</span></label>`).join('')}</div></div>` : `<div class="filter-group"><h4>Amenities</h4><div class="filter-checks">${['Breakfast','Swimming Pool','Gym','WiFi','A/C','Restaurant','Parking'].map(a => `<label class="check-pill"><input type="checkbox" data-amenity="${a}" ${search.amenities.includes(a) ? 'checked' : ''} /><span>${a}</span></label>`).join('')}</div></div>`}
+
+      <div class="filter-group"><h4>Star Rating</h4><div class="filter-checks"><label class="check-pill"><input type="radio" name="starAll" data-star-all ${search.starRatings.length === 0 ? 'checked' : ''} /><span>All</span></label>${starMarkup}</div></div>
+
+      <div class="filter-group">
+        <h4>Price / Night <small class="filter-hint">BDT ${priceMinBound.toLocaleString('en-BD')} – ${priceMaxBound.toLocaleString('en-BD')}</small></h4>
+        <div class="filter-price">
+          <label><span>Minimum</span><input type="number" id="fMinPrice" value="${escapeHtml(search.minPrice)}" placeholder="${priceMinBound}" min="0" /></label>
+          <label><span>Maximum</span><input type="number" id="fMaxPrice" value="${escapeHtml(search.maxPrice)}" placeholder="${priceMaxBound}" min="0" /></label>
+        </div>
+        <div class="range-wrap">
+          <input type="range" id="fPriceSlider" min="${priceMinBound}" max="${priceMaxBound}" step="100" value="${escapeHtml(search.maxPrice || priceMaxBound)}" />
+          <div class="range-labels"><span>${priceMinBound.toLocaleString()}</span><span>${priceMaxBound.toLocaleString()}</span></div>
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <h4>Sort By</h4>
+        <div class="filter-checks">
+          ${[['recommended','Default'],['price_asc','Price: Low to High'],['price_desc','Price: High to Low'],['rating','Rating'],['recommended','Recommended']].slice(0,4).map(([value,label]) => `<label class="check-pill"><input type="radio" name="fSort" data-sort-radio="${value}" ${search.sort === value ? 'checked' : ''} /><span>${label}</span></label>`).join('')}
+        </div>
+      </div>
+
+      <div class="filter-group"><label class="check-pill"><input type="checkbox" id="fFreeCancel" ${search.freeCancellation ? 'checked' : ''} /><span>Free cancellation only</span></label></div>
+
+      <div class="filter-actions">
+        <button type="button" class="btn btn-primary full-btn" id="hotelApplyFilters">Apply Filters</button>
+        <button type="button" class="btn btn-outline full-btn" id="hotelClearFiltersSide2">Clear All</button>
+      </div>
+    `;
+
+    const clearAll = () => {
+      Object.assign(hotelSearchState, { q: '', minPrice: '', maxPrice: '', minStarRating: '', minGuestRating: '', starRatings: [], propertyType: [], amenities: [], areas: [], neighborhoods: [], area: '', freeCancellation: false, page: 1, sort: 'recommended' });
+      publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`);
+    };
+
     const apply = () => {
       hotelSearchState.q = $('#fNameSearch')?.value.trim() || '';
       hotelSearchState.minPrice = $('#fMinPrice')?.value || '';
@@ -1944,38 +2202,88 @@ async function renderHotelSearch(root, query) {
       hotelSearchState.propertyType = $$('[data-ptype]:checked').map(i => i.dataset.ptype);
       hotelSearchState.amenities = $$('[data-amenity]:checked').map(i => i.dataset.amenity);
       hotelSearchState.starRatings = $$('[data-star]:checked').map(i => Number(i.dataset.star));
+      const allChecked = $('[data-star-all]')?.checked;
+      if (allChecked) hotelSearchState.starRatings = [];
       hotelSearchState.areas = $$('[data-area]:checked').map(i => i.dataset.area);
       hotelSearchState.neighborhoods = [];
       hotelSearchState.area = '';
-      hotelSearchState.minGuestRating = $$('[data-score]:checked')[0]?.dataset.score || '';
+      const scoreEl = $$('[data-score]:checked')[0];
+      hotelSearchState.minGuestRating = scoreEl?.dataset.score || '';
       hotelSearchState.freeCancellation = $('#fFreeCancel')?.checked || false;
       hotelSearchState.sort = $$('[data-sort-radio]:checked')[0]?.dataset.sortRadio || hotelSearchState.sort || 'recommended';
       hotelSearchState.page = 1;
       publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`);
     };
+
     let nameTimer;
-    $('#fNameSearch')?.addEventListener('input', () => { clearTimeout(nameTimer); nameTimer = setTimeout(apply, 350); });
-    node.querySelectorAll('input[type=checkbox], input[type=number], input[type=radio], input[type=range]').forEach(i => i.addEventListener('change', apply));
-    $('#fMinPrice')?.addEventListener('blur', apply); $('#fMaxPrice')?.addEventListener('blur', apply);
-    $('#fPriceSlider')?.addEventListener('input', () => { $('#fMaxPrice').value = $('#fPriceSlider').value; });
+    $('#fNameSearch')?.addEventListener('input', () => { clearTimeout(nameTimer); nameTimer = setTimeout(apply, 400); });
+    node.querySelectorAll('input[type=checkbox], input[type=radio]').forEach(i => i.addEventListener('change', apply));
+    $('#fMinPrice')?.addEventListener('change', apply);
+    $('#fMaxPrice')?.addEventListener('change', apply);
+    $('#fPriceSlider')?.addEventListener('input', () => {
+      const maxInput = $('#fMaxPrice');
+      const slider = $('#fPriceSlider');
+      if (maxInput && slider) maxInput.value = slider.value;
+    });
     $('#fPriceSlider')?.addEventListener('change', apply);
     $('#hotelClearFiltersSide')?.addEventListener('click', clearAll);
     $('#hotelClearFiltersSide2')?.addEventListener('click', clearAll);
+    $('#hotelApplyFilters')?.addEventListener('click', apply);
+    const starAll = $('[data-star-all]');
+    if (starAll) starAll.addEventListener('change', () => {
+      if (starAll.checked) {
+        $$('[data-star]').forEach(cb => cb.checked = false);
+        apply();
+      }
+    });
   };
-  const renderHotelPagination = (r) => { const node = $('#hotelPagination'); if (r.pageCount <= 1) { node.innerHTML = ''; return; } node.innerHTML = `${r.page > 1 ? `<button class="btn btn-outline" data-page="${r.page - 1}">← Prev</button>` : ''}<span>Page ${r.page} of ${r.pageCount}</span>${r.page < r.pageCount ? `<button class="btn btn-outline" data-page="${r.page + 1}">Next →</button>` : ''}`; $$('[data-page]', node).forEach(b => b.addEventListener('click', () => { hotelSearchState.page = Number(b.dataset.page); publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); })); };
-  $('#hotelSort').addEventListener('change', e => { hotelSearchState.sort = e.target.value; hotelSearchState.page = 1; publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`); });
+
+  const renderHotelPagination = (r) => {
+    const node = $('#hotelPagination');
+    if (!node) return;
+    if (r.pageCount <= 1) { node.innerHTML = ''; return; }
+    node.innerHTML = `<div class="pagination-inner">${r.page > 1 ? `<button class="btn btn-outline" data-page="${r.page - 1}">← Prev</button>` : ''}<span class="page-info">Page ${r.page} of ${r.pageCount} · ${r.total} properties</span>${r.page < r.pageCount ? `<button class="btn btn-outline" data-page="${r.page + 1}">Next →</button>` : ''}</div>`;
+    $$('[data-page]', node).forEach(b => b.addEventListener('click', () => {
+      hotelSearchState.page = Number(b.dataset.page);
+      publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`);
+    }));
+  };
+
+  const sortElTop = $('#hotelSort');
+  if (sortElTop) sortElTop.addEventListener('change', e => {
+    hotelSearchState.sort = e.target.value;
+    hotelSearchState.page = 1;
+    publicNavigate(`/hotels/search?${hotelBuildUrl(hotelSearchState)}`);
+  });
+
   bindHotelModifyForm(search);
-  // Mobile/tablet: the live sidebar is MOVED into the sheet so there is a
-  // single source of truth — changes apply immediately through navigation,
-  // and the sidebar returns to its pane when the sheet closes.
+
   const openFilterSheet = () => {
     const node = $('#hotelFilters');
     if (!node) return;
     openModal($('#genericModal'));
-    $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-sliders')}</div><h2 id="modalTitle">Filters &amp; Sort</h2></div><div id="mobileFiltersSlot"></div><button type="button" class="btn btn-primary full-btn" data-close-modal>Show results</button>`;
-    $('#mobileFiltersSlot').appendChild(node);
-    $('#modalContent [data-close-modal]')?.addEventListener('click', () => { const pane = $('#hotelFiltersPane'); if (pane && !pane.contains(node)) pane.appendChild(node); });
+    $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-sliders')}</div><h2 id="modalTitle">Filters &amp; Sort</h2></div><div id="mobileFiltersSlot"></div><div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="btn btn-primary full-btn" data-close-modal>Show results</button></div>`;
+    const slot = $('#mobileFiltersSlot');
+    if (slot) slot.appendChild(node);
+    const closeBtn = $('#modalContent [data-close-modal]');
+    if (closeBtn) closeBtn.addEventListener('click', () => {
+      const pane = $('#hotelFiltersPane');
+      if (pane && !pane.contains(node)) pane.appendChild(node);
+    });
+    // Also restore on modal backdrop click
+    const modal = $('#genericModal');
+    if (modal) {
+      const observer = new MutationObserver(() => {
+        if (modal.hidden) {
+          const pane = $('#hotelFiltersPane');
+          if (pane && !pane.contains(node)) pane.appendChild(node);
+          observer.disconnect();
+        }
+      });
+      observer.observe(modal, { attributes: true, attributeFilter: ['hidden'] });
+    }
   };
+
   $('#hotelFiltersToggle')?.addEventListener('click', openFilterSheet);
   $('#hotelSheetFilters')?.addEventListener('click', openFilterSheet);
   await loadResults();
@@ -1989,102 +2297,361 @@ async function renderHotelDetail(root, slug, query) {
   const nights = Math.max(1, Math.round((new Date(`${search.checkOut}T00:00:00`) - new Date(`${search.checkIn}T00:00:00`)) / 86400000));
   root.innerHTML = publicLoading();
   let hotel;
-  try { hotel = (await apiRequest(`/hotels/${encodeURIComponent(slug)}?checkIn=${encodeURIComponent(search.checkIn)}&checkOut=${encodeURIComponent(search.checkOut)}`)).hotel; }
-  catch { root.innerHTML = publicErrorState('The requested hotel was not found.'); return; }
-  if (!hotel) { root.innerHTML = publicErrorState('The requested hotel was not found.'); return; }
+  try {
+    hotel = (await apiRequest(`/hotels/${encodeURIComponent(slug)}?checkIn=${encodeURIComponent(search.checkIn)}&checkOut=${encodeURIComponent(search.checkOut)}`)).hotel;
+  } catch (err) {
+    root.innerHTML = publicErrorState(err?.status === 404 ? 'The requested hotel was not found.' : (err.message || 'Unable to load hotel.'));
+    return;
+  }
+  if (!hotel) {
+    root.innerHTML = publicErrorState('The requested hotel was not found.');
+    return;
+  }
   document.title = `${hotel.name} | Sadik Travels`;
-  setSeo({ title: hotel.name, description: hotel.shortDescription || `${hotel.name} in ${hotel.city}. Book with Sadik Travels.`, canonical: `/hotels/${hotel.slug}`, image: hotel.images?.[0]?.url, jsonLd: { '@context': 'https://schema.org', '@type': 'Hotel', name: hotel.name, address: { '@type': 'PostalAddress', addressLocality: hotel.city, addressCountry: hotel.country }, starRating: { '@type': 'Rating', ratingValue: hotel.starRating }, ...(hotel.priceFrom ? { priceRange: `৳${hotel.priceFrom}` } : {}) } });
+  const firstImgForSeo = hotel.thumbnail || (hotel.images && hotel.images[0] ? extractImageUrl(hotel.images[0]) : '') || '';
+  setSeo({
+    title: hotel.name,
+    description: hotel.shortDescription || `${hotel.name} in ${hotel.city}. Book with Sadik Travels.`,
+    canonical: `/hotels/${hotel.slug}`,
+    image: firstImgForSeo,
+    jsonLd: {
+      '@context': 'https://schema.org',
+      '@type': 'Hotel',
+      name: hotel.name,
+      address: { '@type': 'PostalAddress', addressLocality: hotel.city, addressCountry: hotel.country },
+      starRating: { '@type': 'Rating', ratingValue: hotel.starRating },
+      ...(hotel.priceFrom ? { priceRange: `BDT ${hotel.priceFrom}` } : {})
+    }
+  });
   trackAnalytics('hotel_view', { slug: hotel.slug, city: hotel.city });
-  const images = hotel.images?.length ? hotel.images : [];
-  const mainImg = images[0]?.url || '';
+
+  // Canonical image handling — use real images only, fallback only when genuinely missing
+  const rawImages = Array.isArray(hotel.images) ? hotel.images : [];
+  const normalizedImages = rawImages.map(img => {
+    const url = extractImageUrl(img);
+    return url ? { url, alt: img.alt || hotel.name } : null;
+  }).filter(Boolean);
+  // Also include thumbnail if it is not already in images
+  const thumbUrl = hotel.thumbnail ? String(hotel.thumbnail).trim() : '';
+  if (thumbUrl && !normalizedImages.some(i => i.url === thumbUrl)) {
+    normalizedImages.unshift({ url: thumbUrl, alt: hotel.name });
+  }
+  const hasImages = normalizedImages.length > 0;
+  const mainImg = hasImages ? normalizedImages[0].url : '';
+  const secondaryImages = normalizedImages.slice(1);
+
   const allSoldOut = Boolean((search.checkIn && search.checkOut) && hotel.rooms?.length && hotel.rooms.every(room => Number(room.available) <= 0));
-  const selection = roomSelectionFromStore(hotel.id) || { hotelId: hotel.id, slug: hotel.slug, hotelName: hotel.name, hotelCity: hotel.city, hotelImage: mainImg, checkIn: search.checkIn, checkOut: search.checkOut, nights, rooms: [] };
+  const selection = roomSelectionFromStore(hotel.id) || {
+    hotelId: hotel.id,
+    slug: hotel.slug,
+    hotelName: hotel.name,
+    hotelCity: hotel.city,
+    hotelImage: mainImg,
+    checkIn: search.checkIn,
+    checkOut: search.checkOut,
+    nights,
+    rooms: []
+  };
+
   const renderDetail = () => {
-    root.innerHTML = hotelBreadcrumb([{ label: 'Home', href: '/' }, { label: 'Hotels', href: '/hotels' }, { label: hotel.city, href: `/hotels/search?destination=${encodeURIComponent(hotel.city)}` }, { label: hotel.name, href: `/hotels/${hotel.slug}` }]) + `
-      <div class="hotel-detail">
-        <div class="hotel-detail-media">
-          <button class="hotel-detail-hero" data-gallery-open ${images.length ? '' : 'disabled'}>${hotelImageTag(mainImg, hotel.name)}${images.length ? `<span class="hotel-detail-photos">${icon('i-images')} ${images.length} photo${images.length === 1 ? '' : 's'}</span>` : `<span class="hotel-detail-photos">${icon('i-images')} Photos coming soon</span>`}</button>
-          <div class="hotel-detail-thumbs">${images.slice(1, 4).map(img => `<button type="button" class="hotel-detail-thumb" data-thumb="${escapeHtml(img.url)}"><img src="${escapeHtml(img.url)}" alt="${escapeHtml(img.alt || hotel.name)}" loading="lazy" /></button>`).join('')}${images.length > 4 ? `<button type="button" class="hotel-detail-thumb hotel-detail-viewall" data-gallery-open>+${images.length - 4} more</button>` : images.length ? '' : `<div class="hotel-detail-thumb is-empty">${icon('i-images')}</div>`}</div>
+    const breadcrumbTrail = [
+      { label: 'Home', href: '/' },
+      { label: 'Hotels', href: '/hotels' },
+      { label: hotel.city || "Cox's Bazar", href: `/hotels/search?destination=${encodeURIComponent(hotel.city || '')}` },
+      { label: hotel.name }
+    ];
+
+    // Gallery layout logic per requirements
+    let galleryHtml = '';
+    if (!hasImages) {
+      galleryHtml = `
+        <div class="hotel-gallery hotel-gallery-empty">
+          <div class="hotel-gallery-main hotel-gallery-fallback-main">
+            <img src="${HOTEL_PLACEHOLDER}" alt="${escapeHtml(hotel.name)}" />
+            <div class="gallery-fallback-text"><strong>SADIK TRAVELS</strong><span>PROPERTY IMAGE COMING SOON</span></div>
+          </div>
+        </div>`;
+    } else if (normalizedImages.length === 1) {
+      galleryHtml = `
+        <div class="hotel-gallery hotel-gallery-single">
+          <button class="hotel-gallery-main" data-gallery-open type="button" aria-label="View photo">
+            <img src="${escapeHtml(mainImg)}" alt="${escapeHtml(hotel.name)}" loading="eager" />
+            <span class="hotel-gallery-count">${icon('i-images')} 1 photo</span>
+          </button>
+        </div>`;
+    } else if (normalizedImages.length === 2) {
+      galleryHtml = `
+        <div class="hotel-gallery hotel-gallery-two">
+          <button class="hotel-gallery-main" data-gallery-open type="button" aria-label="View photos">
+            <img src="${escapeHtml(mainImg)}" alt="${escapeHtml(hotel.name)}" loading="eager" />
+            <span class="hotel-gallery-count">${icon('i-images')} ${normalizedImages.length} photos</span>
+          </button>
+          <div class="hotel-gallery-side">
+            <button class="hotel-gallery-side-item" data-thumb="${escapeHtml(secondaryImages[0].url)}" type="button"><img src="${escapeHtml(secondaryImages[0].url)}" alt="" loading="lazy" /></button>
+          </div>
+        </div>`;
+    } else {
+      // 3+ images: main + 2 side + view all
+      const sideItems = secondaryImages.slice(0, 2).map((img, idx) => `
+        <button class="hotel-gallery-side-item" data-thumb="${escapeHtml(img.url)}" data-index="${idx+1}" type="button"><img src="${escapeHtml(img.url)}" alt="" loading="lazy" /></button>
+      `).join('');
+      const extraCount = normalizedImages.length - 3;
+      galleryHtml = `
+        <div class="hotel-gallery hotel-gallery-multi">
+          <button class="hotel-gallery-main" data-gallery-open type="button" aria-label="View all photos">
+            <img src="${escapeHtml(mainImg)}" alt="${escapeHtml(hotel.name)}" loading="eager" />
+            <span class="hotel-gallery-count">${icon('i-images')} ${normalizedImages.length} photos</span>
+          </button>
+          <div class="hotel-gallery-side">
+            ${sideItems}
+            ${extraCount > 0 ? `<button class="hotel-gallery-side-item hotel-gallery-viewall" data-gallery-open type="button"><span>+${extraCount} more</span><small>View all photos</small></button>` : ''}
+          </div>
+        </div>`;
+    }
+
+    const amenitiesHtml = (hotel.amenities && hotel.amenities.length) ? `
+      <section class="hotel-section hotel-amenities-section">
+        <h2>Property Amenities</h2>
+        <div class="amenity-grid">
+          ${hotel.amenities.map(a => `<span class="amenity-item">${icon('i-check')} ${escapeHtml(a)}</span>`).join('')}
         </div>
-        ${allSoldOut ? `<div class="hotel-soldout-banner">${icon('i-info')} Not available for the selected dates (${formatDate(search.checkIn)} → ${formatDate(search.checkOut)}). Try different dates or <a href="/hotels/search?${escapeHtml(hotelBuildUrl({ ...search, destination: hotel.city }))}" data-public-route="/hotels/search?${escapeHtml(hotelBuildUrl({ ...search, destination: hotel.city }))}">browse other hotels</a>.</div>` : ''}
-        <div class="hotel-detail-info">
-          <div class="hotel-detail-head">
-            <div><div class="hotel-card-stars">${hotelStars(hotel.starRating)}</div><h1>${escapeHtml(hotel.name)}</h1><p class="hotel-card-loc">${icon('i-location')}${escapeHtml([hotel.address, hotel.area, hotel.city].filter(Boolean).join(', '))}</p></div>
-            ${(hotel.reviewCount || 0) > 0 ? `<div class="hotel-card-rating"><strong>${Number(hotel.guestRating || hotel.starRating || 0).toFixed(1)}</strong><small>${escapeHtml(hotelRatingLabel(hotel.guestRating || hotel.starRating))}</small><em>${hotel.reviewCount} review${hotel.reviewCount === 1 ? '' : 's'}</em></div>` : '<div class="hotel-card-rating new"><small>New property</small></div>'}
-          </div>
-          <div class="hotel-quick-facts">
-            <span>${icon('i-tag')} ${escapeHtml(hotel.propertyType || 'Hotel')}</span>
-            ${hotel.checkInTime ? `<span>${icon('i-clock')} Check-in ${escapeHtml(hotel.checkInTime)}</span>` : ''}
-            ${hotel.checkOutTime ? `<span>${icon('i-clock')} Check-out ${escapeHtml(hotel.checkOutTime)}</span>` : ''}
-          </div>
-          ${hotel.amenities?.length ? `<div class="hotel-detail-amenities"><h3>Property amenities</h3><div class="amenity-grid">${hotel.amenities.map(a => `<span>${icon('i-check')} ${escapeHtml(a)}</span>`).join('')}</div></div>` : ''}
-          ${hotel.description ? `<div class="hotel-detail-section"><h3>About this property</h3><p>${escapeHtml(hotel.description)}</p></div>` : ''}
-          ${hotel.shortDescription && !hotel.description ? `<div class="hotel-detail-section"><h3>About this property</h3><p>${escapeHtml(hotel.shortDescription)}</p></div>` : ''}
-          ${hotel.cancellationPolicy ? `<div class="hotel-detail-section"><h3>Cancellation policy</h3><p>${escapeHtml(hotel.cancellationPolicy.type === 'free' ? `Free cancellation${hotel.cancellationPolicy.freeUntilDays ? ` up to ${hotel.cancellationPolicy.freeUntilDays} day${hotel.cancellationPolicy.freeUntilDays === 1 ? '' : 's'} before check-in` : ''}.` : 'Non-refundable.')}${hotel.cancellationPolicy.description ? ` ${escapeHtml(hotel.cancellationPolicy.description)}` : ''}</p></div>` : ''}
-          <div class="hotel-detail-section hotel-chat-cta">
-            <button type="button" class="btn btn-outline" data-chat-hotel>${icon('i-headset')} Chat with ${escapeHtml(hotel.name)}</button>
-            <small>Live messages with the property team — replies arrive instantly.</small>
-          </div>
-          ${(hotel.phone || hotel.email || hotel.website) ? `<div class="hotel-detail-section"><h3>Contact the property</h3><div class="hotel-contact-row">${hotel.phone ? `<a href="tel:${escapeHtml(hotel.phone.replace(/[^+\d]/g, ''))}">${icon('i-phone')}${escapeHtml(hotel.phone)}</a>` : ''}${hotel.email ? `<a href="mailto:${escapeHtml(hotel.email)}">${icon('i-mail')}${escapeHtml(hotel.email)}</a>` : ''}${hotel.website ? `<a href="${escapeHtml(hotel.website)}" target="_blank" rel="noopener">${icon('i-globe')}Website</a>` : ''}</div></div>` : ''}
-          ${hotel.latitude && hotel.longitude ? `<div class="hotel-detail-section"><h3>Location</h3><div class="hotel-map"><iframe title="Map of ${escapeHtml(hotel.name)}" loading="lazy" src="https://www.openstreetmap.org/export/embed.html?bbox=${Number(hotel.longitude) - 0.01}%2C${Number(hotel.latitude) - 0.008}%2C${Number(hotel.longitude) + 0.01}%2C${Number(hotel.latitude) + 0.008}&amp;layer=mapnik&amp;marker=${Number(hotel.latitude)}%2C${Number(hotel.longitude)}"></iframe></div></div>` : ''}
-        </div>
-        <section class="hotel-rooms-section" id="rooms">
-          <div class="section-heading"><div><span class="hs-eyebrow">${icon('i-bed')} Availability</span><h2>Choose your room</h2><p>${formatDate(search.checkIn)} → ${formatDate(search.checkOut)} · ${hotelNightWord(nights)} · ${hotelGuestsWord(search.adults, search.children)}</p></div></div>
-          <div class="hotel-rooms-grid" id="hotelRoomsGrid">${hotel.rooms.map(room => hotelRoomCardHtml(room, hotel, selection)).join('')}</div>
-        </section>
-        <section class="hotel-similar-section" id="similar">
-          <div class="section-heading"><div><span class="hs-eyebrow">${icon('i-hotel')} More stays</span><h2>Similar hotels</h2><p>Other properties travellers also look at in ${escapeHtml(hotel.city)}.</p></div></div>
-          <div class="hotel-results-grid" id="hotelSimilarGrid"><div class="public-public-loading"><span class="spinner"></span>Loading similar hotels…</div></div>
-        </section>
+      </section>` : '';
+
+    const descriptionHtml = hotel.description ? `<section class="hotel-section"><h2>About This Property</h2><div class="hotel-prose"><p>${escapeHtml(hotel.description).replace(/\n/g, '<br />')}</p></div></section>` :
+      hotel.shortDescription ? `<section class="hotel-section"><h2>About This Property</h2><div class="hotel-prose"><p>${escapeHtml(hotel.shortDescription)}</p></div></section>` : '';
+
+    const checkInOutHtml = `
+      <div class="hotel-checkinout">
+        ${hotel.checkInTime ? `<div class="check-item"><small>Check-in</small><strong>${escapeHtml(hotel.checkInTime)}</strong></div>` : ''}
+        ${hotel.checkOutTime ? `<div class="check-item"><small>Check-out</small><strong>${escapeHtml(hotel.checkOutTime)}</strong></div>` : ''}
       </div>`;
+
+    const contactHtml = (hotel.phone || hotel.email || hotel.website) ? `
+      <section class="hotel-section">
+        <h3>Contact the property</h3>
+        <div class="hotel-contact-row">
+          ${hotel.phone ? `<a href="tel:${escapeHtml(hotel.phone.replace(/[^+\d]/g, ''))}" class="contact-chip">${icon('i-phone')}${escapeHtml(hotel.phone)}</a>` : ''}
+          ${hotel.email ? `<a href="mailto:${escapeHtml(hotel.email)}" class="contact-chip">${icon('i-mail')}${escapeHtml(hotel.email)}</a>` : ''}
+          ${hotel.website ? `<a href="${escapeHtml(hotel.website)}" target="_blank" rel="noopener" class="contact-chip">${icon('i-globe')}Website</a>` : ''}
+        </div>
+      </section>` : '';
+
+    const locationHtml = (hotel.latitude && hotel.longitude) ? `
+      <section class="hotel-section">
+        <h3>Location</h3>
+        <div class="hotel-map">
+          <iframe title="Map of ${escapeHtml(hotel.name)}" loading="lazy" src="https://www.openstreetmap.org/export/embed.html?bbox=${Number(hotel.longitude) - 0.01}%2C${Number(hotel.latitude) - 0.008}%2C${Number(hotel.longitude) + 0.01}%2C${Number(hotel.latitude) + 0.008}&amp;layer=mapnik&amp;marker=${Number(hotel.latitude)}%2C${Number(hotel.longitude)}"></iframe>
+          <p class="hotel-address">${escapeHtml([hotel.address, hotel.area, hotel.city, hotel.country].filter(Boolean).join(', '))}</p>
+        </div>
+      </section>` : '';
+
+    root.innerHTML = `
+      <div class="hotel-detail-page">
+        ${hotelBreadcrumb(breadcrumbTrail)}
+
+        ${galleryHtml}
+
+        ${allSoldOut ? `<div class="hotel-soldout-banner">${icon('i-info')} Not available for the selected dates (${formatDate(search.checkIn)} → ${formatDate(search.checkOut)}). Try different dates or <a href="/hotels/search?${escapeHtml(hotelBuildUrl({ ...search, destination: hotel.city }))}" data-public-route="/hotels/search?${escapeHtml(hotelBuildUrl({ ...search, destination: hotel.city }))}">browse other hotels</a>.</div>` : ''}
+
+        <div class="hotel-detail-layout">
+          <div class="hotel-detail-maincol">
+            <section class="hotel-section hotel-info-section">
+              <div class="hotel-detail-head">
+                <div class="hotel-head-left">
+                  <div class="hotel-card-stars">${hotelStars(hotel.starRating)}</div>
+                  <h1 class="hotel-detail-title">${escapeHtml(hotel.name)}</h1>
+                  <p class="hotel-card-loc hotel-detail-loc">${icon('i-location')}${escapeHtml([hotel.address || hotel.area || '', hotel.city].filter(Boolean).join(', ') || hotel.city || '')}</p>
+                  <div class="hotel-detail-meta">${icon('i-tag')} ${escapeHtml(hotel.propertyType || 'Hotel')} · ${hotel.area ? escapeHtml(hotel.area) + ' · ' : ''}${escapeHtml(hotel.city || '')}</div>
+                  ${checkInOutHtml}
+                </div>
+                <div class="hotel-head-right">
+                  ${(hotel.reviewCount || 0) > 0 ? `<div class="hotel-card-rating hotel-rating-large"><strong>${Number(hotel.guestRating || hotel.starRating || 0).toFixed(1)}</strong><small>${escapeHtml(hotelRatingLabel(hotel.guestRating || hotel.starRating))}</small><em>${hotel.reviewCount} review${hotel.reviewCount === 1 ? '' : 's'}</em></div>` : '<div class="hotel-card-rating new"><small>New property</small></div>'}
+                  ${typeof hotel.priceFrom === 'number' ? `<div class="hotel-price-badge-detail"><small>From</small><strong>${hotelMoney(hotel.priceFrom)}</strong><span>per night</span></div>` : ''}
+                </div>
+              </div>
+            </section>
+
+            ${amenitiesHtml}
+
+            ${descriptionHtml}
+
+            ${hotel.cancellationPolicy ? `<section class="hotel-section"><h3>Cancellation Policy</h3><p class="hotel-policy">${escapeHtml(hotel.cancellationPolicy.type === 'free' ? `Free cancellation${hotel.cancellationPolicy.freeUntilDays ? ` up to ${hotel.cancellationPolicy.freeUntilDays} day${hotel.cancellationPolicy.freeUntilDays === 1 ? '' : 's'} before check-in` : ''}.` : 'Non-refundable.')}${hotel.cancellationPolicy.description ? ` ${escapeHtml(hotel.cancellationPolicy.description)}` : ''}</p></section>` : ''}
+
+            ${contactHtml}
+
+            ${locationHtml}
+
+            <section class="hotel-section hotel-rooms-section" id="rooms">
+              <div class="section-heading hotel-rooms-heading">
+                <div>
+                  <span class="hs-eyebrow">${icon('i-bed')} Availability</span>
+                  <h2>Available Rooms</h2>
+                  <p>${formatDate(search.checkIn)} → ${formatDate(search.checkOut)} · ${hotelNightWord(nights)} · ${hotelGuestsWord(search.adults, search.children)}</p>
+                </div>
+              </div>
+              <div class="hotel-rooms-grid" id="hotelRoomsGrid">
+                ${hotel.rooms && hotel.rooms.length ? hotel.rooms.map(room => hotelRoomCardHtml(room, hotel, selection, nights)).join('') : publicEmptyState('No rooms published', 'Room types will appear here after an admin adds them.', '')}
+              </div>
+            </section>
+
+            <section class="hotel-similar-section" id="similar">
+              <div class="section-heading">
+                <div><span class="hs-eyebrow">${icon('i-hotel')} More stays</span><h2>Similar Hotels</h2><p>Other properties travellers also look at in ${escapeHtml(hotel.city)}.</p></div>
+              </div>
+              <div class="hotel-results-grid" id="hotelSimilarGrid"><div class="public-public-loading"><span class="spinner"></span>Loading similar hotels…</div></div>
+            </section>
+          </div>
+
+          <aside class="hotel-detail-sidecol">
+            <div class="hotel-booking-card">
+              <div class="hotel-booking-card-head">
+                <div class="hotel-booking-price">
+                  ${typeof hotel.priceFrom === 'number' ? `<strong>${hotelMoney(hotel.priceFrom)}</strong><small>per night</small>` : '<strong>On request</strong>'}
+                </div>
+                <small class="hotel-booking-meta">${formatDate(search.checkIn)} → ${formatDate(search.checkOut)} · ${hotelNightWord(nights)}</small>
+              </div>
+              <div class="hotel-booking-actions">
+                <a href="#rooms" class="btn btn-primary full-btn" data-scroll-rooms>${icon('i-bed')} Book Now</a>
+                <button type="button" class="btn btn-outline full-btn" data-chat-hotel>${icon('i-headset')} Chat with Hotel</button>
+              </div>
+              <p class="hotel-booking-note">Secure booking · Instant confirmation · No hidden fees</p>
+            </div>
+
+            <div class="hotel-support-card">
+              <strong>${icon('i-headset')} Need help?</strong>
+              <p>Our travel specialists answer within minutes during business hours.</p>
+              <a class="btn btn-outline full-btn" href="/support" data-public-route="/support">Contact support</a>
+            </div>
+          </aside>
+        </div>
+      </div>
+    `;
+
     wrapPublicRouteContent(root);
-    bindHotelDetail(hotel, selection, search);
+    bindHotelDetail(hotel, selection, search, normalizedImages);
     void loadSimilarHotels();
   };
-  function hotelRoomCardHtml(room, hotel, selection) {
-    const soldOut = room.available <= 0;
+
+  function hotelRoomCardHtml(room, hotel, selection, nights) {
+    const soldOut = Number(room.available) <= 0;
     const selected = selection.rooms.find(r => r.roomId === room.id);
-    const img = room.images?.[0]?.url || hotel.images?.[0]?.url;
-    const discountBadge = room.originalPrice && room.originalPrice > room.pricePerNight ? `<span class="room-discount">${Math.round((1 - room.pricePerNight / room.originalPrice) * 100)}% OFF</span>` : '';
+    const img = room.images?.[0] ? extractImageUrl(room.images[0]) : (hotel.thumbnail || (hotel.images?.[0] ? extractImageUrl(hotel.images[0]) : ''));
+    const discountBadge = room.originalPrice && room.originalPrice > room.pricePerNight ? `<span class="room-discount">-${Math.round((1 - room.pricePerNight / room.originalPrice) * 100)}% OFF</span>` : '';
+    const hasRoomImage = Boolean(img && !img.includes('hotel-placeholder'));
     return `<article class="hotel-room-card${soldOut ? ' soldout' : ''}${selected ? ' selected' : ''}" data-room-id="${escapeHtml(room.id)}">
-      <div class="hotel-room-media">${hotelImageTag(img, room.name)}</div>
+      <div class="hotel-room-media">
+        ${hasRoomImage ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(room.name)}" loading="lazy" />` : `<div class="hotel-img-fallback room-fallback"><img src="${HOTEL_PLACEHOLDER}" alt="" /></div>`}
+        ${discountBadge}
+      </div>
       <div class="hotel-room-body">
         <div class="hotel-room-top">
-          <div><h3>${escapeHtml(room.name)}</h3><p class="hotel-room-meta">${[room.size ? `${room.size} sq ft` : '', room.bedType, `${room.maxGuests} guest${room.maxGuests === 1 ? '' : 's'}`, room.numBeds ? `${room.numBeds} bed${room.numBeds === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}</p></div>
-          ${soldOut ? '<span class="room-status soldout">Sold out</span>' : room.available <= 3 ? `<span class="room-status low">Only ${room.available} left</span>` : `<span class="room-status ok">${room.available} available</span>`}
+          <div class="hotel-room-titlewrap">
+            <h3>${escapeHtml(room.name)}</h3>
+            <p class="hotel-room-meta">${[room.size ? `${room.size} sq ft` : '', room.bedType || '', `${room.maxGuests || room.maxAdults || 2} guests`, room.numBeds ? `${room.numBeds} bed${room.numBeds === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}</p>
+          </div>
+          ${soldOut ? '<span class="room-status soldout">Sold out</span>' : Number(room.available) <= 3 ? `<span class="room-status low">Only ${room.available} left</span>` : `<span class="room-status ok">${room.available} available</span>`}
         </div>
-        <div class="hotel-room-amenities">${(room.amenities || []).slice(0, 6).map(a => `<span>${icon('i-check')} ${escapeHtml(a)}</span>`).join('')}</div>
+        <div class="hotel-room-amenities">${(room.amenities || []).slice(0, 6).map(a => `<span class="room-amenity">${icon('i-check')} ${escapeHtml(a)}</span>`).join('') || '<span class="room-amenity muted">Verified room</span>'}</div>
         ${room.mealPlan ? `<p class="hotel-room-meal">${icon('i-check')} ${escapeHtml(room.mealPlan)}</p>` : ''}
+        ${room.description ? `<p class="hotel-room-desc">${escapeHtml(room.description.slice(0, 160))}${room.description.length > 160 ? '…' : ''}</p>` : ''}
       </div>
       <div class="hotel-room-price">
         ${room.originalPrice && room.originalPrice > room.pricePerNight ? `<small class="room-original">${hotelMoney(room.originalPrice)}</small>` : ''}
-        ${discountBadge}
-        <strong>${hotelMoney(room.pricePerNight)} <span>/ night</span></strong>
+        <div class="room-price-main"><strong>${hotelMoney(room.pricePerNight)}</strong><span>/ night</span></div>
         <small class="room-total">${hotelMoney(room.pricePerNight * nights)} for ${hotelNightWord(nights)}</small>
         ${room.cancellationPolicy?.type === 'non_refundable' ? '<small class="room-nonrefund">Non-refundable</small>' : '<small class="room-freecancel">Free cancellation</small>'}
-        ${soldOut ? '<button class="btn btn-outline full-btn" disabled>Sold out</button>' : selected ? `<div class="room-selected"><span>${icon('i-check')} Selected</span><button class="btn btn-outline" data-remove-room="${escapeHtml(room.id)}">Remove</button></div>` : `<button class="btn btn-primary full-btn" data-select-room="${escapeHtml(room.id)}">Select room</button>`}
+        ${soldOut ? '<button class="btn btn-outline full-btn" disabled>Sold out</button>' : selected ? `<div class="room-selected"><span class="room-selected-label">${icon('i-check')} Selected</span><button class="btn btn-outline btn-sm" type="button" data-remove-room="${escapeHtml(room.id)}">Remove</button></div>` : `<button class="btn btn-primary full-btn" type="button" data-select-room="${escapeHtml(room.id)}">Select Room</button>`}
       </div>
     </article>`;
   }
+
   async function loadSimilarHotels() {
     const grid = $('#hotelSimilarGrid');
     if (!grid) return;
     try {
-      const r = await apiRequest(`/hotels?city=${encodeURIComponent(hotel.city || '')}&pageSize=4&sort=rating`);
+      const r = await apiRequest(`/hotels?city=${encodeURIComponent(hotel.city || '')}&pageSize=6&sort=rating`);
       const similar = (r.hotels || []).filter(item => item.id !== hotel.id).slice(0, 3);
-      if (!similar.length) { grid.innerHTML = publicEmptyState('No similar hotels yet', 'More properties in this area will appear here.', ''); return; }
+      if (!similar.length) {
+        grid.innerHTML = publicEmptyState('No similar hotels yet', 'More properties in this area will appear here.', '');
+        return;
+      }
       grid.innerHTML = similar.map(h => hotelCardHtml(h, { checkIn: search.checkIn, checkOut: search.checkOut, adults: search.adults, children: search.children, rooms: search.rooms })).join('');
-      $$('#hotelSimilarGrid [data-gallery]').forEach(el => el.addEventListener('click', async e => { e.preventDefault(); try { const detail = await apiRequest(`/hotels/${encodeURIComponent(el.dataset.gallery)}`); hotelGalleryModal(detail.hotel.images); } catch {} }));
-    } catch { grid.innerHTML = publicEmptyState('Similar hotels unavailable', 'Try searching again from the hotel search page.', '<a class="btn btn-outline" href="/hotels" data-public-route="/hotels">Search hotels</a>'); }
+    } catch (err) {
+      grid.innerHTML = publicEmptyState('Similar hotels unavailable', 'Try searching again from the hotel search page.', '<a class="btn btn-outline" href="/hotels" data-public-route="/hotels">Search hotels</a>');
+    }
   }
-  function bindHotelDetail(hotel, selection, search) {
-    $$('.hotel-detail-hero, .hotel-detail-thumb').forEach(el => el.addEventListener('click', () => { const idx = el.dataset.thumb ? hotel.images.findIndex(i => i.url === el.dataset.thumb) : 0; hotelGalleryModal(hotel.images, Math.max(0, idx)); }));
-    $$('[data-chat-hotel]').forEach(btn => btn.addEventListener('click', () => { void openHotelChat({ id: hotel.id, name: hotel.name }); }));
-    $$('[data-select-room]').forEach(btn => btn.addEventListener('click', () => { const room = hotel.rooms.find(r => r.id === btn.dataset.selectRoom); if (!room) return; selection.rooms.push({ roomId: room.id, roomName: room.name, quantity: 1, pricePerNight: room.pricePerNight, maxGuests: room.maxGuests, image: room.images?.[0]?.url }); selection.hotelId = hotel.id; selection.slug = hotel.slug; selection.hotelName = hotel.name; selection.hotelCity = hotel.city; selection.hotelImage = hotel.images?.[0]?.url; roomSelectionSave(selection); renderDetail(); updateSticky(); }));
-    $$('[data-remove-room]').forEach(btn => btn.addEventListener('click', () => { const idx = selection.rooms.findIndex(r => r.roomId === btn.dataset.removeRoom); if (idx >= 0) selection.rooms.splice(idx, 1); roomSelectionSave(selection); renderDetail(); updateSticky(); }));
+
+  function bindHotelDetail(hotel, selection, search, normalizedImages) {
+    // Gallery open
+    $$('[data-gallery-open]').forEach(el => el.addEventListener('click', () => {
+      hotelGalleryModal(normalizedImages, 0);
+    }));
+    $$('[data-thumb]').forEach(el => el.addEventListener('click', () => {
+      const url = el.dataset.thumb;
+      const idx = normalizedImages.findIndex(i => i.url === url);
+      hotelGalleryModal(normalizedImages, Math.max(0, idx));
+    }));
+    $$('[data-chat-hotel]').forEach(btn => btn.addEventListener('click', () => {
+      void openHotelChat({ id: hotel.id, name: hotel.name });
+    }));
+    $$('[data-select-room]').forEach(btn => btn.addEventListener('click', () => {
+      const room = hotel.rooms.find(r => r.id === btn.dataset.selectRoom);
+      if (!room) return;
+      if (selection.rooms.some(r => r.roomId === room.id)) return;
+      selection.rooms.push({
+        roomId: room.id,
+        roomName: room.name,
+        quantity: 1,
+        pricePerNight: room.pricePerNight,
+        maxGuests: room.maxGuests || room.maxAdults || 2,
+        image: room.images?.[0] ? extractImageUrl(room.images[0]) : mainImg
+      });
+      selection.hotelId = hotel.id;
+      selection.slug = hotel.slug;
+      selection.hotelName = hotel.name;
+      selection.hotelCity = hotel.city;
+      selection.hotelImage = mainImg;
+      roomSelectionSave(selection);
+      renderDetail();
+      updateSticky();
+    }));
+    $$('[data-remove-room]').forEach(btn => btn.addEventListener('click', () => {
+      const idx = selection.rooms.findIndex(r => r.roomId === btn.dataset.removeRoom);
+      if (idx >= 0) selection.rooms.splice(idx, 1);
+      roomSelectionSave(selection);
+      renderDetail();
+      updateSticky();
+    }));
+    $$('[data-scroll-rooms]').forEach(btn => btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      document.getElementById('rooms')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
     updateSticky();
   }
-  function updateSticky() { const bar = $('#hotelStickyBar'); const total = selection.rooms.reduce((s, r) => s + r.pricePerNight * selection.nights, 0); if (!selection.rooms.length) { if (bar) bar.remove(); return; } const html = `<div class="hotel-sticky-bar" id="hotelStickyBar"><div class="hotel-sticky-info"><strong>${hotelMoney(total)}<small>${selection.rooms.length} room${selection.rooms.length > 1 ? 's' : ''} · ${hotelNightWord(selection.nights)}</small></strong></div><button class="btn btn-primary" id="hotelContinueBtn">Continue</button></div>`; if (bar) bar.outerHTML = html; else root.insertAdjacentHTML('beforeend', html); $('#hotelContinueBtn')?.addEventListener('click', () => { if (!currentUser) { showToast('Please login to continue with your booking.', 'error'); openLogin(); return; } publicNavigate('/booking/checkout'); }); }
+
+  function updateSticky() {
+    const bar = $('#hotelStickyBar');
+    const total = selection.rooms.reduce((s, r) => s + r.pricePerNight * selection.nights, 0);
+    if (!selection.rooms.length) {
+      if (bar) bar.remove();
+      return;
+    }
+    const html = `<div class="hotel-sticky-bar" id="hotelStickyBar">
+      <div class="hotel-sticky-info"><strong>${hotelMoney(total)}</strong><small>${selection.rooms.length} room${selection.rooms.length > 1 ? 's' : ''} · ${hotelNightWord(selection.nights)}</small></div>
+      <button class="btn btn-primary" id="hotelContinueBtn">Continue to Book</button>
+    </div>`;
+    if (bar) bar.outerHTML = html;
+    else root.insertAdjacentHTML('beforeend', html);
+    $('#hotelContinueBtn')?.addEventListener('click', () => {
+      if (!currentUser) {
+        showToast('Please login to continue with your booking.', 'error');
+        openLogin();
+        return;
+      }
+      publicNavigate('/booking/checkout');
+    });
+  }
+
   renderDetail();
 }
 async function renderHotelCheckout(root) {

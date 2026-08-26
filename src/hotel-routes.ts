@@ -12,7 +12,26 @@ import type { MediaService } from './media.js';
 const toInput = (schema: z.ZodTypeAny, value: unknown) => { try { return schema.parse(value); } catch (error) { if (error instanceof ZodError) throw new AppError(400, 'VALIDATION_ERROR', 'Please check the submitted fields', error.flatten()); throw error; } };
 const clientMeta = (req: any) => ({ ip: req.ip, userAgent: req.get('user-agent')?.slice(0, 500) });
 
-const imageSchema = z.object({ url: z.string().max(1000), publicId: z.string().max(300).optional(), mediaId: z.string().uuid().optional(), alt: z.string().max(300).optional() });
+const imageSchema = z.object({
+  url: z.string().max(1000).optional(),
+  secureUrl: z.string().max(1000).optional(),
+  secure_url: z.string().max(1000).optional(),
+  imageUrl: z.string().max(1000).optional(),
+  src: z.string().max(1000).optional(),
+  publicId: z.string().max(300).optional(),
+  public_id: z.string().max(300).optional(),
+  mediaId: z.string().uuid().optional(),
+  alt: z.string().max(300).optional(),
+  altText: z.string().max(300).optional(),
+}).passthrough().transform((value: any) => {
+  const url = value.url ?? value.secureUrl ?? value.secure_url ?? value.imageUrl ?? value.src;
+  return {
+    url: typeof url === 'string' ? url : '',
+    publicId: value.publicId ?? value.public_id,
+    mediaId: value.mediaId,
+    alt: value.alt ?? value.altText,
+  };
+}).refine((value: any) => typeof value.url === 'string' && value.url.trim().length > 0, { message: 'Image URL is required', path: ['url'] });
 const seasonalDiscountSchema = z.object({ name: z.string().trim().min(2).max(120), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), percentage: z.number().min(0).max(100) }).refine(value => value.endDate >= value.startDate, { message: 'Discount end date must not precede its start date', path: ['endDate'] });
 const cancellationSchema = z.object({ type: z.enum(['free', 'non_refundable']).default('free'), freeUntilDays: z.number().int().min(0).max(365).optional(), description: z.string().max(500).optional() });
 const hotelInputSchema = z.object({
