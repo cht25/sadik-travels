@@ -148,33 +148,51 @@ const optimizeImages = (images: HotelImage[] | undefined, width: number): HotelI
 /**
  * Canonical image normalization — applied on every save AND every read.
  *
- * Fixes the root causes of missing hotel images:
- *  - legacy/malformed rows where `images` contains plain URL strings instead
- *    of {url} objects (these previously produced `url: undefined` and empty
- *    <img src=""> tags — the broken image containers on the public site);
- *  - insecure `http://` URLs, which are blocked by the production CSP and by
- *    browsers on the HTTPS site — upgraded to `https://`;
- *  - whitespace-only or missing URLs, which are dropped entirely so the
- *    frontend can rely on `images[n].url` being a usable absolute URL.
+ * This is the single choke point that repairs ALL historic causes of missing hotel images:
+ *  - legacy/malformed rows where `images` contains plain URL strings instead of {url} objects
+ *  - objects stored under different keys: secureUrl, imageUrl, src, secure_url, image_url
+ *  - insecure http:// URLs blocked by production CSP / HTTPS — upgraded to https://
+ *  - whitespace-only or missing URLs — dropped entirely so frontend can rely on images[n].url
+ *  - Cloudinary URLs must be preserved as absolute https:// URLs, never rewritten to /uploads
  */
 export function normalizeHotelImages(images: unknown): HotelImage[] {
   if (!Array.isArray(images)) return [];
   const normalized: HotelImage[] = [];
   for (const entry of images) {
-    const raw = typeof entry === 'string' ? entry : (entry as HotelImage | null)?.url;
-    if (typeof raw !== 'string') continue;
-    let url = raw.trim();
-    if (!url || !/^(https?:\/\/|\/)/i.test(url)) continue;
+    if (!entry) continue;
+    let rawUrl: unknown;
+    if (typeof entry === 'string') {
+      rawUrl = entry;
+    } else if (typeof entry === 'object') {
+      const obj = entry as any;
+      // Canonical field + all legacy alternatives that have been seen in the wild
+      rawUrl = obj.url ?? obj.secureUrl ?? obj.secure_url ?? obj.imageUrl ?? obj.image_url ?? obj.src ?? obj.path ?? obj.image;
+    }
+    if (typeof rawUrl !== 'string') continue;
+    let url = rawUrl.trim();
+    if (!url) continue;
+    // Accept absolute https/http, protocol-relative //, root-relative /, and data: (for admin preview)
+    // Anything else (bare filename, not-a-url) is dropped — it would render as broken <img src="">
+    if (!/^(https?:\/\/|\/\/|data:image\/|\/)/i.test(url)) continue;
+    if (url.startsWith('//')) url = `https:${url}`;
     if (url.startsWith('http://')) url = `https://${url.slice('http://'.length)}`;
-    const source = typeof entry === 'object' && entry ? (entry as HotelImage) : ({} as HotelImage);
+    const source = typeof entry === 'object' && entry ? (entry as any) : {};
     normalized.push({
       url,
       ...(source.publicId ? { publicId: String(source.publicId) } : {}),
+      ...(source.public_id ? { publicId: String(source.public_id) } : {}),
       ...(source.mediaId ? { mediaId: String(source.mediaId) } : {}),
-      ...(source.alt ? { alt: String(source.alt).slice(0, 300) } : {})
+      ...(source.media_id ? { mediaId: String(source.media_id) } : {}),
+      ...(source.alt ? { alt: String(source.alt).slice(0, 300) } : {}),
+      ...(source.altText ? { alt: String(source.altText).slice(0, 300) } : {}),
     });
   }
   return normalized;
+}
+
+function primaryImageUrl(images: unknown): string | undefined {
+  const list = normalizeHotelImages(images);
+  return list[0]?.url;
 }
 
 export class HotelStore {
@@ -286,11 +304,16 @@ export class HotelStore {
     const total = items.length;
     const currentPage = pageN(filters.page); const pageSize = sizeN(filters.pageSize, 12);
     const slice = items.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-    const view = slice.map(hotel => ({
-      ...hotel,
-      images: optimizeImages(hotel.images, 600),
-      thumbnail: hotel.images?.[0]?.url ? optimizedMediaUrl(hotel.images[0].url, { width: 600 }) : undefined
-    }));
+    const view = slice.map(hotel => {
+      const normalized = normalizeHotelImages(hotel.images);
+      const optimized = normalized.map(image => ({ ...image, url: optimizedMediaUrl(image.url, { width: 600 }) || image.url }));
+      const thumbSource = normalized[0]?.url;
+      return {
+        ...hotel,
+        images: optimized,
+        thumbnail: thumbSource ? optimizedMediaUrl(thumbSource, { width: 600 }) || thumbSource : undefined
+      };
+    });
     const live = (await this.allHotels()).filter(h => h.status === 'active' && h.available !== false && !h.deletedAt);
     const propertyTypes = [...new Set(live.map(h => h.propertyType).filter(Boolean))].sort();
     const cities = [...new Set(live.map(h => h.city).filter(Boolean))].sort();
@@ -314,7 +337,11 @@ export class HotelStore {
     if (!hotel || hotel.deletedAt || hotel.status !== 'active' || hotel.available === false) return undefined;
     const rooms = (await this.allRooms()).filter(room => room.hotelId === hotel.id && !room.deletedAt && room.status === 'active');
     const roomsWithAvail = options.checkIn && options.checkOut ? await Promise.all(rooms.map(async room => ({ ...room, images: optimizeImages(room.images, 800), available: await this.availabilityFor(room.id, options.checkIn!, options.checkOut!, room.inventory), nights: nightsBetween(options.checkIn!, options.checkOut!) }))) : rooms.map(room => ({ ...room, images: optimizeImages(room.images, 800), available: room.inventory }));
-    return { ...hotel, priceFrom: this.priceFromHotel(rooms, hotel), originalPriceFrom: this.originalPriceFromHotel(rooms, hotel), images: optimizeImages(hotel.images, 1280), rooms: (options.withRooms === false ? [] : roomsWithAvail) };
+    // Normalize hotel images once, so thumbnail, gallery and snapshot all use the same canonical source
+    const hotelImages = optimizeImages(hotel.images, 1280);
+    const normalizedForThumb = normalizeHotelImages(hotel.images);
+    const thumb = normalizedForThumb[0]?.url ? optimizedMediaUrl(normalizedForThumb[0].url, { width: 600 }) || normalizedForThumb[0].url : undefined;
+    return { ...hotel, priceFrom: this.priceFromHotel(rooms, hotel), originalPriceFrom: this.originalPriceFromHotel(rooms, hotel), images: hotelImages, thumbnail: thumb, rooms: (options.withRooms === false ? [] : roomsWithAvail) };
   }
 
   async priceQuote(input: { hotelId: string; rooms: Array<{ roomId: string; quantity?: number; adults?: number; children?: number }>; checkIn: string; checkOut: string }): Promise<{ rooms: HotelBookingRoom[]; breakdown: PriceBreakdown; hotelName: string }> {
@@ -396,6 +423,7 @@ export class HotelStore {
     let bookingNumber = generateBookingNumber();
     while (await BookingModel.findOne({ bookingNumber }).lean()) bookingNumber = generateBookingNumber();
     const time = now();
+    const snapshotImage = primaryImageUrl(hotel.images);
     const booking: HotelBooking = {
       id: randomUUID(), bookingNumber, userId, hotelId: input.hotelId,
       checkIn: input.checkIn, checkOut: input.checkOut, nights: quote.breakdown.nights,
@@ -403,7 +431,7 @@ export class HotelStore {
       specialRequests: input.specialRequests, priceBreakdown: quote.breakdown,
       paymentMethod: input.paymentMethod || 'pay_on_arrival', paymentStatus: 'pending', status: 'pending',
       cancellationPolicy: hotel.cancellationPolicy || { type: 'free', freeUntilDays: 1 },
-      hotelSnapshot: { name: hotel.name, city: hotel.city, address: hotel.address, image: hotel.images?.[0]?.url },
+      hotelSnapshot: { name: hotel.name, city: hotel.city, address: hotel.address, image: snapshotImage },
       createdBy: userId, createdAt: time, updatedAt: time
     };
     try {
@@ -467,7 +495,10 @@ export class HotelStore {
     const total = hotels.length; const currentPage = pageN(filters.page); const pageSize = sizeN(filters.pageSize, 20);
     const slice = hotels.slice((currentPage - 1) * pageSize, currentPage * pageSize).map(hotel => {
       const hotelRooms = rooms.filter(r => r.hotelId === hotel.id && !r.deletedAt && r.status === 'active');
-      return { ...hotel, roomCount: hotelRooms.length, priceFrom: this.priceFromHotel(hotelRooms, hotel), images: optimizeImages(hotel.images, 200) };
+      const normalized = normalizeHotelImages(hotel.images);
+      const optimized = normalized.map(image => ({ ...image, url: optimizedMediaUrl(image.url, { width: 200 }) || image.url }));
+      const thumb = normalized[0]?.url ? optimizedMediaUrl(normalized[0].url, { width: 400 }) || normalized[0].url : undefined;
+      return { ...hotel, roomCount: hotelRooms.length, priceFrom: this.priceFromHotel(hotelRooms, hotel), images: optimized, thumbnail: thumb };
     });
     return { hotels: slice, total, page: currentPage, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
   }

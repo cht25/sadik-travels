@@ -993,8 +993,10 @@ async function renderHotels() {
   const response = await safeRequest(`/admin/hotels?${new URLSearchParams({ page: '1', pageSize: '50', ...(q ? { q } : {}), ...(status ? { status } : {}) })}`);
   if (isError(response)) return renderError(response.__error, '/admin/hotels');
   const hotels = response.hotels || [];
-  const rows = hotels.length ? hotels.map(hotel => `<tr>
-      <td><div class="media-thumb admin-image-wrapper"><img src="${escapeAttr(hotel.images?.[0]?.url || '/assets/hotel-placeholder.svg')}" alt="" data-image-fallback/></div></td>
+  const rows = hotels.length ? hotels.map(hotel => {
+    const thumb = hotel.thumbnail || hotel.images?.[0]?.url || '/assets/hotel-placeholder.svg';
+    return `<tr>
+      <td><div class="media-thumb admin-image-wrapper"><img src="${escapeAttr(thumb)}" alt="" data-image-fallback/></div></td>
       <td><a class="table-link" href="/admin/hotels/${escapeAttr(hotel.id)}" data-route="/admin/hotels/${escapeAttr(hotel.id)}"><span class="table-primary">${escapeHtml(hotel.name)}</span><span class="table-secondary">${escapeHtml(hotel.slug)}</span></a></td>
       <td>${escapeHtml(hotel.city)}<span class="table-secondary">${escapeHtml(hotel.country)}</span></td>
       <td>${escapeHtml(hotel.propertyType || 'Hotel')}</td>
@@ -1004,7 +1006,8 @@ async function renderHotels() {
       <td>${typeof hotel.priceFrom === 'number' ? formatMoney(hotel.priceFrom) : '<span class="table-secondary">—</span>'}</td>
       <td>${escapeHtml(formatDate(hotel.updatedAt))}</td>
       <td><div class="table-actions"><a class="table-action" href="/admin/hotels/${escapeAttr(hotel.id)}" data-route="/admin/hotels/${escapeAttr(hotel.id)}">Manage</a><button class="table-action" data-hotel-edit="${escapeAttr(hotel.id)}">Edit</button>${hotel.status !== 'archived' ? `<button class="table-action danger" data-hotel-archive="${escapeAttr(hotel.id)}">Remove</button>` : `<button class="table-action" data-hotel-restore="${escapeAttr(hotel.id)}">Restore</button>`}</div></td>
-    </tr>`).join('') : `<tr><td colspan="10">${emptyState('No hotels yet', 'Create your first hotel with rooms, pricing and inventory.', 'hotel')}</td></tr>`;
+    </tr>`;
+  }).join('') : `<tr><td colspan="10">${emptyState('No hotels yet', 'Create your first hotel with rooms, pricing and inventory.', 'hotel')}</td></tr>`;
   const [stats] = await Promise.all([safeRequest('/admin/hotels/stats')]);
   const s = isError(stats) ? null : stats.stats;
   $('#adminOutlet').innerHTML = pageHeader('Hotel management', 'Hotels', 'Add, edit, price and publish hotels. Manage rooms, inventory and booking status from one panel — plain text fields only.', '<button class="admin-primary" data-action="new-hotel">+ Add hotel</button><a class="admin-secondary" href="/admin/hotel-bookings" data-route="/admin/hotel-bookings">Hotel bookings</a>') +
@@ -1021,7 +1024,17 @@ function bindHotelsPage(hotels) {
 }
 function seasonalDiscountsMarkup() { return `<div class="seasonal-discounts"><div class="seasonal-discounts-head"><span class="field-label"><span>Seasonal discounts</span></span><button class="admin-secondary" type="button" data-discount-add>+ Add discount</button></div><div id="seasonalDiscountRows">${seasonalDiscountState.map((discount, index) => `<div class="seasonal-discount-row"><input data-discount-name="${index}" aria-label="Discount name" placeholder="Summer offer" value="${escapeAttr(discount.name || '')}"/><input data-discount-start="${index}" type="date" aria-label="Start date" value="${escapeAttr(discount.startDate || '')}"/><input data-discount-end="${index}" type="date" aria-label="End date" value="${escapeAttr(discount.endDate || '')}"/><label><input data-discount-percentage="${index}" type="number" min="0" max="100" step="0.01" aria-label="Discount percentage" value="${escapeAttr(discount.percentage ?? 0)}"/><span>%</span></label><button class="image-remove" type="button" data-discount-remove="${index}" aria-label="Remove seasonal discount">×</button></div>`).join('') || '<p class="table-secondary">No seasonal discounts configured.</p>'}</div></div>`; }
 function bindSeasonalDiscounts() { $('[data-discount-add]')?.addEventListener('click', () => { seasonalDiscountState.push({ name: '', startDate: '', endDate: '', percentage: 0 }); $('#seasonalDiscountManager').innerHTML = seasonalDiscountsMarkup(); bindSeasonalDiscounts(); }); $$('[data-discount-remove]').forEach(button => button.addEventListener('click', () => { seasonalDiscountState.splice(Number(button.dataset.discountRemove), 1); $('#seasonalDiscountManager').innerHTML = seasonalDiscountsMarkup(); bindSeasonalDiscounts(); })); const sync = (selector, dataKey, field, number = false) => $$(selector).forEach(input => input.addEventListener('input', () => { seasonalDiscountState[Number(input.dataset[dataKey])][field] = number ? Number(input.value) : input.value; })); sync('[data-discount-name]', 'discountName', 'name'); sync('[data-discount-start]', 'discountStart', 'startDate'); sync('[data-discount-end]', 'discountEnd', 'endDate'); sync('[data-discount-percentage]', 'discountPercentage', 'percentage', true); }
-function hotelImagesMarkup() { return `<div class="image-manager"><div class="image-grid" id="hotelImageGrid">${hotelImageState.map((image, i) => `<div class="image-cell${i === 0 ? ' is-primary' : ''}"><img src="${escapeAttr(image.url || '/assets/hotel-placeholder.svg')}" alt="" data-image-fallback/>${i === 0 ? '<span class="image-primary-badge">Primary</span>' : `<button type="button" class="image-primary" data-img-primary="${i}">Make primary</button>`}<button type="button" class="image-remove" data-img-remove="${i}" aria-label="Remove image">×</button></div>`).join('')}</div><p class="image-hint">The first image is the primary photo used on listing cards and search results. Upload once — images are stored permanently in Cloudinary and every replaced image gets a new URL, so guests always see the latest version.</p><label class="field-label"><span>Upload images (JPEG/PNG/WebP)</span><input id="hotelImageFile" type="file" accept="image/jpeg,image/png,image/webp" multiple/></label></div>`; }
+function extractAdminImageUrl(img) {
+  if (!img) return '';
+  if (typeof img === 'string') return img;
+  return img.url || img.secureUrl || img.secure_url || img.imageUrl || img.src || '';
+}
+function hotelImagesMarkup() {
+  return `<div class="image-manager"><div class="image-grid" id="hotelImageGrid">${hotelImageState.map((image, i) => {
+    const u = extractAdminImageUrl(image) || '/assets/hotel-placeholder.svg';
+    return `<div class="image-cell${i === 0 ? ' is-primary' : ''}"><img src="${escapeAttr(u)}" alt="" data-image-fallback/>${i === 0 ? '<span class="image-primary-badge">Primary</span>' : `<button type="button" class="image-primary" data-img-primary="${i}">Make primary</button>`}<button type="button" class="image-remove" data-img-remove="${i}" aria-label="Remove image">×</button></div>`;
+  }).join('')}</div><p class="image-hint">The first image is the primary photo used on listing cards and search results. Upload once — images are stored permanently in Cloudinary (https://res.cloudinary.com/...) and every replaced image gets a new URL, so guests always see the latest version. The public site shows the real uploaded image, never the placeholder, when a valid image exists.</p><label class="field-label"><span>Upload images (JPEG/PNG/WebP)</span><input id="hotelImageFile" type="file" accept="image/jpeg,image/png,image/webp" multiple/></label></div>`;
+}
 function bindHotelImages() {
   const refresh = () => { const manager = $('#hotelImageGrid')?.closest('.image-manager'); if (manager) { manager.outerHTML = hotelImagesMarkup(); } bindHotelImages(); };
   const grid = $('#hotelImageGrid');
@@ -1088,7 +1101,10 @@ function readHotelForm() {
 async function openHotelEditor(hotel = {}) {
   if (state.isSuperAdmin) { const response = await safeRequest('/admin/admins'); hotelOwnerOptions = isError(response) ? [] : (response.admins || []).filter(user => user.role === 'hotel_owner' && user.status === 'active'); }
   seasonalDiscountState = (hotel.seasonalDiscounts || []).map(discount => ({ ...discount }));
-  hotelImageState = (hotel.images || []).map(i => ({ url: i.url, publicId: i.publicId, mediaId: i.mediaId, alt: i.alt }));
+  hotelImageState = (hotel.images || []).map(i => {
+    const url = (typeof i === 'string' ? i : (i.url || i.secureUrl || i.secure_url || i.imageUrl || i.src || '')) ;
+    return { url, publicId: i.publicId || i.public_id, mediaId: i.mediaId, alt: i.alt || i.altText };
+  }).filter(img => img.url);
   openModal(hotelFormMarkup(hotel), () => {
     bindHotelImages(); bindSeasonalDiscounts();
     $('#hotelForm').addEventListener('submit', async event => {
@@ -1138,7 +1154,10 @@ function roomFormMarkup(hotelId, room = {}) {
   <div class="form-actions"><button type="button" class="admin-secondary" data-modal-close>Cancel</button><button class="admin-primary" type="submit">Save room</button></div></form>`;
 }
 function openRoomEditor(hotelId, room = {}) {
-  hotelImageState = (room.images || []).map(i => ({ url: i.url, publicId: i.publicId, mediaId: i.mediaId, alt: i.alt }));
+  hotelImageState = (room.images || []).map(i => {
+    const url = (typeof i === 'string' ? i : (i.url || i.secureUrl || i.secure_url || i.imageUrl || i.src || '')) ;
+    return { url, publicId: i.publicId || i.public_id, mediaId: i.mediaId, alt: i.alt || i.altText };
+  }).filter(img => img.url);
   openModal(roomFormMarkup(hotelId, room), () => {
     bindHotelImages();
     $('#roomForm').addEventListener('submit', async event => {
