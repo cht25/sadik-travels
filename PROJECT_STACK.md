@@ -58,6 +58,44 @@ security rules are in `database.rules.json`.
 
 Cloudinary is accessed only by the backend. Uploads are validated from file bytes, limited in memory, stored in an organized Sadik Travels folder, and represented in MongoDB by media metadata. No Cloudinary secret is returned to browser code.
 
+### Canonical hotel image contract
+
+Cloudinary is the only persistent image store — there is no `/uploads` filesystem
+path anywhere in the app, so photos survive Render redeploys and restarts.
+
+`images: [{ url, publicId, mediaId, alt, isPrimary }]` is the single shape used by
+the database, the API and the admin editor:
+
+- **`url`** — the canonical, permanently stored Cloudinary delivery URL. It never
+  carries display transformations. `canonicalMediaUrl` (src/media.ts) strips any
+  transformation chain out of `/upload/…`, which both prevents and repairs the
+  historic corruption where a display URL was posted back by the editor and
+  re-persisted, growing the stored URL by one chained segment per save.
+- **`displayUrl`** — read-only, derived per surface by `optimizedMediaUrl`
+  (600px cards, 800px rooms, 1280px hero). Never persisted.
+- **`isPrimary`** — exactly one, always at index 0. `normalizeHotelImages`
+  (src/hotel-store.ts) is the single choke point applied on every save and every
+  read; it accepts every legacy shape that has ever been stored (plain URL
+  strings, `secureUrl`/`imageUrl`/`src`/`image_url`, `http://`, duplicates), so
+  old records keep working and heal to the canonical shape on their next save.
+
+Admin responses (`/api/v1/admin/hotels*`) hand the editor the **canonical** `url`
+plus a separate `thumbnail` for list previews, so an edit-and-save round trip can
+never rewrite stored data. Public responses send both.
+
+`POST`/`PATCH` on hotels and rooms re-read the record after writing and fail with
+`502 IMAGE_NOT_PERSISTED` unless every submitted photo URL is actually stored, so
+the console can never show "Hotel updated." for photos that did not persist.
+
+On the storefront, `app.js` exposes one selector block (between the
+`SADIK-HOTEL-IMAGES` markers): `hotelImageList`, `getHotelPrimaryImage`,
+`hotelImageSrc`, `hotelHasRealImage`, `hotelImageTag`. Cards, search results, the
+detail gallery, room cards, related hotels and the booking summary all use it.
+"Photos coming soon" is a *data* state and renders only when the record genuinely
+has no loadable image; a transient load failure swaps in the branded placeholder
+and offers an explicit Retry. No inline `onerror` is emitted — production
+`script-src` has no `'unsafe-inline'`.
+
 ## Testing
 
 `TEST_MONGODB_URI` runs the integration suite against a dedicated disposable MongoDB database. Do not point it to a production database.

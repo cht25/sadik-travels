@@ -1720,55 +1720,141 @@ const HOTEL_NEIGHBORHOODS = { "Cox's Bazar": ['Kolatoli Road', 'Inani Beach', 'L
 const REVIEW_BUCKETS = [{ id: '4.25', label: '8.5+ Excellent', min: 4.25 }, { id: '4', label: '8.0+ Very good', min: 4 }, { id: '3.5', label: '7.0+ Good', min: 3.5 }];
 const HOTEL_CHECKOUT_KEY = 'sadikHotelCheckout';
 const hotelSearchState = { destination: '', checkIn: '', checkOut: '', adults: 2, children: 0, rooms: 1, minPrice: '', maxPrice: '', minStarRating: '', starRatings: [], minGuestRating: '', area: '', areas: [], neighborhoods: [], propertyType: [], amenities: [], freeCancellation: false, sort: 'recommended', page: 1 };
-/* Branded fallback so a missing/failing image never renders as a broken icon. */
+/* ==== SADIK-HOTEL-IMAGES:BEGIN ==================================================
+ * Single source of truth for hotel imagery on the public site.
+ *
+ * Mirrors `normalizeHotelImages` in src/hotel-store.ts: one canonical entry
+ * shape ({ url, displayUrl, alt, isPrimary }) read from every field that has
+ * ever been stored (images[], photos[], gallery[], coverImage, heroImage,
+ * imageUrl, image, thumbnail). No surface decides for itself whether a hotel
+ * has a photo, so a card, the gallery and the booking summary can never
+ * disagree — and "Photos coming soon" only appears when the record genuinely
+ * has no usable image.
+ *
+ * This block is loaded verbatim by src/hotel-image-frontend.test.ts; keep it
+ * free of dependencies on anything outside it.
+ * ==== */
 const HOTEL_PLACEHOLDER = '/assets/hotel-placeholder.svg';
-function extractImageUrl(entry) {
-  if (!entry) return '';
-  if (typeof entry === 'string') return entry.trim();
-  if (typeof entry === 'object') {
-    const obj = entry;
-    return (obj.url || obj.secureUrl || obj.secure_url || obj.imageUrl || obj.image_url || obj.src || obj.path || '').trim();
-  }
-  return '';
+const HOTEL_IMAGE_URL_RE = /^(https?:\/\/|\/\/|data:image\/|\/)/i;
+const HOTEL_IMAGE_LEGACY_KEYS = ['coverImage', 'heroImage', 'imageUrl', 'image', 'thumbnail', 'photo'];
+const hotelEscapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+/** Accept a URL only if it can actually be loaded by an <img>; '' otherwise. */
+function hotelImageUrlCandidate(value) {
+  if (typeof value !== 'string') return '';
+  const url = value.trim();
+  return HOTEL_IMAGE_URL_RE.test(url) ? url : '';
 }
-function hotelHasValidImage(hotel) {
-  if (!hotel) return false;
-  if (hotel.thumbnail && String(hotel.thumbnail).trim()) return true;
-  if (Array.isArray(hotel.images) && hotel.images.length) {
-    for (const img of hotel.images) {
-      const u = extractImageUrl(img);
-      if (u && /^(https?:\/\/|\/\/|data:image\/|\/)/i.test(u)) return true;
-    }
+/** Normalize one raw entry (string or object, canonical or legacy) or return null. */
+function hotelImageEntryOf(entry) {
+  if (!entry) return null;
+  if (typeof entry === 'string') {
+    const url = hotelImageUrlCandidate(entry);
+    return url ? { url, displayUrl: url, alt: '', publicId: '', mediaId: '', isPrimary: false } : null;
   }
-  const fallback = extractImageUrl(hotel.imageUrl) || extractImageUrl(hotel.image) || extractImageUrl(hotel.heroImage);
-  return Boolean(fallback && /^(https?:\/\/|\/\/|data:image\/|\/)/i.test(fallback));
+  if (typeof entry !== 'object') return null;
+  const canonical = hotelImageUrlCandidate(entry.url) || hotelImageUrlCandidate(entry.secureUrl) || hotelImageUrlCandidate(entry.secure_url) || hotelImageUrlCandidate(entry.imageUrl) || hotelImageUrlCandidate(entry.image_url) || hotelImageUrlCandidate(entry.src) || hotelImageUrlCandidate(entry.path) || hotelImageUrlCandidate(entry.image);
+  if (!canonical) return null;
+  return {
+    url: canonical,
+    displayUrl: hotelImageUrlCandidate(entry.displayUrl) || canonical,
+    alt: String(entry.alt ?? entry.altText ?? '').trim(),
+    publicId: String(entry.publicId ?? entry.public_id ?? '').trim(),
+    mediaId: String(entry.mediaId ?? '').trim(),
+    isPrimary: entry.isPrimary === true
+  };
 }
-const hotelImageSrc = (hotel) => {
-  if (!hotel) return '';
-  if (hotel.thumbnail && String(hotel.thumbnail).trim()) return String(hotel.thumbnail).trim();
-  if (Array.isArray(hotel.images) && hotel.images.length) {
-    const first = extractImageUrl(hotel.images[0]);
-    if (first) return first;
+/**
+ * Canonical, de-duplicated, primary-first image list of a hotel/room record.
+ * Returns [] only when the record truly has no loadable image.
+ */
+function hotelImageList(source) {
+  if (!source || typeof source !== 'object') return [];
+  const found = [];
+  const add = (entry) => {
+    const image = hotelImageEntryOf(entry);
+    if (!image || found.some(existing => existing.url === image.url)) return;
+    found.push(image);
+  };
+  for (const list of [source.images, source.photos, source.gallery]) {
+    if (Array.isArray(list)) for (const entry of list) add(entry);
   }
-  return extractImageUrl(hotel.imageUrl) || extractImageUrl(hotel.image) || extractImageUrl(hotel.heroImage) || '';
-};
-const hotelNightsBetween = (checkIn, checkOut) => Math.max(1, Math.round((new Date(`${checkOut}T00:00:00`) - new Date(`${checkIn}T00:00:00`)) / 86400000));
-const hotelImageTag = (src, alt, attrs = '') => {
-  const valid = src && String(src).trim() && !String(src).includes('hotel-placeholder');
-  if (!valid) {
-    return `<div class="hotel-img-fallback" role="img" aria-label="${escapeHtml(alt || 'Hotel image')}"><img src="${HOTEL_PLACEHOLDER}" alt="${escapeHtml(alt || '')}" loading="lazy" ${attrs} data-fallback-applied="1" /></div>`;
+  // Legacy records that only ever stored a single image field.
+  if (!found.length) for (const key of HOTEL_IMAGE_LEGACY_KEYS) add(source[key]);
+  const primaryAt = found.findIndex(image => image.isPrimary);
+  if (primaryAt > 0) found.unshift(found.splice(primaryAt, 1)[0]);
+  return found.map((image, index) => ({ ...image, isPrimary: index === 0 }));
+}
+/** The cover photo entry, or null when the record genuinely has no image. */
+function getHotelPrimaryImage(source) { return hotelImageList(source)[0] || null; }
+/** Best URL to render for the cover photo ('' when there is none). */
+function hotelImageSrc(source) { return getHotelPrimaryImage(source)?.displayUrl || ''; }
+/** True only when a real, loadable uploaded image exists. */
+function hotelHasRealImage(source) { return hotelImageList(source).length > 0; }
+/* Kept for existing call sites — same canonical answer. */
+const hotelHasValidImage = hotelHasRealImage;
+function extractImageUrl(entry) { return hotelImageEntryOf(entry)?.displayUrl || ''; }
+/**
+ * <img> markup. Never emits an inline onerror: production script-src has no
+ * 'unsafe-inline', so inline handlers are refused by the browser and only
+ * produce CSP violations. Failures are handled by bindHotelImageRecovery().
+ */
+function hotelImageTag(src, alt, attrs = '') {
+  const url = hotelImageUrlCandidate(src);
+  const label = alt || 'Hotel image';
+  if (!url) {
+    return `<div class="hotel-img-fallback" role="img" aria-label="${hotelEscapeHtml(label)}"><img src="${HOTEL_PLACEHOLDER}" alt="${hotelEscapeHtml(label)}" loading="lazy" data-image-fallback data-fallback-applied="1" ${attrs} /></div>`;
   }
-  return `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt || '')}" loading="lazy" onerror="if(!this.dataset.fallbackApplied){this.dataset.fallbackApplied='1';this.src='${HOTEL_PLACEHOLDER}';}" ${attrs} />`;
-};
+  return `<img src="${hotelEscapeHtml(url)}" alt="${hotelEscapeHtml(label)}" loading="lazy" data-image-fallback ${attrs} />`;
+}
+/** Loading skeleton used while a photo is still in flight. */
+function hotelImageSkeleton(label) {
+  return `<div class="hotel-img-skeleton" role="img" aria-label="${hotelEscapeHtml(label || 'Loading photo')}"><span class="hotel-img-skeleton-shimmer"></span></div>`;
+}
+/**
+ * Progressive image states: skeleton while loading, branded placeholder on a
+ * transient failure, explicit retry when even the placeholder cannot load
+ * (offline). The "Photos coming soon" fallback is a *data* state and is only
+ * rendered when hotelHasRealImage() is false.
+ */
+function bindHotelImageRecovery(scope) {
+  const root = scope && typeof scope.querySelectorAll === 'function' ? scope : document;
+  Array.from(root.querySelectorAll('img[data-image-fallback]')).forEach(img => {
+    if (img.dataset.imageRecoveryBound === '1') return;
+    img.dataset.imageRecoveryBound = '1';
+    const original = img.getAttribute('src') || '';
+    const isPlaceholder = () => String(img.getAttribute('src') || '').includes('hotel-placeholder');
+    if (img.complete && img.naturalWidth > 0) img.classList.add('is-loaded');
+    img.addEventListener('load', () => img.classList.add('is-loaded'));
+    img.addEventListener('error', () => {
+      if (img.dataset.fallbackApplied === '1' || isPlaceholder()) {
+        const host = img.parentElement;
+        if (!host || host.querySelector('.hotel-img-error')) return;
+        host.classList.add('hotel-img-error-host');
+        host.insertAdjacentHTML('beforeend', `<div class="hotel-img-error"><span>Photo failed to load</span><button type="button" class="btn btn-outline hotel-img-retry">Retry</button></div>`);
+        host.querySelector('.hotel-img-retry')?.addEventListener('click', () => {
+          host.querySelector('.hotel-img-error')?.remove();
+          host.classList.remove('hotel-img-error-host');
+          img.dataset.fallbackApplied = '0';
+          img.classList.remove('is-loaded');
+          img.src = original ? `${original}${original.includes('?') ? '&' : '?'}retry=${Date.now()}` : original;
+        });
+        return;
+      }
+      img.dataset.fallbackApplied = '1';
+      img.src = HOTEL_PLACEHOLDER;
+    });
+  });
+}
+/* Safety net for images rendered outside a bound scope. */
 document.addEventListener('error', event => {
   const img = event.target;
-  if (!img || img.tagName !== 'IMG' || img.dataset.fallbackApplied) return;
-  if (!img.closest('.hotel-card, .hotel-detail, .booking-row, .receipt-card, .hs-card')) return;
+  if (!img || img.tagName !== 'IMG' || !img.hasAttribute('data-image-fallback') || img.dataset.fallbackApplied === '1') return;
   const src = img.getAttribute('src') || '';
   if (!src || src.includes('hotel-placeholder.svg')) return;
   img.dataset.fallbackApplied = '1';
   img.src = HOTEL_PLACEHOLDER;
 }, true);
+/* ==== SADIK-HOTEL-IMAGES:END ================================================== */
 const hotelMoney = (value) => `৳${Number(value || 0).toLocaleString('en-BD')}`;
 const tourMoney = (value) => `BDT ${Number(value || 0).toLocaleString('en-BD')}`;
 const hotelStars = (rating) => { const n = Math.max(0, Math.min(5, Math.round(Number(rating || 0)))); return Array.from({ length: n }, () => icon('i-star')).join(''); };
@@ -1826,8 +1912,8 @@ function hotelBreadcrumb(trail) {
 function hotelGalleryModal(images, startIndex = 0) {
   if (!images?.length) return;
   let index = startIndex;
-  const render = () => { const img = images[index] || images[0]; $('#modalContent').innerHTML = `<div class="gallery-lightbox"><button class="gallery-arrow gallery-prev" type="button" aria-label="Previous">${icon('i-arrow-left')}</button><div class="gallery-stage"><img src="${escapeHtml(img.url)}" alt="${escapeHtml(img.alt || 'Hotel photo')}" /><span class="gallery-count">${index + 1} / ${images.length}</span></div><button class="gallery-arrow gallery-next" type="button" aria-label="Next">${icon('i-arrow-right')}</button></div><button type="button" class="btn btn-outline full-btn" data-close-modal>Close</button>`; bindGallery(); };
-  const bindGallery = () => { $('#modalContent .gallery-prev')?.addEventListener('click', () => { index = (index - 1 + images.length) % images.length; render(); }); $('#modalContent .gallery-next')?.addEventListener('click', () => { index = (index + 1) % images.length; render(); }); $$('#modalContent [data-close-modal]').forEach(b => b.addEventListener('click', () => closeModal($('#genericModal')))); };
+  const render = () => { const img = images[index] || images[0]; $('#modalContent').innerHTML = `<div class="gallery-lightbox"><button class="gallery-arrow gallery-prev" type="button" aria-label="Previous">${icon('i-arrow-left')}</button><div class="gallery-stage">${hotelImageTag(img.displayUrl || img.url, img.alt || 'Hotel photo')}<span class="gallery-count">${index + 1} / ${images.length}</span></div><button class="gallery-arrow gallery-next" type="button" aria-label="Next">${icon('i-arrow-right')}</button></div><button type="button" class="btn btn-outline full-btn" data-close-modal>Close</button>`; bindGallery(); };
+  const bindGallery = () => { $('#modalContent .gallery-prev')?.addEventListener('click', () => { index = (index - 1 + images.length) % images.length; render(); }); $('#modalContent .gallery-next')?.addEventListener('click', () => { index = (index + 1) % images.length; render(); }); bindHotelImageRecovery($('#modalContent')); $$('#modalContent [data-close-modal]').forEach(b => b.addEventListener('click', () => closeModal($('#genericModal')))); };
   openModal($('#genericModal')); render();
 }
 function hotelCompactSearchForm(values) {
@@ -1933,9 +2019,12 @@ function hotelStepper(label, id, value, min, max) {
   return `<div class="guest-stepper"><div><strong>${escapeHtml(label)}</strong></div><div class="stepper"><button type="button" data-step-target="${id}" data-dir="-1">−</button><output id="${id}" data-value="${value}"><span id="${id}Val">${value}</span></output><button type="button" data-step-target="${id}" data-dir="1">+</button></div></div>`;
 }
 function hotelCardHtml(hotel, search) {
-  const img = hotelImageSrc(hotel);
-  const hasRealImage = hotelHasValidImage(hotel);
-  const photoCount = Array.isArray(hotel.images) ? hotel.images.length : 0;
+  // Canonical selectors only: card, search results, detail gallery and booking
+  // summary all resolve the cover photo the same way (primary -> first valid).
+  const images = hotelImageList(hotel);
+  const img = images[0]?.displayUrl || '';
+  const hasRealImage = images.length > 0;
+  const photoCount = images.length;
   const rating = hotel.guestRating || hotel.starRating || 0;
   const reviews = hotel.reviewCount || 0;
   const detailHref = `/hotels/${encodeURIComponent(hotel.slug)}?${hotelBuildUrl({ ...search, page: 1 })}`;
@@ -2008,6 +2097,7 @@ async function renderHotelLanding(root) {
     if (!grid) return;
     if (featured.length) {
       grid.innerHTML = featured.map(h => hotelCardHtml(h, defaultSearch)).join('');
+      bindHotelImageRecovery(grid);
     } else {
       grid.innerHTML = publicEmptyState('No hotels published yet', 'Hotels will appear here after an administrator adds and publishes them.', '<a class="btn btn-primary" href="/" data-public-route="/">Back home</a>');
     }
@@ -2100,6 +2190,7 @@ async function renderHotelSearch(root, query) {
       if (grid) {
         if (r.hotels.length) {
           grid.innerHTML = r.hotels.map(h => hotelCardHtml(h, search)).join('');
+          bindHotelImageRecovery(grid);
         } else {
           grid.innerHTML = publicEmptyState('No hotels found', 'Try changing your dates, destination, or filters.', `<button class="btn btn-outline" type="button" id="hotelClearFilters">Clear filters</button>`);
         }
@@ -2308,7 +2399,7 @@ async function renderHotelDetail(root, slug, query) {
     return;
   }
   document.title = `${hotel.name} | Sadik Travels`;
-  const firstImgForSeo = hotel.thumbnail || (hotel.images && hotel.images[0] ? extractImageUrl(hotel.images[0]) : '') || '';
+  const firstImgForSeo = hotelImageSrc(hotel);
   setSeo({
     title: hotel.name,
     description: hotel.shortDescription || `${hotel.name} in ${hotel.city}. Book with Sadik Travels.`,
@@ -2325,19 +2416,12 @@ async function renderHotelDetail(root, slug, query) {
   });
   trackAnalytics('hotel_view', { slug: hotel.slug, city: hotel.city });
 
-  // Canonical image handling — use real images only, fallback only when genuinely missing
-  const rawImages = Array.isArray(hotel.images) ? hotel.images : [];
-  const normalizedImages = rawImages.map(img => {
-    const url = extractImageUrl(img);
-    return url ? { url, alt: img.alt || hotel.name } : null;
-  }).filter(Boolean);
-  // Also include thumbnail if it is not already in images
-  const thumbUrl = hotel.thumbnail ? String(hotel.thumbnail).trim() : '';
-  if (thumbUrl && !normalizedImages.some(i => i.url === thumbUrl)) {
-    normalizedImages.unshift({ url: thumbUrl, alt: hotel.name });
-  }
+  // Canonical image handling — the same selector the card and the booking
+  // summary use, so the gallery can only fall back when the record genuinely
+  // has no loadable photo.
+  const normalizedImages = hotelImageList(hotel).map(image => ({ ...image, alt: image.alt || hotel.name }));
   const hasImages = normalizedImages.length > 0;
-  const mainImg = hasImages ? normalizedImages[0].url : '';
+  const mainImg = hasImages ? normalizedImages[0].displayUrl : '';
   const secondaryImages = normalizedImages.slice(1);
 
   const allSoldOut = Boolean((search.checkIn && search.checkOut) && hotel.rooms?.length && hotel.rooms.every(room => Number(room.available) <= 0));
@@ -2375,7 +2459,7 @@ async function renderHotelDetail(root, slug, query) {
       galleryHtml = `
         <div class="hotel-gallery hotel-gallery-single">
           <button class="hotel-gallery-main" data-gallery-open type="button" aria-label="View photo">
-            <img src="${escapeHtml(mainImg)}" alt="${escapeHtml(hotel.name)}" loading="eager" />
+            ${hotelImageTag(mainImg, hotel.name, 'loading="eager" data-gallery-hero')}
             <span class="hotel-gallery-count">${icon('i-images')} 1 photo</span>
           </button>
         </div>`;
@@ -2387,19 +2471,19 @@ async function renderHotelDetail(root, slug, query) {
             <span class="hotel-gallery-count">${icon('i-images')} ${normalizedImages.length} photos</span>
           </button>
           <div class="hotel-gallery-side">
-            <button class="hotel-gallery-side-item" data-thumb="${escapeHtml(secondaryImages[0].url)}" type="button"><img src="${escapeHtml(secondaryImages[0].url)}" alt="" loading="lazy" /></button>
+            <button class="hotel-gallery-side-item" data-thumb="${escapeHtml(secondaryImages[0].displayUrl)}" type="button">${hotelImageTag(secondaryImages[0].displayUrl, secondaryImages[0].alt)}</button>
           </div>
         </div>`;
     } else {
       // 3+ images: main + 2 side + view all
       const sideItems = secondaryImages.slice(0, 2).map((img, idx) => `
-        <button class="hotel-gallery-side-item" data-thumb="${escapeHtml(img.url)}" data-index="${idx+1}" type="button"><img src="${escapeHtml(img.url)}" alt="" loading="lazy" /></button>
+        <button class="hotel-gallery-side-item" data-thumb="${escapeHtml(img.displayUrl)}" data-index="${idx+1}" type="button">${hotelImageTag(img.displayUrl, img.alt)}</button>
       `).join('');
       const extraCount = normalizedImages.length - 3;
       galleryHtml = `
         <div class="hotel-gallery hotel-gallery-multi">
           <button class="hotel-gallery-main" data-gallery-open type="button" aria-label="View all photos">
-            <img src="${escapeHtml(mainImg)}" alt="${escapeHtml(hotel.name)}" loading="eager" />
+            ${hotelImageTag(mainImg, hotel.name, 'loading="eager" data-gallery-hero')}
             <span class="hotel-gallery-count">${icon('i-images')} ${normalizedImages.length} photos</span>
           </button>
           <div class="hotel-gallery-side">
@@ -2535,12 +2619,14 @@ async function renderHotelDetail(root, slug, query) {
   function hotelRoomCardHtml(room, hotel, selection, nights) {
     const soldOut = Number(room.available) <= 0;
     const selected = selection.rooms.find(r => r.roomId === room.id);
-    const img = room.images?.[0] ? extractImageUrl(room.images[0]) : (hotel.thumbnail || (hotel.images?.[0] ? extractImageUrl(hotel.images[0]) : ''));
+    // Room photo first, then the hotel cover photo — resolved by the same
+    // canonical selector as every other surface.
+    const img = hotelImageSrc(room) || hotelImageSrc(hotel);
     const discountBadge = room.originalPrice && room.originalPrice > room.pricePerNight ? `<span class="room-discount">-${Math.round((1 - room.pricePerNight / room.originalPrice) * 100)}% OFF</span>` : '';
-    const hasRoomImage = Boolean(img && !img.includes('hotel-placeholder'));
+    const hasRoomImage = Boolean(img);
     return `<article class="hotel-room-card${soldOut ? ' soldout' : ''}${selected ? ' selected' : ''}" data-room-id="${escapeHtml(room.id)}">
       <div class="hotel-room-media">
-        ${hasRoomImage ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(room.name)}" loading="lazy" />` : `<div class="hotel-img-fallback room-fallback"><img src="${HOTEL_PLACEHOLDER}" alt="" /></div>`}
+        ${hasRoomImage ? hotelImageTag(img, room.name) : `<div class="hotel-img-fallback room-fallback"><img src="${HOTEL_PLACEHOLDER}" alt="${escapeHtml(room.name)}" loading="lazy" data-image-fallback data-fallback-applied="1" /></div>`}
         ${discountBadge}
       </div>
       <div class="hotel-room-body">
@@ -2576,6 +2662,7 @@ async function renderHotelDetail(root, slug, query) {
         return;
       }
       grid.innerHTML = similar.map(h => hotelCardHtml(h, { checkIn: search.checkIn, checkOut: search.checkOut, adults: search.adults, children: search.children, rooms: search.rooms })).join('');
+      bindHotelImageRecovery(grid);
     } catch (err) {
       grid.innerHTML = publicEmptyState('Similar hotels unavailable', 'Try searching again from the hotel search page.', '<a class="btn btn-outline" href="/hotels" data-public-route="/hotels">Search hotels</a>');
     }
@@ -2588,9 +2675,11 @@ async function renderHotelDetail(root, slug, query) {
     }));
     $$('[data-thumb]').forEach(el => el.addEventListener('click', () => {
       const url = el.dataset.thumb;
-      const idx = normalizedImages.findIndex(i => i.url === url);
+      const idx = normalizedImages.findIndex(i => (i.displayUrl || i.url) === url || i.url === url);
       hotelGalleryModal(normalizedImages, Math.max(0, idx));
     }));
+    // Loading skeleton -> real photo -> branded placeholder -> retry, uniformly.
+    bindHotelImageRecovery(document);
     $$('[data-chat-hotel]').forEach(btn => btn.addEventListener('click', () => {
       void openHotelChat({ id: hotel.id, name: hotel.name });
     }));
@@ -2604,7 +2693,7 @@ async function renderHotelDetail(root, slug, query) {
         quantity: 1,
         pricePerNight: room.pricePerNight,
         maxGuests: room.maxGuests || room.maxAdults || 2,
-        image: room.images?.[0] ? extractImageUrl(room.images[0]) : mainImg
+        image: hotelImageSrc(room) || mainImg
       });
       selection.hotelId = hotel.id;
       selection.slug = hotel.slug;
@@ -2736,7 +2825,8 @@ async function renderMyBookings(root) {
       }).join('') : publicEmptyState(`No ${active} bookings`, active === 'upcoming' ? 'Your upcoming hotel stays will appear here.' : 'Nothing here yet.', '')}</div>`;
   };
   root.innerHTML = publicPageHeader('Account', 'My Bookings', 'Your hotel bookings with Sadik Travels.', `<a class="btn btn-outline" href="/hotels" data-public-route="/hotels">Book a stay</a>`) + `<section class="public-page-card">${renderList('upcoming')}</section>`;
-  $$('[data-tab]').forEach(t => t.addEventListener('click', () => { $('.public-page-card').innerHTML = renderList(t.dataset.tab); $$('[data-tab]').forEach(x => x.classList.toggle('active', x === t)); $$('[data-tab]').forEach(x => { /* rebind */ }); $$('.bookings-list [data-public-route]').forEach(() => {}); }));
+  bindHotelImageRecovery(root);
+  $$('[data-tab]').forEach(t => t.addEventListener('click', () => { $('.public-page-card').innerHTML = renderList(t.dataset.tab); bindHotelImageRecovery($('.public-page-card')); $$('[data-tab]').forEach(x => x.classList.toggle('active', x === t)); $$('[data-tab]').forEach(x => { /* rebind */ }); $$('.bookings-list [data-public-route]').forEach(() => {}); }));
 }
 async function renderBookingDetail(root, id) {
   document.title = 'Booking | Sadik Travels';

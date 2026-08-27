@@ -14,6 +14,7 @@ import { createServer } from 'node:http';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { config } from './config.js';
+import { hotelDisplayImages, normalizeHotelImages, primaryImageUrl } from './hotel-store.js';
 import { ChatRealtimeHub } from './chat/realtime.js';
 import { ChatService } from './chat/service.js';
 import { registerChatRoutes } from './chat/routes.js';
@@ -83,7 +84,9 @@ async function main() {
   const demoPriceFrom = (hotel: any) => hotel.priceFrom ?? (hotel.starRating >= 5 ? 9500 : hotel.starRating >= 4 ? 4200 : 2800);
   app.get('/api/v1/hotels', (req, res) => {
     const q = req.query as any;
-    let items = liveHotels().map(hotel => ({ ...hotel, slug: hotelSlug(hotel), shortDescription: `Demo ${String(hotel.propertyType).toLowerCase()} in ${hotel.city}.`, priceFrom: demoPriceFrom(hotel), originalPriceFrom: Math.round(demoPriceFrom(hotel) * 1.2), roomCount: 2, availableRooms: 2, thumbnail: hotel.images?.[0]?.url }));
+    // Same canonical image contract the production HotelStore returns:
+    // `images[].url` canonical, `images[].displayUrl` responsive, `thumbnail` = cover.
+    let items = liveHotels().map(hotel => ({ ...hotel, slug: hotelSlug(hotel), shortDescription: `Demo ${String(hotel.propertyType).toLowerCase()} in ${hotel.city}.`, priceFrom: demoPriceFrom(hotel), originalPriceFrom: Math.round(demoPriceFrom(hotel) * 1.2), roomCount: 2, availableRooms: 2, images: hotelDisplayImages(hotel.images, 600), thumbnail: primaryImageUrl(hotel.images) }));
     const norm = (v: unknown) => String(v ?? '').toLowerCase();
     if (q.q) items = items.filter(hotel => `${hotel.name} ${hotel.city} ${hotel.area || ''}`.toLowerCase().includes(norm(q.q)));
     if (q.destination) items = items.filter(hotel => `${hotel.name} ${hotel.city} ${hotel.area || ''}`.toLowerCase().includes(norm(q.destination)));
@@ -119,7 +122,8 @@ async function main() {
     const hotel = hotels.find(candidate => candidate.id === req.params.slug || hotelSlug(candidate) === String(req.params.slug).toLowerCase());
     if (!hotel) return res.status(404).json({ error: { code: 'HOTEL_NOT_FOUND', message: 'Hotel not found' } });
     const base = demoPriceFrom(hotel);
-    res.json({ success: true, hotel: { ...hotel, slug: hotelSlug(hotel), priceFrom: base, checkInTime: '14:00', checkOutTime: '12:00', cancellationPolicy: { type: 'free', freeUntilDays: 1 }, rooms: [
+    const gallery = hotelDisplayImages(hotel.images, 1280);
+    res.json({ success: true, hotel: { ...hotel, slug: hotelSlug(hotel), priceFrom: base, checkInTime: '14:00', checkOutTime: '12:00', cancellationPolicy: { type: 'free', freeUntilDays: 1 }, images: gallery, thumbnail: gallery[0]?.displayUrl, rooms: [
       { id: `${hotel.id}-deluxe`, name: 'Deluxe Double Room', size: 320, bedType: '1 double bed', maxGuests: 2, numBeds: 1, pricePerNight: base, originalPrice: Math.round(base * 1.2), available: 5, amenities: ['AC', 'Free Wi-Fi', 'Breakfast'], images: [] },
       { id: `${hotel.id}-premium`, name: 'Premium Sea View', size: 420, bedType: '1 king bed', maxGuests: 3, numBeds: 1, pricePerNight: Math.round(base * 1.6), available: 3, amenities: ['AC', 'Balcony', 'Sea view'], images: [] }
     ] } });
@@ -167,7 +171,7 @@ async function main() {
   app.get('/api/v1/admin/hotels', demoAuth, (req, res) => {
     const user = (req as any).user as User;
     const scoped = user.role === 'hotel_owner' ? hotels.filter(hotel => hotel.ownerId === user.id) : hotels;
-    res.json({ hotels: scoped.map(hotel => ({ ...hotel, slug: hotel.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), roomCount: 2, priceFrom: 3500, images: hotel.images, status: 'active' })), total: scoped.length, page: 1, pageSize: 50, pageCount: 1 });
+    res.json({ hotels: scoped.map(hotel => ({ ...hotel, slug: hotel.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), roomCount: 2, priceFrom: 3500, images: normalizeHotelImages(hotel.images), thumbnail: primaryImageUrl(hotel.images), status: 'active' })), total: scoped.length, page: 1, pageSize: 50, pageCount: 1 });
   });
   app.get('/api/v1/notifications', demoAuth, (_req, res) => res.json({ unread: 0, notifications: [] }));
 

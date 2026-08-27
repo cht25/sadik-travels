@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import { AppError } from './errors.js';
-import { optimizedMediaUrl } from './media.js';
+import { canonicalMediaUrl, optimizedMediaUrl } from './media.js';
 
 /**
  * Hotel booking ecosystem (add-on). Uses the same shared mongoose connection as
@@ -15,7 +15,7 @@ export type RoomStatus = 'active' | 'hidden' | 'archived';
 export type HotelBookingStatus = 'pending' | 'payment_pending' | 'confirmed' | 'cancelled' | 'completed' | 'refund_requested' | 'refunded' | 'failed' | 'expired';
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded' | 'partial';
 
-export type HotelImage = { url: string; publicId?: string; mediaId?: string; alt?: string };
+export type HotelImage = { url: string; publicId?: string; mediaId?: string; alt?: string; isPrimary?: boolean };
 export type SeasonalDiscount = { name: string; startDate: string; endDate: string; percentage: number };
 export type CancellationPolicy = { type: 'free' | 'non_refundable'; freeUntilDays?: number; description?: string };
 
@@ -77,7 +77,7 @@ const makeModel = (name: string, collection: string, fields: Record<string, any>
   return model(name, schema, collection);
 };
 
-const imageSchema = () => [{ url: String, publicId: String, mediaId: String, alt: String }];
+const imageSchema = () => [{ url: String, publicId: String, mediaId: String, alt: String, isPrimary: Boolean }];
 const cancellationSchema = () => ({ type: { type: String, enum: ['free', 'non_refundable'], default: 'free' }, freeUntilDays: Number, description: String });
 
 const HotelModel = makeModel('SadikHotel', 'hotels', {
@@ -122,6 +122,7 @@ const contains = (value: unknown, query?: string) => !query || normalize(value).
 const pageN = (value?: number) => Math.max(1, Math.floor(value || 1));
 const sizeN = (value?: number, fallback = 20) => Math.min(100, Math.max(1, Math.floor(value || fallback)));
 const stripMongo = (doc: any) => { if (!doc) return doc; const { _id, __v, ...rest } = doc; return clone(rest); };
+const defined = <T extends Record<string, any>>(value: T): T => Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
 const eachDate = (checkIn: string, checkOut: string): string[] => {
   const dates: string[] = []; const start = new Date(`${checkIn}T00:00:00Z`); const end = new Date(`${checkOut}T00:00:00Z`);
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return dates;
@@ -143,8 +144,6 @@ export function generateBookingNumber() {
   return `ST-${year}-${code}`;
 }
 
-const optimizeImages = (images: HotelImage[] | undefined, width: number): HotelImage[] => normalizeHotelImages(images).map(image => ({ ...image, url: optimizedMediaUrl(image.url, { width }) || image.url }));
-
 /**
  * Canonical image normalization — applied on every save AND every read.
  *
@@ -152,12 +151,16 @@ const optimizeImages = (images: HotelImage[] | undefined, width: number): HotelI
  *  - legacy/malformed rows where `images` contains plain URL strings instead of {url} objects
  *  - objects stored under different keys: secureUrl, imageUrl, src, secure_url, image_url
  *  - insecure http:// URLs blocked by production CSP / HTTPS — upgraded to https://
+ *  - Cloudinary URLs that were written back with display transformations chained into the
+ *    path — reduced to their canonical delivery URL (see canonicalMediaUrl)
  *  - whitespace-only or missing URLs — dropped entirely so frontend can rely on images[n].url
  *  - Cloudinary URLs must be preserved as absolute https:// URLs, never rewritten to /uploads
+ *  - duplicate URLs collapsed, and the primary (cover) photo always lands at index 0
  */
 export function normalizeHotelImages(images: unknown): HotelImage[] {
   if (!Array.isArray(images)) return [];
   const normalized: HotelImage[] = [];
+  let sawPrimary = false;
   for (const entry of images) {
     if (!entry) continue;
     let rawUrl: unknown;
@@ -176,8 +179,10 @@ export function normalizeHotelImages(images: unknown): HotelImage[] {
     if (!/^(https?:\/\/|\/\/|data:image\/|\/)/i.test(url)) continue;
     if (url.startsWith('//')) url = `https:${url}`;
     if (url.startsWith('http://')) url = `https://${url.slice('http://'.length)}`;
+    url = canonicalMediaUrl(url) || url;
+    if (normalized.some(image => image.url === url)) continue;
     const source = typeof entry === 'object' && entry ? (entry as any) : {};
-    normalized.push({
+    const image: HotelImage = {
       url,
       ...(source.publicId ? { publicId: String(source.publicId) } : {}),
       ...(source.public_id ? { publicId: String(source.public_id) } : {}),
@@ -185,14 +190,30 @@ export function normalizeHotelImages(images: unknown): HotelImage[] {
       ...(source.media_id ? { mediaId: String(source.media_id) } : {}),
       ...(source.alt ? { alt: String(source.alt).slice(0, 300) } : {}),
       ...(source.altText ? { alt: String(source.altText).slice(0, 300) } : {}),
-    });
+    };
+    if (source.isPrimary === true || source.isPrimary === 'true') { sawPrimary = true; normalized.unshift(image); } else normalized.push(image);
   }
-  return normalized;
+  // Exactly one primary: index 0. Everything else carries no flag, so the
+  // frontend can rely on images[0] being the cover photo everywhere.
+  return normalized.map((image, index) => (index === 0 && sawPrimary ? { ...image, isPrimary: true } : image));
 }
 
-function primaryImageUrl(images: unknown): string | undefined {
-  const list = normalizeHotelImages(images);
-  return list[0]?.url;
+/** Primary (cover) photo URL of a hotel/room record, or undefined. */
+export function primaryImageUrl(images: unknown): string | undefined {
+  return normalizeHotelImages(images)[0]?.url;
+}
+
+/**
+ * Read-side view of a hotel/room image list.
+ *
+ * `url` stays the canonical, permanently stored Cloudinary URL — it is what an
+ * editor must be handed so a save round trip never rewrites stored data.
+ * `displayUrl` is the responsive variant for the surface being rendered and is
+ * never persisted.
+ */
+export type HotelDisplayImage = HotelImage & { displayUrl: string };
+export function hotelDisplayImages(images: unknown, width: number): HotelDisplayImage[] {
+  return normalizeHotelImages(images).map(image => ({ ...image, displayUrl: optimizedMediaUrl(image.url, { width }) || image.url }));
 }
 
 export class HotelStore {
@@ -202,8 +223,10 @@ export class HotelStore {
   private async allRooms() { return (await RoomModel.find({}).lean()).map(stripMongo); }
   private async oneHotel(idOrSlug: string) { const doc = await HotelModel.findOne({ $or: [{ id: idOrSlug }, { slug: idOrSlug }] }).lean(); return doc ? stripMongo(doc) : undefined; }
   private async oneRoom(id: string) { const doc = await RoomModel.findOne({ id }).lean(); return doc ? stripMongo(doc) : undefined; }
-  private async saveHotel(hotel: any) { const doc = await HotelModel.findOneAndUpdate({ id: hotel.id }, { $set: hotel }, { new: true, upsert: true }).lean(); return stripMongo(doc); }
-  private async saveRoom(room: any) { const doc = await RoomModel.findOneAndUpdate({ id: room.id }, { $set: room }, { new: true, upsert: true }).lean(); return stripMongo(doc); }
+  // `undefined` values are stripped before $set: a partial patch must never
+  // blank out a field (notably `images`) that the caller did not send.
+  private async saveHotel(hotel: any) { const doc = await HotelModel.findOneAndUpdate({ id: hotel.id }, { $set: defined(hotel) }, { new: true, upsert: true }).lean(); return stripMongo(doc); }
+  private async saveRoom(room: any) { const doc = await RoomModel.findOneAndUpdate({ id: room.id }, { $set: defined(room) }, { new: true, upsert: true }).lean(); return stripMongo(doc); }
   private async saveBooking(booking: any) { const doc = await BookingModel.findOneAndUpdate({ id: booking.id }, { $set: booking }, { new: true, upsert: true }).lean(); return stripMongo(doc); }
 
   private seasonalDiscountFor(hotel: Hotel, date = new Date().toISOString().slice(0, 10)): number {
@@ -305,14 +328,11 @@ export class HotelStore {
     const currentPage = pageN(filters.page); const pageSize = sizeN(filters.pageSize, 12);
     const slice = items.slice((currentPage - 1) * pageSize, currentPage * pageSize);
     const view = slice.map(hotel => {
-      const normalized = normalizeHotelImages(hotel.images);
-      const optimized = normalized.map(image => ({ ...image, url: optimizedMediaUrl(image.url, { width: 600 }) || image.url }));
-      const thumbSource = normalized[0]?.url;
-      return {
-        ...hotel,
-        images: optimized,
-        thumbnail: thumbSource ? optimizedMediaUrl(thumbSource, { width: 600 }) || thumbSource : undefined
-      };
+      // `images[].url` is the canonical stored URL; `images[].displayUrl` is the
+      // 16:9 card variant. The canonical URL is what any editor round trip must
+      // persist, so display transformations never leak into the database.
+      const images = hotelDisplayImages(hotel.images, 600);
+      return { ...hotel, images, thumbnail: images[0]?.displayUrl };
     });
     const live = (await this.allHotels()).filter(h => h.status === 'active' && h.available !== false && !h.deletedAt);
     const propertyTypes = [...new Set(live.map(h => h.propertyType).filter(Boolean))].sort();
@@ -336,11 +356,10 @@ export class HotelStore {
     const hotel = await this.oneHotel(idOrSlug);
     if (!hotel || hotel.deletedAt || hotel.status !== 'active' || hotel.available === false) return undefined;
     const rooms = (await this.allRooms()).filter(room => room.hotelId === hotel.id && !room.deletedAt && room.status === 'active');
-    const roomsWithAvail = options.checkIn && options.checkOut ? await Promise.all(rooms.map(async room => ({ ...room, images: optimizeImages(room.images, 800), available: await this.availabilityFor(room.id, options.checkIn!, options.checkOut!, room.inventory), nights: nightsBetween(options.checkIn!, options.checkOut!) }))) : rooms.map(room => ({ ...room, images: optimizeImages(room.images, 800), available: room.inventory }));
+    const roomsWithAvail = options.checkIn && options.checkOut ? await Promise.all(rooms.map(async room => ({ ...room, images: hotelDisplayImages(room.images, 800), available: await this.availabilityFor(room.id, options.checkIn!, options.checkOut!, room.inventory), nights: nightsBetween(options.checkIn!, options.checkOut!) }))) : rooms.map(room => ({ ...room, images: hotelDisplayImages(room.images, 800), available: room.inventory }));
     // Normalize hotel images once, so thumbnail, gallery and snapshot all use the same canonical source
-    const hotelImages = optimizeImages(hotel.images, 1280);
-    const normalizedForThumb = normalizeHotelImages(hotel.images);
-    const thumb = normalizedForThumb[0]?.url ? optimizedMediaUrl(normalizedForThumb[0].url, { width: 600 }) || normalizedForThumb[0].url : undefined;
+    const hotelImages = hotelDisplayImages(hotel.images, 1280);
+    const thumb = hotelImages[0]?.displayUrl ? optimizedMediaUrl(hotelImages[0].url, { width: 600 }) || hotelImages[0].url : undefined;
     return { ...hotel, priceFrom: this.priceFromHotel(rooms, hotel), originalPriceFrom: this.originalPriceFromHotel(rooms, hotel), images: hotelImages, thumbnail: thumb, rooms: (options.withRooms === false ? [] : roomsWithAvail) };
   }
 
@@ -495,25 +514,36 @@ export class HotelStore {
     const total = hotels.length; const currentPage = pageN(filters.page); const pageSize = sizeN(filters.pageSize, 20);
     const slice = hotels.slice((currentPage - 1) * pageSize, currentPage * pageSize).map(hotel => {
       const hotelRooms = rooms.filter(r => r.hotelId === hotel.id && !r.deletedAt && r.status === 'active');
-      const normalized = normalizeHotelImages(hotel.images);
-      const optimized = normalized.map(image => ({ ...image, url: optimizedMediaUrl(image.url, { width: 200 }) || image.url }));
-      const thumb = normalized[0]?.url ? optimizedMediaUrl(normalized[0].url, { width: 400 }) || normalized[0].url : undefined;
-      return { ...hotel, roomCount: hotelRooms.length, priceFrom: this.priceFromHotel(hotelRooms, hotel), images: optimized, thumbnail: thumb };
+      // The admin editor seeds its form from this payload and posts it straight
+      // back on save, so `images[].url` MUST stay the canonical stored URL.
+      const images = normalizeHotelImages(hotel.images);
+      const thumb = images[0]?.url ? optimizedMediaUrl(images[0].url, { width: 400 }) || images[0].url : undefined;
+      return { ...hotel, roomCount: hotelRooms.length, priceFrom: this.priceFromHotel(hotelRooms, hotel), images, thumbnail: thumb };
     });
     return { hotels: slice, total, page: currentPage, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
   }
-  async adminFindHotel(id: string) { const hotel = await this.oneHotel(id); return hotel ? hotel as Hotel : undefined; }
-  async adminFindRoom(id: string) { const room = await this.oneRoom(id); return room && !room.deletedAt ? room as HotelRoom : undefined; }
+  async adminFindHotel(id: string) { const hotel = await this.oneHotel(id); return hotel ? { ...hotel, images: normalizeHotelImages(hotel.images), thumbnail: primaryImageUrl(hotel.images) } as Hotel & { thumbnail?: string } : undefined; }
+  async adminFindRoom(id: string) { const room = await this.oneRoom(id); return room && !room.deletedAt ? { ...room, images: normalizeHotelImages(room.images) } as HotelRoom : undefined; }
   async adminCreateHotel(input: Partial<Hotel>, actor: string) { const time = now(); const hotel: Hotel = { id: randomUUID(), slug: input.slug!, name: input.name!, shortDescription: input.shortDescription, description: input.description, propertyType: input.propertyType || 'Hotel', address: input.address, city: input.city!, country: input.country || 'Bangladesh', area: input.area, latitude: input.latitude, longitude: input.longitude, phone: input.phone, email: input.email, website: input.website, starRating: input.starRating ?? 3, guestRating: input.guestRating, reviewCount: 0, amenities: input.amenities || [], facilities: input.facilities || [], images: normalizeHotelImages(input.images), roomTypes: input.roomTypes || [], pricePerNight: input.pricePerNight, seasonalDiscounts: input.seasonalDiscounts || [], available: input.available !== false, ownerId: input.ownerId || actor, checkInTime: input.checkInTime, checkOutTime: input.checkOutTime, cancellationPolicy: input.cancellationPolicy, status: input.status || 'active', featured: input.featured || false, sortOrder: input.sortOrder || 0, createdBy: actor, updatedAt: time, createdAt: time } as Hotel; return this.saveHotel(hotel); }
-  async adminUpdateHotel(id: string, patch: Partial<Hotel>, actor: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, ...patch, id, updatedBy: actor, updatedAt: now(), ...(patch.images ? { images: normalizeHotelImages(patch.images) } : {}) }); }
+  async adminUpdateHotel(id: string, patch: Partial<Hotel>, actor: string) {
+    const hotel = await this.oneHotel(id);
+    if (!hotel) return undefined;
+    // Always re-normalize the merged image list: a submitted list is canonicalized,
+    // and any save of a legacy record repairs its stored images in place.
+    return this.saveHotel({ ...hotel, ...patch, id, updatedBy: actor, updatedAt: now(), images: normalizeHotelImages(patch.images ?? hotel.images) });
+  }
   async adminArchiveHotel(id: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, status: 'archived', updatedAt: now() }); }
   async adminRestoreHotel(id: string) { const hotel = await this.oneHotel(id); if (!hotel) return undefined; return this.saveHotel({ ...hotel, status: 'active', deletedAt: undefined as any, updatedAt: now() }); }
   async adminDeleteHotel(id: string) { const bookings = await BookingModel.findOne({ hotelId: id }).lean(); if (bookings) throw new AppError(409, 'HOTEL_IN_USE', 'Archive this hotel instead — it is referenced by existing bookings'); return (await HotelModel.deleteOne({ id })).deletedCount === 1; }
 
   // ---- Admin: rooms ----
-  async adminListRooms(hotelId: string) { return (await this.allRooms()).filter(room => room.hotelId === hotelId && !room.deletedAt).sort((a, b) => a.sortOrder - b.sortOrder).map(room => ({ ...room, images: optimizeImages(room.images, 200) })); }
+  async adminListRooms(hotelId: string) { return (await this.allRooms()).filter(room => room.hotelId === hotelId && !room.deletedAt).sort((a, b) => a.sortOrder - b.sortOrder).map(room => ({ ...room, images: hotelDisplayImages(room.images, 400), thumbnail: primaryImageUrl(room.images) ? optimizedMediaUrl(primaryImageUrl(room.images)!, { width: 400 }) : undefined })); }
   async adminCreateRoom(hotelId: string, input: Partial<HotelRoom>, actor: string) { const time = now(); const room: HotelRoom = { id: randomUUID(), hotelId, name: input.name!, slug: input.slug!, description: input.description, images: normalizeHotelImages(input.images), size: input.size, bedType: input.bedType, numBeds: input.numBeds, maxAdults: input.maxAdults ?? 2, maxChildren: input.maxChildren ?? 1, maxGuests: input.maxGuests ?? 3, amenities: input.amenities || [], inventory: input.inventory ?? 5, pricePerNight: input.pricePerNight ?? 0, originalPrice: input.originalPrice, taxesPct: input.taxesPct ?? 0, serviceFee: input.serviceFee ?? 0, cancellationPolicy: input.cancellationPolicy, mealPlan: input.mealPlan, status: input.status || 'active', sortOrder: input.sortOrder || 0, createdBy: actor, updatedAt: time, createdAt: time } as HotelRoom; return this.saveRoom(room); }
-  async adminUpdateRoom(id: string, patch: Partial<HotelRoom>, actor: string) { const room = await this.oneRoom(id); if (!room) return undefined; return this.saveRoom({ ...room, ...patch, id, updatedBy: actor, updatedAt: now(), ...(patch.images ? { images: normalizeHotelImages(patch.images) } : {}) }); }
+  async adminUpdateRoom(id: string, patch: Partial<HotelRoom>, actor: string) {
+    const room = await this.oneRoom(id);
+    if (!room) return undefined;
+    return this.saveRoom({ ...room, ...patch, id, updatedBy: actor, updatedAt: now(), images: normalizeHotelImages(patch.images ?? room.images) });
+  }
   async adminArchiveRoom(id: string) { const room = await this.oneRoom(id); if (!room) return undefined; return this.saveRoom({ ...room, status: 'archived', deletedAt: now(), updatedAt: now() }); }
 
   // ---- Admin: inventory ----

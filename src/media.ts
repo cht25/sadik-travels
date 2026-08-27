@@ -17,7 +17,48 @@ export function detectImage(buffer: Buffer, declaredMime?: string): DetectedImag
   throw new AppError(415, 'UNSUPPORTED_IMAGE_FORMAT', `Unsupported image format${declaredMime ? `: ${declaredMime}` : ''}`);
 }
 
-export function optimizedMediaUrl(url: string | undefined, options: { width?: number; quality?: string } = {}) { if (!url || !url.includes('res.cloudinary.com')) return url; const transformations = ['f_auto', `q_${options.quality || 'auto'}`]; if (options.width) transformations.push(`w_${Math.max(160, Math.floor(options.width))}`, 'c_limit'); return url.replace('/upload/', `/upload/${transformations.join(',')}/`); }
+/**
+ * Canonical (un-transformed) form of a Cloudinary delivery URL.
+ *
+ * Cloudinary lets you chain transformation segments into the path
+ * (`/upload/f_auto,q_auto,w_600,c_limit/v123/folder/asset.jpg`). If a display
+ * URL is ever written back to the database, every later read adds another
+ * segment: the stored URL grows without bound, the image is permanently capped
+ * at the smallest width ever requested, and once it passes the API's URL length
+ * limit the record can no longer be saved at all.
+ *
+ * Everything persisted therefore stores the canonical URL, and display variants
+ * are derived from it on read. This function is also the self-healing path for
+ * rows that were already corrupted by the round trip: the next save stores the
+ * canonical URL again.
+ */
+const CLOUDINARY_UPLOAD_MARKER = '/upload/';
+const TRANSFORM_SEGMENT_RE = /^[a-z]{1,3}_[^/]*$/i;
+const VERSION_SEGMENT_RE = /^v\d+$/;
+
+export function canonicalMediaUrl(url: string | undefined): string | undefined {
+  if (typeof url !== 'string') return url;
+  const trimmed = url.trim();
+  if (!trimmed || !trimmed.includes('res.cloudinary.com')) return trimmed;
+  const at = trimmed.indexOf(CLOUDINARY_UPLOAD_MARKER);
+  if (at === -1) return trimmed;
+  const head = trimmed.slice(0, at + CLOUDINARY_UPLOAD_MARKER.length);
+  const segments = trimmed.slice(at + CLOUDINARY_UPLOAD_MARKER.length).split('/');
+  let index = 0;
+  // Drop leading transformation segments; keep the version segment (`v123456`)
+  // and the public id path that follows it.
+  while (index < segments.length && TRANSFORM_SEGMENT_RE.test(segments[index]) && !VERSION_SEGMENT_RE.test(segments[index])) index += 1;
+  if (index === 0 || index >= segments.length) return trimmed;
+  return `${head}${segments.slice(index).join('/')}`;
+}
+
+export function optimizedMediaUrl(url: string | undefined, options: { width?: number; quality?: string } = {}) {
+  if (!url || !url.includes('res.cloudinary.com')) return url;
+  const base = canonicalMediaUrl(url) || url;
+  const transformations = ['f_auto', `q_${options.quality || 'auto'}`];
+  if (options.width) transformations.push(`w_${Math.max(160, Math.floor(options.width))}`, 'c_limit');
+  return base.replace(CLOUDINARY_UPLOAD_MARKER, `${CLOUDINARY_UPLOAD_MARKER}${transformations.join(',')}/`);
+}
 
 export class MediaService {
   isConfigured() { return Boolean(config.cloudinaryCloudName && config.cloudinaryApiKey && config.cloudinaryApiSecret); }

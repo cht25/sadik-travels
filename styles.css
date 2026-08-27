@@ -1516,6 +1516,70 @@ body.pwa-popup-open{overflow:hidden}
   object-fit: contain;
   position: static;
 }
+/* ---------- Hotel image states (loading / failed / retry) ---------- */
+/* Every hotel photo starts behind a shimmer so a slow CDN never leaves a hole. */
+.hotel-card-media img[data-image-fallback],
+.hotel-gallery img[data-image-fallback],
+.hotel-room-media img[data-image-fallback],
+.booking-row-media img[data-image-fallback] {
+  opacity: 0;
+  transition: opacity .28s ease;
+  background: linear-gradient(100deg, #eef2f7 30%, #e2e8f0 48%, #eef2f7 66%);
+  background-size: 220% 100%;
+  animation: hotel-img-shimmer 1.15s linear infinite;
+}
+.hotel-card-media img[data-image-fallback].is-loaded,
+.hotel-gallery img[data-image-fallback].is-loaded,
+.hotel-room-media img[data-image-fallback].is-loaded,
+.booking-row-media img[data-image-fallback].is-loaded {
+  opacity: 1;
+  animation: none;
+  background: none;
+}
+@keyframes hotel-img-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+.hotel-img-skeleton {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #eef2f7;
+}
+.hotel-img-skeleton-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, .75) 50%, transparent 70%);
+  background-size: 220% 100%;
+  animation: hotel-img-shimmer 1.15s linear infinite;
+}
+/* Transient failure: branded placeholder plus an explicit retry affordance. */
+.hotel-img-error-host { position: relative; }
+.hotel-img-error {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(17, 24, 39, .86);
+  color: #f9fafb;
+  font-size: 12px;
+  font-weight: 600;
+  backdrop-filter: blur(6px);
+}
+.hotel-img-error .hotel-img-retry {
+  padding: 4px 10px;
+  font-size: 11px;
+  line-height: 1.6;
+  border-color: rgba(255, 255, 255, .55);
+  color: #fff;
+  background: transparent;
+}
 .hotel-card-photos {
   position: absolute;
   left: 10px;

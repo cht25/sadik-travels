@@ -994,7 +994,7 @@ async function renderHotels() {
   if (isError(response)) return renderError(response.__error, '/admin/hotels');
   const hotels = response.hotels || [];
   const rows = hotels.length ? hotels.map(hotel => {
-    const thumb = hotel.thumbnail || hotel.images?.[0]?.url || '/assets/hotel-placeholder.svg';
+    const thumb = extractAdminImageUrl(hotel.thumbnail) || extractAdminImageUrl(hotel.images?.[0]) || '/assets/hotel-placeholder.svg';
     return `<tr>
       <td><div class="media-thumb admin-image-wrapper"><img src="${escapeAttr(thumb)}" alt="" data-image-fallback/></div></td>
       <td><a class="table-link" href="/admin/hotels/${escapeAttr(hotel.id)}" data-route="/admin/hotels/${escapeAttr(hotel.id)}"><span class="table-primary">${escapeHtml(hotel.name)}</span><span class="table-secondary">${escapeHtml(hotel.slug)}</span></a></td>
@@ -1024,31 +1024,82 @@ function bindHotelsPage(hotels) {
 }
 function seasonalDiscountsMarkup() { return `<div class="seasonal-discounts"><div class="seasonal-discounts-head"><span class="field-label"><span>Seasonal discounts</span></span><button class="admin-secondary" type="button" data-discount-add>+ Add discount</button></div><div id="seasonalDiscountRows">${seasonalDiscountState.map((discount, index) => `<div class="seasonal-discount-row"><input data-discount-name="${index}" aria-label="Discount name" placeholder="Summer offer" value="${escapeAttr(discount.name || '')}"/><input data-discount-start="${index}" type="date" aria-label="Start date" value="${escapeAttr(discount.startDate || '')}"/><input data-discount-end="${index}" type="date" aria-label="End date" value="${escapeAttr(discount.endDate || '')}"/><label><input data-discount-percentage="${index}" type="number" min="0" max="100" step="0.01" aria-label="Discount percentage" value="${escapeAttr(discount.percentage ?? 0)}"/><span>%</span></label><button class="image-remove" type="button" data-discount-remove="${index}" aria-label="Remove seasonal discount">×</button></div>`).join('') || '<p class="table-secondary">No seasonal discounts configured.</p>'}</div></div>`; }
 function bindSeasonalDiscounts() { $('[data-discount-add]')?.addEventListener('click', () => { seasonalDiscountState.push({ name: '', startDate: '', endDate: '', percentage: 0 }); $('#seasonalDiscountManager').innerHTML = seasonalDiscountsMarkup(); bindSeasonalDiscounts(); }); $$('[data-discount-remove]').forEach(button => button.addEventListener('click', () => { seasonalDiscountState.splice(Number(button.dataset.discountRemove), 1); $('#seasonalDiscountManager').innerHTML = seasonalDiscountsMarkup(); bindSeasonalDiscounts(); })); const sync = (selector, dataKey, field, number = false) => $$(selector).forEach(input => input.addEventListener('input', () => { seasonalDiscountState[Number(input.dataset[dataKey])][field] = number ? Number(input.value) : input.value; })); sync('[data-discount-name]', 'discountName', 'name'); sync('[data-discount-start]', 'discountStart', 'startDate'); sync('[data-discount-end]', 'discountEnd', 'endDate'); sync('[data-discount-percentage]', 'discountPercentage', 'percentage', true); }
+const ADMIN_IMAGE_URL_RE = /^(https?:\/\/|\/\/|data:image\/|\/|blob:)/i;
+/** Canonical URL of a stored/edited image entry — mirrors normalizeHotelImages server side. */
 function extractAdminImageUrl(img) {
   if (!img) return '';
-  if (typeof img === 'string') return img;
-  return img.url || img.secureUrl || img.secure_url || img.imageUrl || img.src || '';
+  const raw = typeof img === 'string' ? img : (img.url || img.displayUrl || img.secureUrl || img.secure_url || img.imageUrl || img.image_url || img.src || img.path || '');
+  return typeof raw === 'string' ? raw.trim() : '';
 }
+/**
+ * Seed the editor state from a saved record. Index 0 is always the primary
+ * (cover) photo, which is what the public card, search results and detail hero
+ * render first.
+ */
+function adminImageStateFrom(record) {
+  const state = [];
+  for (const entry of Array.isArray(record?.images) ? record.images : []) {
+    const url = extractAdminImageUrl(entry);
+    if (!url || !ADMIN_IMAGE_URL_RE.test(url) || state.some(item => item.url === url)) continue;
+    const source = entry && typeof entry === 'object' ? entry : {};
+    state.push({ url, publicId: source.publicId || source.public_id || '', mediaId: source.mediaId || '', alt: source.alt || source.altText || '', isPrimary: source.isPrimary === true });
+  }
+  const primaryAt = state.findIndex(item => item.isPrimary);
+  if (primaryAt > 0) state.unshift(state.splice(primaryAt, 1)[0]);
+  return state.map((item, index) => ({ ...item, isPrimary: index === 0 }));
+}
+const hotelImagesUploading = () => hotelImageState.some(image => image.pending);
+const hotelImagesBroken = () => hotelImageState.filter(image => !image.pending && (!image.url || !ADMIN_IMAGE_URL_RE.test(image.url) || image.error));
 function hotelImagesMarkup() {
-  return `<div class="image-manager"><div class="image-grid" id="hotelImageGrid">${hotelImageState.map((image, i) => {
-    const u = extractAdminImageUrl(image) || '/assets/hotel-placeholder.svg';
-    return `<div class="image-cell${i === 0 ? ' is-primary' : ''}"><img src="${escapeAttr(u)}" alt="" data-image-fallback/>${i === 0 ? '<span class="image-primary-badge">Primary</span>' : `<button type="button" class="image-primary" data-img-primary="${i}">Make primary</button>`}<button type="button" class="image-remove" data-img-remove="${i}" aria-label="Remove image">×</button></div>`;
-  }).join('')}</div><p class="image-hint">The first image is the primary photo used on listing cards and search results. Upload once — images are stored permanently in Cloudinary (https://res.cloudinary.com/...) and every replaced image gets a new URL, so guests always see the latest version. The public site shows the real uploaded image, never the placeholder, when a valid image exists.</p><label class="field-label"><span>Upload images (JPEG/PNG/WebP)</span><input id="hotelImageFile" type="file" accept="image/jpeg,image/png,image/webp" multiple/></label></div>`;
+  const cells = hotelImageState.map((image, i) => {
+    const u = image.previewUrl || extractAdminImageUrl(image) || '/assets/hotel-placeholder.svg';
+    const status = image.pending ? '<span class="image-status uploading">Uploading…</span>'
+      : image.error ? `<span class="image-status failed" title="${escapeAttr(image.error)}">Upload failed</span>`
+      : '<span class="image-status done">Saved to Cloudinary</span>';
+    const primary = i === 0 ? '<span class="image-primary-badge">Primary</span>' : `<button type="button" class="image-primary" data-img-primary="${i}">Make primary</button>`;
+    const move = i === 0 ? '' : `<button type="button" class="image-move" data-img-up="${i}" aria-label="Move photo earlier">↑</button>`;
+    return `<div class="image-cell${i === 0 ? ' is-primary' : ''}${image.pending ? ' is-uploading' : ''}${image.error ? ' is-failed' : ''}"><img src="${escapeAttr(u)}" alt="${escapeAttr(image.alt || '')}" data-image-fallback/>${status}${primary}${move}<button type="button" class="image-remove" data-img-remove="${i}" aria-label="Remove image">×</button></div>`;
+  }).join('');
+  return `<div class="image-manager"><div class="image-grid" id="hotelImageGrid">${cells || '<p class="table-secondary">No photos yet — upload below. The first photo is the cover image shown on the public site.</p>'}</div><p class="image-hint">The first image is the primary photo used on listing cards, search results and the hotel hero. Uploads go straight to Cloudinary and only the returned <code>https://res.cloudinary.com/…</code> URL is stored on the hotel, so photos survive redeploys and restarts. Save is blocked until every upload has a real URL, and the server re-reads the record before reporting success.</p><label class="field-label"><span>Upload images (JPEG/PNG/WebP)</span><input id="hotelImageFile" type="file" accept="image/jpeg,image/png,image/webp" multiple/></label><span class="form-status" id="hotelImageStatus"></span></div>`;
 }
 function bindHotelImages() {
+  const setStatus = (message, kind = '') => { const el = $('#hotelImageStatus'); if (el) { el.textContent = message || ''; el.className = `form-status ${kind}`.trim(); } };
   const refresh = () => { const manager = $('#hotelImageGrid')?.closest('.image-manager'); if (manager) { manager.outerHTML = hotelImagesMarkup(); } bindHotelImages(); };
   const grid = $('#hotelImageGrid');
-  $$('[data-img-remove]', grid).forEach(btn => btn.addEventListener('click', () => { hotelImageState.splice(Number(btn.dataset.imgRemove), 1); refresh(); }));
+  $$('[data-img-remove]', grid).forEach(btn => btn.addEventListener('click', () => {
+    const [removed] = hotelImageState.splice(Number(btn.dataset.imgRemove), 1);
+    if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+    refresh();
+  }));
   $$('[data-img-primary]', grid).forEach(btn => btn.addEventListener('click', () => { const index = Number(btn.dataset.imgPrimary); const [image] = hotelImageState.splice(index, 1); if (image) hotelImageState.unshift(image); refresh(); }));
+  $$('[data-img-up]', grid).forEach(btn => btn.addEventListener('click', () => { const index = Number(btn.dataset.imgUp); if (index <= 0) return; const [image] = hotelImageState.splice(index, 1); hotelImageState.splice(index - 1, 0, image); refresh(); }));
   $('#hotelImageFile')?.addEventListener('change', async event => {
     const files = [...event.target.files || []];
-    if (!files.length) return;
-    for (const file of files) {
-      try { const media = await uploadMediaFile(file, 'hotels', $('#hotelName')?.value || ''); hotelImageState.push({ url: media.secureUrl, publicId: media.publicId, mediaId: media.id, ...(media.altText ? { alt: media.altText } : {}) }); }
-      catch (error) { toast(error.message || 'Image upload failed.', 'error'); }
-    }
     event.target.value = '';
+    if (!files.length) return;
+    // Instant local preview, then the real Cloudinary URL replaces it.
+    const placeholders = files.map(file => ({ url: '', publicId: '', mediaId: '', alt: $('#hotelName')?.value || '', pending: true, previewUrl: URL.createObjectURL(file), name: file.name }));
+    hotelImageState.push(...placeholders);
     refresh();
+    setStatus(`Uploading ${files.length} photo${files.length === 1 ? '' : 's'} to Cloudinary…`);
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files[i]; const slot = placeholders[i];
+      try {
+        const media = await uploadMediaFile(file, 'hotels', $('#hotelName')?.value || '');
+        const secureUrl = extractAdminImageUrl(media);
+        if (!secureUrl || !/^https:\/\//i.test(secureUrl)) throw new Error('The image store did not return a public https URL.');
+        slot.url = secureUrl; slot.publicId = media.publicId || ''; slot.mediaId = media.id || '';
+        if (media.altText) slot.alt = media.altText;
+        slot.pending = false;
+      } catch (error) {
+        slot.pending = false; slot.error = error.message || 'Image upload failed.';
+        toast(slot.error, 'error');
+      }
+      if (slot.previewUrl) { URL.revokeObjectURL(slot.previewUrl); delete slot.previewUrl; }
+    }
+    refresh();
+    const failed = hotelImageState.filter(image => image.error).length;
+    setStatus(failed ? `${failed} upload(s) failed — remove them before saving.` : `${hotelImageState.length} photo(s) ready. Save the hotel to publish them.`, failed ? 'error' : 'success');
   });
 }
 function hotelFormMarkup(hotel = {}) {
@@ -1085,6 +1136,24 @@ function hotelFormMarkup(hotel = {}) {
   <div class="form-grid"><div class="form-span-2" id="seasonalDiscountManager">${seasonalDiscountsMarkup()}</div><div class="form-span-2"><span class="field-label" style="display:block;margin-bottom:6px"><span>Hotel images</span></span><div id="hotelImageManager">${hotelImagesMarkup()}</div></div></div>
   <div class="form-actions"><button type="button" class="admin-secondary" data-modal-close>Cancel</button><button class="admin-primary" type="submit">Save hotel</button></div></form>`;
 }
+/** Canonical payload for the API: no local preview/blob state, index 0 = primary. */
+function adminImagePayload() {
+  return hotelImageState
+    .filter(image => image.url && ADMIN_IMAGE_URL_RE.test(image.url) && !image.pending && !image.error)
+    .map((image, index) => ({ url: image.url, publicId: image.publicId || undefined, mediaId: image.mediaId || undefined, alt: image.alt || undefined, isPrimary: index === 0 }));
+}
+/**
+ * Phase 8 — the record the server sent back must actually contain every photo
+ * the admin just saved, otherwise this throws and the success toast is never
+ * shown.
+ */
+function assertSavedImages(savedRecord, label) {
+  const expected = adminImagePayload().map(image => image.url);
+  if (!expected.length) return;
+  const stored = (Array.isArray(savedRecord?.images) ? savedRecord.images : []).map(extractAdminImageUrl).filter(Boolean);
+  const missing = expected.filter(url => !stored.includes(url));
+  if (missing.length) throw new Error(`${missing.length} photo${missing.length === 1 ? '' : 's'} are missing from the saved ${label}. Nothing was published — please reopen it and upload again.`);
+}
 function readHotelForm() {
   const cancelType = $('#hotelCancelType').value;
   return {
@@ -1095,21 +1164,28 @@ function readHotelForm() {
     amenities: $('#hotelAmenities').value.split(',').map(s => s.trim()).filter(Boolean), roomTypes: $('#hotelRoomTypes').value.split(',').map(s => s.trim()).filter(Boolean), pricePerNight: $('#hotelBasePrice').value ? Number($('#hotelBasePrice').value) : undefined, seasonalDiscounts: seasonalDiscountState.filter(discount => discount.name && discount.startDate && discount.endDate),
     shortDescription: $('#hotelShort').value.trim() || undefined, description: $('#hotelDescription').value.trim() || undefined,
     cancellationPolicy: { type: cancelType, freeUntilDays: cancelType === 'free' ? Number($('#hotelCancelDays').value) || 0 : undefined },
-    status: $('#hotelStatus').value, sortOrder: Number($('#hotelSort').value) || 0, available: $('#hotelAvailable').checked, featured: $('#hotelFeatured').checked, images: hotelImageState
+    status: $('#hotelStatus').value, sortOrder: Number($('#hotelSort').value) || 0, available: $('#hotelAvailable').checked, featured: $('#hotelFeatured').checked, images: adminImagePayload()
   };
 }
 async function openHotelEditor(hotel = {}) {
   if (state.isSuperAdmin) { const response = await safeRequest('/admin/admins'); hotelOwnerOptions = isError(response) ? [] : (response.admins || []).filter(user => user.role === 'hotel_owner' && user.status === 'active'); }
   seasonalDiscountState = (hotel.seasonalDiscounts || []).map(discount => ({ ...discount }));
-  hotelImageState = (hotel.images || []).map(i => {
-    const url = (typeof i === 'string' ? i : (i.url || i.secureUrl || i.secure_url || i.imageUrl || i.src || '')) ;
-    return { url, publicId: i.publicId || i.public_id, mediaId: i.mediaId, alt: i.alt || i.altText };
-  }).filter(img => img.url);
+  hotelImageState = adminImageStateFrom(hotel);
   openModal(hotelFormMarkup(hotel), () => {
     bindHotelImages(); bindSeasonalDiscounts();
     $('#hotelForm').addEventListener('submit', async event => {
-      event.preventDefault(); const button = event.submitter; setLoading(button, true, 'Saving…');
-      try { const id = $('#hotelId').value; const payload = readHotelForm(); await $admin(id ? `/admin/hotels/${id}` : '/admin/hotels', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload) }); resetDirty(); closeModal(); toast(id ? 'Hotel updated.' : 'Hotel created.', 'success'); await renderRoute(); }
+      event.preventDefault(); const button = event.submitter;
+      if (hotelImagesUploading()) { toast('Photos are still uploading. Wait for them to finish before saving.', 'error'); return; }
+      const broken = hotelImagesBroken();
+      if (broken.length) { toast(`${broken.length} photo upload${broken.length === 1 ? '' : 's'} failed. Remove ${broken.length === 1 ? 'it' : 'them'} or upload again — the hotel was not saved.`, 'error'); return; }
+      setLoading(button, true, 'Saving…');
+      try {
+        const id = $('#hotelId').value; const payload = readHotelForm();
+        const response = await $admin(id ? `/admin/hotels/${id}` : '/admin/hotels', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
+        // Do not report success until the photos are provably stored.
+        assertSavedImages(response?.hotel, 'hotel');
+        resetDirty(); closeModal(); toast(id ? 'Hotel updated.' : 'Hotel created.', 'success'); await renderRoute();
+      }
       catch (error) { toast(error.message || 'Unable to save hotel.', 'error'); } finally { setLoading(button, false); }
     });
   });
@@ -1119,7 +1195,7 @@ async function renderHotelAdminDetail(id) {
   const hotel = response.hotel; const rooms = response.rooms || [];
   $('#adminOutlet').innerHTML = pageHeader('Catalogue', hotel.name, `${hotel.city} · ${hotel.propertyType} · ${rooms.length} room${rooms.length === 1 ? '' : 's'}`, `<a class="admin-secondary" href="/admin/hotels" data-route="/admin/hotels">All hotels</a><button class="admin-primary" data-action="edit-hotel">Edit hotel</button>`) +
     `<div class="dashboard-grid"><section class="admin-card">${cardHeader('Hotel information')}<dl class="detail-list"><div><dt>Status</dt><dd>${statusPill(hotel.status)}</dd></div><div><dt>Star rating</dt><dd>${'★'.repeat(hotel.starRating || 0)}</dd></div><div><dt>Address</dt><dd>${escapeHtml([hotel.address, hotel.area, hotel.city, hotel.country].filter(Boolean).join(', '))}</dd></div><div><dt>Contact</dt><dd>${escapeHtml([hotel.phone, hotel.email].filter(Boolean).join(' · ') || '—')}</dd></div><div><dt>Coordinates</dt><dd>${hotel.latitude && hotel.longitude ? `${hotel.latitude}, ${hotel.longitude}` : '—'}</dd></div><div><dt>Cancellation</dt><dd>${escapeHtml(hotel.cancellationPolicy?.type === 'non_refundable' ? 'Non-refundable' : `Free${hotel.cancellationPolicy?.freeUntilDays ? ` · ${hotel.cancellationPolicy.freeUntilDays}d` : ''}`)}</dd></div></dl>${hotel.description ? `<p class="table-secondary" style="margin-top:10px">${escapeHtml(hotel.description)}</p>` : ''}</section>
-    <section class="admin-card">${cardHeader('Gallery', 'Cloudinary images')}<div class="media-grid">${(hotel.images || []).length ? hotel.images.map(img => `<div class="media-preview"><img src="${escapeAttr(img.url)}" alt=""/></div>`).join('') : emptyState('No images', 'Upload images in the editor.', 'image')}</div></section>
+    <section class="admin-card">${cardHeader('Gallery', 'Cloudinary images')}<div class="media-grid">${(hotel.images || []).length ? hotel.images.map((img, index) => `<div class="media-preview"><img src="${escapeAttr(extractAdminImageUrl(img))}" alt="${escapeAttr(img?.alt || hotel.name)}" data-image-fallback/>${index === 0 ? '<span class="image-primary-badge">Primary</span>' : ''}</div>`).join('') : emptyState('No images', 'Upload images in the editor.', 'image')}</div></section>
     <section class="admin-card span-full">${cardHeader('Rooms', 'Room types, capacity, inventory and pricing', '<button class="admin-primary" data-action="new-room">+ Add room</button>')}<div class="table-wrap"><table><thead><tr><th>Room</th><th>Capacity</th><th>Inventory</th><th>Price/night</th><th>Status</th><th>Updated</th><th></th></tr></thead><tbody>${rooms.length ? rooms.map(room => `<tr><td><span class="table-primary">${escapeHtml(room.name)}</span><span class="table-secondary">${escapeHtml(room.bedType || '')}</span></td><td>${room.maxAdults}A ${room.maxChildren}C</td><td>${room.inventory}</td><td>${formatMoney(room.pricePerNight)}${room.originalPrice ? ` <span class="table-secondary" style="text-decoration:line-through">${formatMoney(room.originalPrice)}</span>` : ''}</td><td>${statusPill(room.status)}</td><td>${escapeHtml(formatDate(room.updatedAt))}</td><td><div class="table-actions"><button class="table-action" type="button" data-room-edit="${escapeAttr(room.id)}">Edit</button><button class="table-action" type="button" data-room-inventory="${escapeAttr(room.id)}">Inventory</button><button class="table-action danger" type="button" data-room-archive="${escapeAttr(room.id)}">Archive</button></div></td></tr>`).join('') : `<tr><td colspan="7">${emptyState('No rooms yet', 'Add a room type to enable bookings.', 'bed')}</td></tr>`}</tbody></table></div></section></div>`;
   $('#adminOutlet').querySelector('[data-action="edit-hotel"]')?.addEventListener('click', () => openHotelEditor(hotel));
   $('#adminOutlet').querySelector('[data-action="new-room"]')?.addEventListener('click', () => openRoomEditor(hotel.id));
@@ -1154,17 +1230,19 @@ function roomFormMarkup(hotelId, room = {}) {
   <div class="form-actions"><button type="button" class="admin-secondary" data-modal-close>Cancel</button><button class="admin-primary" type="submit">Save room</button></div></form>`;
 }
 function openRoomEditor(hotelId, room = {}) {
-  hotelImageState = (room.images || []).map(i => {
-    const url = (typeof i === 'string' ? i : (i.url || i.secureUrl || i.secure_url || i.imageUrl || i.src || '')) ;
-    return { url, publicId: i.publicId || i.public_id, mediaId: i.mediaId, alt: i.alt || i.altText };
-  }).filter(img => img.url);
+  hotelImageState = adminImageStateFrom(room);
   openModal(roomFormMarkup(hotelId, room), () => {
     bindHotelImages();
     $('#roomForm').addEventListener('submit', async event => {
-      event.preventDefault(); const button = event.submitter; setLoading(button, true, 'Saving…');
+      event.preventDefault(); const button = event.submitter;
+      if (hotelImagesUploading()) { toast('Photos are still uploading. Wait for them to finish before saving.', 'error'); return; }
+      const broken = hotelImagesBroken();
+      if (broken.length) { toast(`${broken.length} photo upload${broken.length === 1 ? '' : 's'} failed. Remove ${broken.length === 1 ? 'it' : 'them'} or upload again — the room was not saved.`, 'error'); return; }
+      setLoading(button, true, 'Saving…');
       try {
-        const id = $('#roomId').value; const payload = { name: $('#roomName').value.trim(), slug: $('#roomSlug').value.trim(), bedType: $('#roomBed').value.trim() || undefined, numBeds: Number($('#roomNumBeds').value) || undefined, size: Number($('#roomSize').value) || undefined, maxAdults: Number($('#roomAdults').value), maxChildren: Number($('#roomChildren').value), maxGuests: Number($('#roomGuests').value), inventory: Number($('#roomInventory').value), pricePerNight: Number($('#roomPrice').value), originalPrice: $('#roomOriginal').value ? Number($('#roomOriginal').value) : undefined, taxesPct: Number($('#roomTaxes').value) || 0, serviceFee: Number($('#roomService').value) || 0, mealPlan: $('#roomMeal').value.trim() || undefined, status: $('#roomStatus').value, sortOrder: Number($('#roomSort').value) || 0, description: $('#roomDescription').value.trim() || undefined, amenities: $('#roomAmenities').value.split(',').map(s => s.trim()).filter(Boolean), cancellationPolicy: { type: $('#roomCancelType').value }, images: hotelImageState };
-        await $admin(id ? `/admin/hotels/${hotelId}/rooms/${id}` : `/admin/hotels/${hotelId}/rooms`, { method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
+        const id = $('#roomId').value; const payload = { name: $('#roomName').value.trim(), slug: $('#roomSlug').value.trim(), bedType: $('#roomBed').value.trim() || undefined, numBeds: Number($('#roomNumBeds').value) || undefined, size: Number($('#roomSize').value) || undefined, maxAdults: Number($('#roomAdults').value), maxChildren: Number($('#roomChildren').value), maxGuests: Number($('#roomGuests').value), inventory: Number($('#roomInventory').value), pricePerNight: Number($('#roomPrice').value), originalPrice: $('#roomOriginal').value ? Number($('#roomOriginal').value) : undefined, taxesPct: Number($('#roomTaxes').value) || 0, serviceFee: Number($('#roomService').value) || 0, mealPlan: $('#roomMeal').value.trim() || undefined, status: $('#roomStatus').value, sortOrder: Number($('#roomSort').value) || 0, description: $('#roomDescription').value.trim() || undefined, amenities: $('#roomAmenities').value.split(',').map(s => s.trim()).filter(Boolean), cancellationPolicy: { type: $('#roomCancelType').value }, images: adminImagePayload() };
+        const response = await $admin(id ? `/admin/hotels/${hotelId}/rooms/${id}` : `/admin/hotels/${hotelId}/rooms`, { method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
+        assertSavedImages(response?.room, 'room');
         resetDirty(); closeModal(); toast(id ? 'Room updated.' : 'Room created.', 'success'); await renderRoute();
       } catch (error) { toast(error.message || 'Unable to save room.', 'error'); } finally { setLoading(button, false); }
     });
