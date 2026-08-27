@@ -258,6 +258,8 @@ Use `render.yaml` as a starting point. Configure these values in Render's secret
 
 The Render service is stateless: MongoDB stores application data, and Cloudinary stores images. No Render disk is required.
 
+The service must use `npm start` as its start command. Do not append `npm i` or any other setup command to it: dependency installation belongs in the build command, and a post-start install can mask the real application exit. If the service was created from the Render dashboard rather than this Blueprint, copy the production environment values into **Environment** manually—Blueprint changes are not retroactively applied to an existing service. In particular, set `COOKIE_SECURE=true` (and remove any stale `COOKIE_SECURE=false`). The application also defaults this flag to `true` when `NODE_ENV=production`, while still rejecting an explicit insecure value.
+
 Required production settings include `NODE_ENV=production`, `TRUST_PROXY=true`, `COOKIE_SECURE=true`, `DEV_OTP_ECHO=false`, explicit HTTPS origins, and a managed MongoDB URI.
 
 ## Checks
