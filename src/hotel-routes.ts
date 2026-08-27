@@ -6,35 +6,44 @@ import { optionalAuth, requireAuth, requireHotelManager } from './middleware.js'
 import { rateLimit } from './rate-limit.js';
 import type { Store } from './store.js';
 import type { PaymentProvider } from './providers.js';
-import type { HotelStore } from './hotel-store.js';
+import { normalizeHotelImages, type HotelStore } from './hotel-store.js';
 import type { MediaService } from './media.js';
 
 const toInput = (schema: z.ZodTypeAny, value: unknown) => { try { return schema.parse(value); } catch (error) { if (error instanceof ZodError) throw new AppError(400, 'VALIDATION_ERROR', 'Please check the submitted fields', error.flatten()); throw error; } };
 const clientMeta = (req: any) => ({ ip: req.ip, userAgent: req.get('user-agent')?.slice(0, 500) });
 
-const imageSchema = z.object({
-  url: z.string().max(1000).optional(),
-  secureUrl: z.string().max(1000).optional(),
-  secure_url: z.string().max(1000).optional(),
-  imageUrl: z.string().max(1000).optional(),
-  src: z.string().max(1000).optional(),
+/**
+ * Canonical hotel/room image input.
+ *
+ * The transform runs the submitted entry through `normalizeHotelImages` — the
+ * exact same choke point the store applies on save — so whatever the browser
+ * sends (canonical `url`, legacy `secureUrl`/`imageUrl`/`src`, a plain string,
+ * an http:// URL, or a Cloudinary URL carrying chained display transformations)
+ * is stored in one shape: `{ url, publicId, mediaId, alt, isPrimary }` with a
+ * canonical https URL. Exported for the pipeline tests.
+ */
+export const imageSchema = z.object({
+  url: z.string().max(2000).optional(),
+  secureUrl: z.string().max(2000).optional(),
+  secure_url: z.string().max(2000).optional(),
+  imageUrl: z.string().max(2000).optional(),
+  image_url: z.string().max(2000).optional(),
+  src: z.string().max(2000).optional(),
+  path: z.string().max(2000).optional(),
+  displayUrl: z.string().max(2000).optional(),
   publicId: z.string().max(300).optional(),
   public_id: z.string().max(300).optional(),
   mediaId: z.string().uuid().optional(),
   alt: z.string().max(300).optional(),
   altText: z.string().max(300).optional(),
+  isPrimary: z.boolean().optional(),
 }).passthrough().transform((value: any) => {
-  const url = value.url ?? value.secureUrl ?? value.secure_url ?? value.imageUrl ?? value.src;
-  return {
-    url: typeof url === 'string' ? url : '',
-    publicId: value.publicId ?? value.public_id,
-    mediaId: value.mediaId,
-    alt: value.alt ?? value.altText,
-  };
+  const [normalized] = normalizeHotelImages([{ ...value, url: value.url ?? value.secureUrl ?? value.secure_url ?? value.imageUrl ?? value.image_url ?? value.src ?? value.path }]);
+  return normalized ?? { url: '' };
 }).refine((value: any) => typeof value.url === 'string' && value.url.trim().length > 0, { message: 'Image URL is required', path: ['url'] });
 const seasonalDiscountSchema = z.object({ name: z.string().trim().min(2).max(120), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), percentage: z.number().min(0).max(100) }).refine(value => value.endDate >= value.startDate, { message: 'Discount end date must not precede its start date', path: ['endDate'] });
 const cancellationSchema = z.object({ type: z.enum(['free', 'non_refundable']).default('free'), freeUntilDays: z.number().int().min(0).max(365).optional(), description: z.string().max(500).optional() });
-const hotelInputSchema = z.object({
+export const hotelInputSchema = z.object({
   slug: z.string().trim().min(2).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9-]+)*$/), name: z.string().trim().min(2).max(160),
   shortDescription: z.string().max(300).optional(), description: z.string().max(5000).optional(),
   propertyType: z.string().max(80).default('Hotel'), address: z.string().max(300).optional(), city: z.string().trim().min(2).max(120), country: z.string().max(120).default('Bangladesh'), area: z.string().max(120).optional(),
@@ -45,7 +54,7 @@ const hotelInputSchema = z.object({
   checkInTime: z.string().max(20).optional(), checkOutTime: z.string().max(20).optional(), cancellationPolicy: cancellationSchema.optional(),
   status: z.enum(['draft', 'active', 'hidden', 'archived']).default('active'), featured: z.boolean().default(false), sortOrder: z.number().int().min(-100000).max(100000).default(0)
 });
-const roomInputSchema = z.object({
+export const roomInputSchema = z.object({
   name: z.string().trim().min(2).max(160), slug: z.string().trim().min(2).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9-]+)*$/), description: z.string().max(3000).optional(),
   images: z.array(imageSchema).default([]), size: z.number().int().min(0).max(100000).optional(), bedType: z.string().max(60).optional(), numBeds: z.number().int().min(0).max(20).optional(),
   maxAdults: z.number().int().min(1).max(20).default(2), maxChildren: z.number().int().min(0).max(20).default(0), maxGuests: z.number().int().min(1).max(30).default(3),
@@ -81,6 +90,21 @@ export function registerHotelRoutes(app: Express, deps: { store: Store; hotelSto
     await assertHotelAccess(req, room.hotelId);
     return room;
   };
+  /**
+   * Phase 8 — a save is only reported as successful once the photos are
+   * provably back out of the database. The written record is re-read and every
+   * submitted image URL must be present; otherwise the request fails with a
+   * real error instead of a misleading "Hotel updated." toast.
+   */
+  const assertImagesPersisted = async (kind: 'hotel' | 'room', id: string, submitted: unknown) => {
+    const expected = normalizeHotelImages(submitted).map(image => image.url);
+    if (!expected.length) return;
+    const record = kind === 'hotel' ? await hotelStore.adminFindHotel(id) : await hotelStore.adminFindRoom(id);
+    const stored = new Set(normalizeHotelImages(record?.images).map(image => image.url));
+    const missing = expected.filter(url => !stored.has(url));
+    if (missing.length) throw new AppError(502, 'IMAGE_NOT_PERSISTED', `${missing.length} photo${missing.length === 1 ? '' : 's'} could not be saved to this ${kind}. Please upload again and save once more.`);
+  };
+
   const assertBookingAccess = async (req: any, bookingId: string) => {
     const booking = await hotelStore.findBooking(bookingId);
     if (!booking) throw new AppError(404, 'BOOKING_NOT_FOUND', 'Booking not found');
@@ -195,7 +219,7 @@ export function registerHotelRoutes(app: Express, deps: { store: Store; hotelSto
   });
   app.get('/api/v1/admin/hotels/stats', requireHotelManager(store, 'hotel.view'), async (req, res) => res.json({ success: true, stats: await hotelStore.adminStats(ownerScope(req)) }));
   app.post('/api/v1/admin/hotels', requireHotelManager(store, 'hotel.create'), async (req, res, next) => {
-    try { const input = toInput(hotelInputSchema, req.body) as any; const actor = (req as any).user; if (actor.role !== 'super_admin') input.ownerId = actor.id; else if (input.ownerId) { const owner = await store.findUserById(input.ownerId); if (!owner || owner.role !== 'hotel_owner' || owner.status !== 'active') throw new AppError(400, 'INVALID_HOTEL_OWNER', 'Choose an active Hotel Owner'); } const hotel = await hotelStore.adminCreateHotel(input, actor.id); await store.audit('hotel.created', { ...clientMeta(req), userId: (req as any).user.id, metadata: { hotelId: hotel.id, slug: hotel.slug } }); res.status(201).json({ hotel }); }
+    try { const input = toInput(hotelInputSchema, req.body) as any; const actor = (req as any).user; if (actor.role !== 'super_admin') input.ownerId = actor.id; else if (input.ownerId) { const owner = await store.findUserById(input.ownerId); if (!owner || owner.role !== 'hotel_owner' || owner.status !== 'active') throw new AppError(400, 'INVALID_HOTEL_OWNER', 'Choose an active Hotel Owner'); } const hotel = await hotelStore.adminCreateHotel(input, actor.id); await assertImagesPersisted('hotel', hotel.id, input.images); await store.audit('hotel.created', { ...clientMeta(req), userId: (req as any).user.id, metadata: { hotelId: hotel.id, slug: hotel.slug } }); res.status(201).json({ hotel }); }
     catch (error) { next(error); }
   });
   app.get('/api/v1/admin/hotels/:id', requireHotelManager(store, 'hotel.view'), async (req, res, next) => {
@@ -203,7 +227,7 @@ export function registerHotelRoutes(app: Express, deps: { store: Store; hotelSto
     catch (error) { next(error); }
   });
   app.patch('/api/v1/admin/hotels/:id', requireHotelManager(store, 'hotel.update'), async (req, res, next) => {
-    try { const input = toInput(hotelInputSchema.partial(), req.body) as any; const current = await assertHotelAccess(req, String(req.params.id)); if ((req as any).user.role !== 'super_admin') delete input.ownerId; else if (input.ownerId) { const owner = await store.findUserById(input.ownerId); if (!owner || owner.role !== 'hotel_owner' || owner.status !== 'active') throw new AppError(400, 'INVALID_HOTEL_OWNER', 'Choose an active Hotel Owner'); } const hotel = await hotelStore.adminUpdateHotel(current.id, input, (req as any).user.id); if (!hotel) throw new AppError(404, 'HOTEL_NOT_FOUND', 'Hotel not found'); await store.audit('hotel.updated', { ...clientMeta(req), userId: (req as any).user.id, metadata: { hotelId: hotel.id, keys: Object.keys(input) } }); res.json({ hotel }); }
+    try { const input = toInput(hotelInputSchema.partial(), req.body) as any; const current = await assertHotelAccess(req, String(req.params.id)); if ((req as any).user.role !== 'super_admin') delete input.ownerId; else if (input.ownerId) { const owner = await store.findUserById(input.ownerId); if (!owner || owner.role !== 'hotel_owner' || owner.status !== 'active') throw new AppError(400, 'INVALID_HOTEL_OWNER', 'Choose an active Hotel Owner'); } const hotel = await hotelStore.adminUpdateHotel(current.id, input, (req as any).user.id); if (!hotel) throw new AppError(404, 'HOTEL_NOT_FOUND', 'Hotel not found'); await assertImagesPersisted('hotel', hotel.id, input.images); await store.audit('hotel.updated', { ...clientMeta(req), userId: (req as any).user.id, metadata: { hotelId: hotel.id, keys: Object.keys(input) } }); res.json({ hotel }); }
     catch (error) { next(error); }
   });
   app.delete('/api/v1/admin/hotels/:id', requireHotelManager(store, 'hotel.delete'), async (req, res, next) => {
@@ -218,11 +242,11 @@ export function registerHotelRoutes(app: Express, deps: { store: Store; hotelSto
   // ---------- Admin: rooms ----------
   app.get('/api/v1/admin/hotels/:id/rooms', requireHotelManager(store, 'room.view'), async (req, res, next) => { try { await assertHotelAccess(req, String(req.params.id)); res.json({ rooms: await hotelStore.adminListRooms(String(req.params.id)) }); } catch (error) { next(error); } });
   app.post('/api/v1/admin/hotels/:id/rooms', requireHotelManager(store, 'room.create'), async (req, res, next) => {
-    try { await assertHotelAccess(req, String(req.params.id)); const input = toInput(roomInputSchema, req.body); const room = await hotelStore.adminCreateRoom(String(req.params.id), input as any, (req as any).user.id); await store.audit('hotel.room_created', { ...clientMeta(req), userId: (req as any).user.id, metadata: { hotelId: req.params.id, roomId: room.id } }); res.status(201).json({ room }); }
+    try { await assertHotelAccess(req, String(req.params.id)); const input = toInput(roomInputSchema, req.body); const room = await hotelStore.adminCreateRoom(String(req.params.id), input as any, (req as any).user.id); await assertImagesPersisted('room', room.id, (input as any).images); await store.audit('hotel.room_created', { ...clientMeta(req), userId: (req as any).user.id, metadata: { hotelId: req.params.id, roomId: room.id } }); res.status(201).json({ room }); }
     catch (error) { next(error); }
   });
   app.patch('/api/v1/admin/hotels/:hotelId/rooms/:roomId', requireHotelManager(store, 'room.update'), async (req, res, next) => {
-    try { const ownedRoom = await assertRoomAccess(req, String(req.params.roomId)); if (ownedRoom.hotelId !== String(req.params.hotelId)) throw new AppError(404, 'ROOM_NOT_FOUND', 'Room not found'); const input = toInput(roomInputSchema.partial(), req.body); const room = await hotelStore.adminUpdateRoom(String(req.params.roomId), input as any, (req as any).user.id); if (!room) throw new AppError(404, 'ROOM_NOT_FOUND', 'Room not found'); await store.audit('hotel.room_updated', { ...clientMeta(req), userId: (req as any).user.id, metadata: { roomId: room.id, keys: Object.keys(input) } }); res.json({ room }); }
+    try { const ownedRoom = await assertRoomAccess(req, String(req.params.roomId)); if (ownedRoom.hotelId !== String(req.params.hotelId)) throw new AppError(404, 'ROOM_NOT_FOUND', 'Room not found'); const input = toInput(roomInputSchema.partial(), req.body); const room = await hotelStore.adminUpdateRoom(String(req.params.roomId), input as any, (req as any).user.id); if (!room) throw new AppError(404, 'ROOM_NOT_FOUND', 'Room not found'); await assertImagesPersisted('room', room.id, (input as any).images); await store.audit('hotel.room_updated', { ...clientMeta(req), userId: (req as any).user.id, metadata: { roomId: room.id, keys: Object.keys(input) } }); res.json({ room }); }
     catch (error) { next(error); }
   });
   app.delete('/api/v1/admin/hotels/:hotelId/rooms/:roomId', requireHotelManager(store, 'room.delete'), async (req, res, next) => {
