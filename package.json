@@ -19,7 +19,11 @@
     "demo": "tsx src/demo-server.ts"
   },
   "dependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.17",
     "@types/express": "^5.0.3",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^22.15.30",
     "@types/nodemailer": "^6.4.16",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -35,14 +39,10 @@
     "pino-http": "^10.4.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
+    "typescript": "^5.8.3",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/cookie-parser": "^1.4.10",
-    "@types/cors": "^2.8.17",
-    "@types/multer": "^2.2.0",
-    "@types/node": "^22.15.30",
-    "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
+    "tsx": "^4.19.4"
   }
 }
