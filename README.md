@@ -294,3 +294,5 @@ TEST_MONGODB_URI='mongodb+srv://…/sadik_travels_test' npm test
   server and customer payment history uses the persisted ledger.
 - **SEO/PWA** — live sitemap, robots policy, structured data and network-first
   application shell with API responses excluded from service-worker caches.
+  The public site is installable from `/pwa` and the admin console is its own
+  installable app (scoped to `/admin`, install page at `/admin/pwa`).

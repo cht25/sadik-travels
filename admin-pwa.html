@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Install the Sadik Travels Admin Console app on your phone, tablet or desktop — one-tap access to bookings, catalogue, payments and support." />
+  <title>Install the Admin Console App</title>
+  <link rel="icon" type="image/png" href="/assets/admin-icon-192.png" />
+  <link rel="apple-touch-icon" href="/assets/admin-icon-192.png" />
+  <link rel="manifest" href="/admin/manifest.webmanifest" />
+  <meta name="theme-color" content="#1438b8" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Sadik Admin" />
+  <link rel="stylesheet" href="/pwa-pages.css?v=1" />
+</head>
+<body data-theme="admin" data-app-name="Sadik Travels Admin" data-sw="/admin/sw.js" data-icon="/assets/admin-icon-192.png">
+  <header class="pp-header">
+    <img src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels" />
+    <span class="pp-brand-copy">Operations Console</span>
+    <a class="pp-back" href="/admin/">Open console →</a>
+  </header>
+
+  <main class="pp-main">
+    <section class="pp-card" aria-labelledby="ppTitle">
+      <img class="pp-icon" src="/assets/admin-icon-192.png" alt="" width="76" height="76" />
+      <span class="pp-eyebrow">Admin · Progressive Web App</span>
+      <h1 id="ppTitle">Install the Admin Console</h1>
+      <p class="pp-lead">Add the Sadik Travels operations console to your device for one-tap access to bookings, catalogue, payments and customer care.</p>
+      <ul class="pp-benefits">
+        <li>One-tap access from your home screen</li>
+        <li>Booking &amp; support notifications</li>
+        <li>Opens in its own window, like a native app</li>
+      </ul>
+      <div class="pp-actions">
+        <button type="button" class="pp-install-btn" id="pwaPageInstall">Install Admin App</button>
+        <span class="pp-note" id="pwaPageNote">For staff · Installs in seconds · Android, iOS &amp; desktop</span>
+      </div>
+      <div class="pp-installed" id="pwaPageInstalled" hidden>✓ Installed — open the Admin Console from your home screen.</div>
+      <div class="pp-steps" id="pwaPageIosSteps" hidden>
+        <strong>Install on iPhone / iPad:</strong>
+        <ol>
+          <li>Tap the <b>Share</b> button (⬆︎) in Safari</li>
+          <li>Choose <b>Add to Home Screen</b></li>
+          <li>Tap <b>Add</b></li>
+        </ol>
+      </div>
+      <p class="pp-alt">Prefer the browser? <a href="/admin/">Open the console in your browser</a></p>
+    </section>
+  </main>
+
+  <footer class="pp-footer">Sadik Travels · Operations &amp; management console for authorized staff.</footer>
+
+  <script src="/pwa-install-page.js?v=1" defer></script>
+</body>
+</html>

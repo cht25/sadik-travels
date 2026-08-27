@@ -155,6 +155,36 @@ Manager without deleting data.
   `localStorage`, focus-trapped and keyboard-accessible dialog. Explicit
   "Install App" buttons (`[data-pwa-install]`) always work regardless of the
   cooldown.
+- `pwa.html` (served at `/pwa`) — branded install landing page for the public
+  app: registers `/sw.js`, links `/manifest.webmanifest`, shows the install
+  dialog automatically as soon as `beforeinstallprompt` is available and keeps
+  a big explicit Install button plus iOS Safari instructions.
+
+### Admin console PWA
+
+The operations console is its own installable app, scoped to `/admin/` so it
+never collides with the public worker (the most specific scope wins per page):
+
+- `admin-manifest.webmanifest` (served at `/admin/manifest.webmanifest`) —
+  standalone display, admin-badged brand icons (incl. maskable 512px),
+  shortcuts for Dashboard, Hotel Bookings, Bookings and Live Support.
+- `admin-sw.js` (served at `/admin/sw.js`) — precaches the console shell,
+  network-first `/admin/*` navigations with the cached shell as offline
+  fallback, stale-while-revalidate static assets, **no caching of `/api/` or
+  `/socket.io/`**, and the same Web Push handlers as the public worker but
+  routing notification clicks to admin routes (`/admin/hotel-bookings`,
+  `/admin/live-support`, …).
+- `admin-pwa.js` — registers `/admin/sw.js` inside the console and auto-shows
+  the branded install popup (8s after `beforeinstallprompt`, 14-day dismissal
+  cooldown); a sidebar "Install app" button (`[data-pwa-install]`) is revealed
+  when installation becomes available and always works.
+- `admin-pwa.html` (served at `/admin/pwa`) — install landing page for the
+  admin app, mirroring `/pwa`: auto-shown install dialog, explicit button and
+  iOS instructions. Registered in `app.ts` **before** the `/admin/*` SPA
+  catch-all so it is not swallowed by `admin.html`.
+- `pwa-install-page.js` + `pwa-pages.css` — shared bootstrap and styles for
+  both landing pages, configured through `data-app-name` / `data-sw` /
+  `data-icon` attributes on `<body>`.
 
 ## Degraded-mode behaviour (database unreachable)
 

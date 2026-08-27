@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Install the Sadik Travels app on your phone, tablet or desktop — faster booking, home-screen access and booking notifications, no app store required." />
+  <title>Install the Sadik Travels App</title>
+  <link rel="icon" type="image/png" href="/assets/pwa-icon-192.png" />
+  <link rel="apple-touch-icon" href="/assets/pwa-icon-192.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#1438b8" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Sadik Travels" />
+  <link rel="stylesheet" href="/pwa-pages.css?v=1" />
+</head>
+<body data-app-name="Sadik Travels" data-sw="/sw.js" data-icon="/assets/pwa-icon-192.png">
+  <header class="pp-header">
+    <img src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels" />
+    <span class="pp-brand-copy">Hotels · Villas · Tours · Packages</span>
+    <a class="pp-back" href="/">Continue to website →</a>
+  </header>
+
+  <main class="pp-main">
+    <section class="pp-card" aria-labelledby="ppTitle">
+      <img class="pp-icon" src="/assets/pwa-icon-192.png" alt="" width="76" height="76" />
+      <span class="pp-eyebrow">Progressive Web App</span>
+      <h1 id="ppTitle">Install the Sadik Travels app</h1>
+      <p class="pp-lead">Add Sadik Travels to your home screen for faster booking and easy access to your trips — no app store required.</p>
+      <ul class="pp-benefits">
+        <li>Faster booking from your home screen</li>
+        <li>Works even on unstable connections</li>
+        <li>Booking &amp; payment notifications</li>
+      </ul>
+      <div class="pp-actions">
+        <button type="button" class="pp-install-btn" id="pwaPageInstall">Install App</button>
+        <span class="pp-note" id="pwaPageNote">Free · Installs in seconds · Android, iOS &amp; desktop</span>
+      </div>
+      <div class="pp-installed" id="pwaPageInstalled" hidden>✓ Installed — open Sadik Travels from your home screen.</div>
+      <div class="pp-steps" id="pwaPageIosSteps" hidden>
+        <strong>Install on iPhone / iPad:</strong>
+        <ol>
+          <li>Tap the <b>Share</b> button (⬆︎) in Safari</li>
+          <li>Choose <b>Add to Home Screen</b></li>
+          <li>Tap <b>Add</b></li>
+        </ol>
+      </div>
+      <p class="pp-alt">Just browsing? <a href="/">Continue to the website</a></p>
+    </section>
+  </main>
+
+  <footer class="pp-footer">Sadik Travels · Book hotels, homes &amp; villas, tours and holiday packages with secure payments and 24/7 support.</footer>
+
+  <script src="/pwa-install-page.js?v=1" defer></script>
+</body>
+</html>
