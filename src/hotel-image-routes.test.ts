@@ -79,7 +79,10 @@ function createHarness(options: { persistImages?: boolean } = {}) {
 
   const app = express();
   app.use(express.json());
-  registerHotelRoutes(app, { store, hotelStore, media: { isConfigured: () => true } as any, payment: {} as any });
+  // Notification delivery is not what these tests exercise, so a no-op service
+  // is injected; the real hotel handlers still run.
+  const notifications = { emit: async () => undefined, emitToUser: async () => undefined, adminRecipients: async () => [] } as any;
+  registerHotelRoutes(app, { store, hotelStore, media: { isConfigured: () => true } as any, payment: {} as any, notifications });
   app.use((error: any, _req: any, res: any, _next: any) => {
     const appError = error instanceof AppError ? error : new AppError(500, 'INTERNAL_ERROR', error?.message || 'failed');
     res.status(appError.statusCode).json({ error: { code: appError.code, message: appError.message } });

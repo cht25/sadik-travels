@@ -33,43 +33,26 @@ export const REVIEW_BUCKETS = [
   { id: 'good', label: '7.0+ Good', min: 3.5 }
 ] as const;
 
-/** VAT 15% + AIT 5% on taxable hotel/tour totals (Bangladesh). */
-export const BD_VAT_PCT = 15;
-export const BD_AIT_PCT = 5;
-
-export type TourPricingConfig = {
-  adultPrice: number;
-  childPrice?: number;
-  infantPrice?: number;
-  seasonSurchargePct?: number;
-  emiMonths?: number[];
-  vatPct?: number;
-  aitPct?: number;
-};
-
-export function computeTourQuote(cfg: TourPricingConfig, pax: { adults: number; children?: number; infants?: number }) {
-  const adults = Math.max(1, pax.adults || 1);
-  const children = Math.max(0, pax.children || 0);
-  const infants = Math.max(0, pax.infants || 0);
-  const base = adults * cfg.adultPrice + children * (cfg.childPrice ?? Math.round(cfg.adultPrice * 0.7)) + infants * (cfg.infantPrice ?? 0);
-  const surcharge = Math.round(base * ((cfg.seasonSurchargePct || 0) / 100));
-  const taxable = base + surcharge;
-  const vatPct = cfg.vatPct ?? BD_VAT_PCT;
-  const aitPct = cfg.aitPct ?? BD_AIT_PCT;
-  const vat = Math.round(taxable * vatPct / 100);
-  const ait = Math.round(taxable * aitPct / 100);
-  const total = taxable + vat + ait;
-  const emis = (cfg.emiMonths || [3, 6, 12]).map(months => ({ months, installment: Math.ceil(total / months) }));
-  return {
-    currency: 'BDT',
-    adults, children, infants,
-    adultUnit: cfg.adultPrice,
-    childUnit: cfg.childPrice ?? Math.round(cfg.adultPrice * 0.7),
-    infantUnit: cfg.infantPrice ?? 0,
-    baseFare: base,
-    seasonSurcharge: surcharge,
-    vat, ait, vatPct, aitPct,
-    total,
-    emi: emis
-  };
-}
+/**
+ * Tour pricing lives in `./pricing.ts` — the single source of truth for
+ * payable amounts, with a self-verifying breakdown. This module re-exports it
+ * so existing imports keep resolving; do not add a second calculation here.
+ *
+ * `BD_VAT_PCT` / `BD_AIT_PCT` are Bangladesh *reference* rates. They are no
+ * longer applied implicitly: an operator must opt in per tour or per
+ * deployment. That default was one of the two defects that turned a
+ * BDT 6,000 package into a BDT 14,400 charge.
+ */
+export {
+  BD_VAT_PCT,
+  BD_AIT_PCT,
+  DEFAULT_CHILD_PRICE_FACTOR,
+  DEFAULT_TOUR_TRAVELLERS,
+  computeTourQuote,
+  normalizeTravellers,
+  tourPricingFromRecord,
+  assertQuoteConsistent,
+  formatBdt,
+  roundTaka
+} from './pricing.js';
+export type { TourPricingConfig, TourQuote, TourTravellers, PriceLine, SurchargeRule } from './pricing.js';

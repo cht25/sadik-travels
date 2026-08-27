@@ -6,6 +6,7 @@
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "orientation": "portrait-primary",
   "theme_color": "#1438b8",
   "background_color": "#f5f7fb",
@@ -17,10 +18,11 @@
     { "src": "/assets/pwa-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "/assets/pwa-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
+  "prefer_related_applications": false,
   "shortcuts": [
-    { "name": "Hotels", "url": "/hotels", "icons": [{ "src": "/assets/pwa-icon-192.png", "sizes": "192x192" }] },
-    { "name": "Tours", "url": "/tours", "icons": [{ "src": "/assets/pwa-icon-192.png", "sizes": "192x192" }] },
-    { "name": "Track Booking", "url": "/track-booking", "icons": [{ "src": "/assets/pwa-icon-192.png", "sizes": "192x192" }] },
-    { "name": "My Cart", "url": "/cart", "icons": [{ "src": "/assets/pwa-icon-192.png", "sizes": "192x192" }] }
+    { "name": "Hotels", "short_name": "Hotels", "description": "Search hotels and homes", "url": "/hotels", "icons": [{ "src": "/assets/pwa-icon-192.png", "sizes": "192x192" }] },
+    { "name": "Tours", "short_name": "Tours", "description": "Browse tour packages", "url": "/tours", "icons": [{ "src": "/assets/pwa-icon-192.png", "sizes": "192x192" }] },
+    { "name": "Track Booking", "short_name": "Bookings", "description": "Track a booking", "url": "/track-booking", "icons": [{ "src": "/assets/pwa-icon-192.png", "sizes": "192x192" }] },
+    { "name": "My Cart", "short_name": "Cart", "description": "Review your cart", "url": "/cart", "icons": [{ "src": "/assets/pwa-icon-192.png", "sizes": "192x192" }] }
   ]
 }

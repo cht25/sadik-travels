@@ -2,6 +2,9 @@ import type { Express, Request } from 'express';
 import { z, ZodError } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { AppError, assert } from './errors.js';
+import { formatBdt } from './pricing.js';
+import { NOTIFICATION_EVENT } from './notifications/events.js';
+import type { NotificationService } from './notifications/service.js';
 import { optionalAuth, requireAuth, requireAnyFinePermission, requireFinePermission } from './middleware.js';
 import { hasFinePermission } from './permissions.js';
 import { rateLimit } from './rate-limit.js';
@@ -111,13 +114,29 @@ const accountPrefill = (user: any) => ({
   address: user?.address || '', dateOfBirth: user?.dateOfBirth || '', nationality: user?.nationality || ''
 });
 
-export function registerCommerceRoutes(app: Express, deps: { store: Store; commerce: CommerceStore; payment: PaymentProvider }) {
-  const { store, commerce, payment } = deps;
+export function registerCommerceRoutes(app: Express, deps: { store: Store; commerce: CommerceStore; payment: PaymentProvider; notifications: NotificationService }) {
+  const { store, commerce, payment, notifications } = deps;
   const isHomeOwner = (req: any) => req.user?.role === 'home_owner';
   const assertHomeOwnership = (req: any, product: any) => { if (isHomeOwner(req) && (product?.type !== 'home' || product?.createdBy !== req.user.id)) throw new AppError(403, 'HOME_OWNERSHIP_REQUIRED', 'You can manage only your own home and villa listings'); };
 
-  const notify = async (userId: string, title: string, message: string) => {
-    try { await store.createNotification({ userId, title, message, channels: ['in_app'], status: 'sent', sentAt: new Date().toISOString() } as any); } catch { /* notifications are best-effort */ }
+  /**
+   * Order notifications go through the centralized service, so a catalogue
+   * order reaches the customer in-app, by push and by email — not only as a
+   * bell entry. Best effort: an order must never fail because delivery failed.
+   */
+  const notify = async (userId: string, title: string, message: string, options: { event?: string; orderId?: string; route?: string; notifyAdmins?: boolean } = {}) => {
+    try {
+      await notifications.emit({
+        event: (options.event || NOTIFICATION_EVENT.BOOKING_UPDATED) as any,
+        title,
+        message,
+        recipients: [
+          { userId, audience: 'customer' },
+          ...(options.notifyAdmins ? await notifications.adminRecipients((options.event || NOTIFICATION_EVENT.BOOKING_UPDATED) as any) : [])
+        ],
+        context: { orderId: options.orderId, bookingId: options.orderId, route: options.route || (options.orderId ? `/orders/${options.orderId}` : '/orders') }
+      });
+    } catch { /* notifications are best-effort */ }
   };
 
   /* =====================================================  PUBLIC CATALOGUE  */
@@ -290,7 +309,12 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
 
     const invoice = await commerce.createInvoice(order);
     await store.audit('order.created', { ...clientMeta(req), userId: req.user!.id, metadata: { orderId: order.id, orderNumber: order.orderNumber, total: order.total } });
-    await notify(req.user!.id, 'Booking created', `Your booking ${order.orderNumber} has been created. Complete payment to confirm it.`);
+    const isCod = order.paymentMethod && order.paymentMethod !== 'online';
+    await notify(req.user!.id, isCod ? 'Booking created — payment pending' : 'Booking created',
+      isCod
+        ? `Your booking ${order.orderNumber} has been created for ${formatBdt(order.total, order.currency)}. Nothing has been charged; our team will contact you to arrange payment.`
+        : `Your booking ${order.orderNumber} has been created. Complete payment to confirm it.`,
+      { event: isCod ? NOTIFICATION_EVENT.PAYMENT_PENDING_COD : NOTIFICATION_EVENT.BOOKING_CREATED, orderId: order.id, notifyAdmins: true });
 
     res.status(201).json({ order, invoice });
   });
@@ -314,7 +338,7 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
     assert(['pending', 'confirmed', 'processing'].includes(order!.status), 409, 'ORDER_NOT_CANCELLABLE', 'This booking can no longer be cancelled online');
     const updated = await commerce.updateOrder(order!.id, { status: 'cancelled' }, { at: new Date().toISOString(), status: 'cancelled', note: 'Cancelled by customer', actorId: req.user!.id });
     await store.audit('order.cancelled', { ...clientMeta(req), userId: req.user!.id, metadata: { orderId: order!.id } });
-    await notify(req.user!.id, 'Booking cancelled', `Booking ${order!.orderNumber} has been cancelled.`);
+    await notify(req.user!.id, 'Booking cancelled', `Booking ${order!.orderNumber} has been cancelled.`, { event: NOTIFICATION_EVENT.BOOKING_CANCELLED, orderId: order!.id, notifyAdmins: true });
     res.json({ order: updated });
   });
 
@@ -485,8 +509,8 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
     if (input.status) patch.status = input.status;
     if (input.paymentStatus) patch.paymentStatus = input.paymentStatus;
     const updated = await commerce.updateOrder(order!.id, patch, { at: new Date().toISOString(), status: input.status || input.paymentStatus || 'updated', note: input.note, actorId: req.user!.id });
-    if (input.paymentStatus === 'paid') { await commerce.markInvoicePaid(order!.id); await notify(order!.userId, 'Payment received', `We have received payment for booking ${order!.orderNumber}.`); }
-    if (input.status === 'confirmed') await notify(order!.userId, 'Booking confirmed', `Your booking ${order!.orderNumber} is confirmed.`);
+    if (input.paymentStatus === 'paid') { await commerce.markInvoicePaid(order!.id); await notify(order!.userId, 'Payment received', `We have received payment for booking ${order!.orderNumber}.`, { event: NOTIFICATION_EVENT.PAYMENT_SUCCESS, orderId: order!.id, notifyAdmins: true }); }
+    if (input.status === 'confirmed') await notify(order!.userId, 'Booking confirmed', `Your booking ${order!.orderNumber} is confirmed.`, { event: NOTIFICATION_EVENT.BOOKING_CONFIRMED, orderId: order!.id });
     await store.audit('order.updated', { ...clientMeta(req), userId: req.user!.id, metadata: { orderId: order!.id, ...patch } });
     res.json({ order: updated });
   });

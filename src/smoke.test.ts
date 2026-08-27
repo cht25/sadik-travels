@@ -5,7 +5,7 @@ import { io as createSocket, type Socket } from 'socket.io-client';
 import { effectiveFinePermissions, hasFinePermission, ROLE_PERMISSION_PRESETS, getRolePreset, auditAndMigrateVendorPermissions, sanitizePermissions } from './permissions.js';
 import { conversationDedupKey, encodeDedupKey, hashGuestSecret, parseIdentityCredentials, verifyGuestSecret } from './chat/keys.js';
 import { ACTIVE_CATALOG_TYPES, RETIRED_VERTICAL_TYPES, isRetiredAdminNavItem } from './legacy-purge.js';
-import { computeTourQuote } from './booking-schema.js';
+import { computeTourQuote, tourPricingFromRecord, normalizeTravellers, assertQuoteConsistent, BD_VAT_PCT, BD_AIT_PCT } from './pricing.js';
 
 test('retired verticals such as the legacy Umrah fare entry are rejected everywhere', () => {
   // The persisted row behind "Special Umrah Fair": its base path (/admin/catalog)
@@ -270,9 +270,13 @@ test('chat identity credentials and conversation dedup keys are stable and timin
 test('tour pricing is always computed on the server from the persisted adult price', () => {
   const quote = computeTourQuote({ adultPrice: 200 }, { adults: 3 });
   assert.equal(quote.baseFare, 600);
-  assert.equal(quote.vat, 90);
-  assert.equal(quote.ait, 30);
-  assert.equal(quote.total, 720);
+  // No tax or fee is applied unless an operator configured one. An implicit
+  // 15% VAT + 5% AIT on every tour was one half of the 6,000 → 14,400 bug.
+  assert.equal(quote.vat, 0);
+  assert.equal(quote.ait, 0);
+  assert.equal(quote.tax, 0);
+  assert.equal(quote.serviceFee, 0);
+  assert.equal(quote.total, 600);
 
   // Children default to 70% of adult fare; infants are free unless configured.
   const family = computeTourQuote({ adultPrice: 200 }, { adults: 2, children: 2, infants: 1 });
@@ -282,6 +286,110 @@ test('tour pricing is always computed on the server from the persisted adult pri
   // A configured child price is used, not the default 70%.
   const explicit = computeTourQuote({ adultPrice: 200, childPrice: 120, infantPrice: 0 }, { adults: 1, children: 2 });
   assert.equal(explicit.baseFare, 200 + 240);
+
+  // Taxes ARE applied when an operator opts in, and appear in the breakdown.
+  const taxed = computeTourQuote({ adultPrice: 200, vatPct: BD_VAT_PCT, aitPct: BD_AIT_PCT }, { adults: 3 });
+  assert.equal(taxed.vat, 90);
+  assert.equal(taxed.ait, 30);
+  assert.equal(taxed.tax, 120);
+  assert.equal(taxed.total, 720);
+  assert.equal(taxed.vatPct, 15);
+});
+
+/**
+ * Regression test for the reported production defect: a BDT 6,000 tour package
+ * was charged BDT 14,400 at checkout.
+ *
+ * The cause was two compounding defaults:
+ *   1. the checkout form defaulted travellers to 2 instead of 1 (×2), and
+ *   2. `computeTourQuote` hard-defaulted to VAT 15% + AIT 5% on every tour.
+ *   6,000 × 2 = 12,000, then +1,800 +600 = 14,400.
+ *
+ * Both are fixed: the traveller count defaults to exactly 1 and surcharges are
+ * opt-in. This test pins the exact reported figures.
+ */
+test('a BDT 6,000 tour for one traveller is charged BDT 6,000 — never BDT 14,400', () => {
+  const single = computeTourQuote({ adultPrice: 6000 }, { adults: 1 });
+  assert.equal(single.subtotal, 6000);
+  assert.equal(single.discount, 0);
+  assert.equal(single.tax, 0);
+  assert.equal(single.serviceFee, 0);
+  assert.equal(single.total, 6000, 'a 6,000 tour for one traveller must total 6,000');
+
+  // The old result must never come back.
+  assert.notEqual(single.total, 14400);
+
+  // Omitted / invalid counts all resolve to exactly one adult — there is no
+  // hidden quantity default anywhere in the chain.
+  for (const pax of [{}, { adults: undefined }, { adults: 0 }, { adults: NaN }, { adults: -5 }]) {
+    const result = computeTourQuote({ adultPrice: 6000 }, pax as { adults?: number });
+    assert.equal(result.adults, 1, `pax ${JSON.stringify(pax)} must resolve to 1 adult`);
+    assert.equal(result.total, 6000);
+  }
+
+  // Two travellers is an explicit, visible doubling — not a silent one.
+  const two = computeTourQuote({ adultPrice: 6000 }, { adults: 2 });
+  assert.equal(two.adults, 2);
+  assert.equal(two.total, 12000);
+
+  // With an operator-configured tax the charge is 6,000 + the disclosed tax,
+  // and every component is a named, visible line.
+  const taxed = computeTourQuote({ adultPrice: 6000, vatPct: 15, aitPct: 5 }, { adults: 1 });
+  assert.equal(taxed.subtotal, 6000);
+  assert.equal(taxed.vat, 900);
+  assert.equal(taxed.ait, 300);
+  assert.equal(taxed.total, 7200);
+  assert.notEqual(taxed.total, 14400);
+});
+
+test('every price component is applied exactly once and the breakdown sums to the total', () => {
+  const cfg = { adultPrice: 6000, childPrice: 4000, infantPrice: 500, seasonSurchargePct: 10, serviceFeePct: 3, vatPct: 15, aitPct: 5, promoCode: 'SAVE10', promoPct: 10 };
+  const quote = computeTourQuote(cfg, { adults: 2, children: 1, infants: 1 }, 'save10');
+
+  // Each component counted once — no double multiplication, no doubled fee.
+  assert.equal(quote.baseFare, 12000 + 4000 + 500);
+  assert.equal(quote.seasonSurcharge, Math.round(16500 * 0.10));
+  const taxable = quote.baseFare + quote.seasonSurcharge;
+  assert.equal(quote.vat, Math.round(taxable * 0.15));
+  assert.equal(quote.ait, Math.round(taxable * 0.05));
+  assert.equal(quote.serviceFee, Math.round(taxable * 0.03));
+  assert.equal(quote.discount, Math.round(16500 * 0.10));
+  assert.equal(quote.promoApplied, true);
+
+  // The lines rendered at checkout add up to exactly what is charged.
+  const lineSum = quote.lines.reduce((sum, line) => sum + line.amount, 0);
+  assert.equal(lineSum, quote.total);
+  assert.equal(quote.total, quote.baseFare + quote.seasonSurcharge + quote.tax + quote.serviceFee - quote.discount);
+
+  // A non-matching promo code changes nothing.
+  const noPromo = computeTourQuote(cfg, { adults: 2, children: 1, infants: 1 }, 'WRONG');
+  assert.equal(noPromo.discount, 0);
+  assert.equal(noPromo.promoApplied, false);
+  assert.equal(noPromo.total, quote.total + quote.discount);
+
+  // A discount can never exceed the subtotal or drive the total negative.
+  const absurd = computeTourQuote({ adultPrice: 1000, promoCode: 'ALL', promoPct: 100 }, { adults: 1 }, 'ALL');
+  assert.equal(absurd.discount, 1000);
+  assert.equal(absurd.total, 0);
+});
+
+test('tour pricing maps database records and operator settings without implicit charges', () => {
+  // No metadata, no settings: the listed price is the charged price.
+  const bare = tourPricingFromRecord({ priceBdt: 6000, metadata: {} }, {});
+  assert.equal(bare.vatPct, undefined);
+  assert.equal(computeTourQuote(bare, { adults: 1 }).total, 6000);
+
+  // Deployment defaults apply when the tour says nothing.
+  const fromSettings = tourPricingFromRecord({ priceBdt: 6000, metadata: {} }, { vatPct: 15, aitPct: 5 });
+  assert.equal(computeTourQuote(fromSettings, { adults: 1 }).total, 7200);
+
+  // A tour-level value always overrides the deployment default.
+  const overridden = tourPricingFromRecord({ priceBdt: 6000, metadata: { vatPct: 0, aitPct: 0 } }, { vatPct: 15, aitPct: 5 });
+  assert.equal(computeTourQuote(overridden, { adults: 1 }).total, 6000);
+
+  // Empty strings and nulls in metadata are not treated as configured values.
+  const dirty = tourPricingFromRecord({ priceBdt: 6000, metadata: { vatPct: '', aitPct: null, childPrice: undefined } }, { vatPct: 10 });
+  assert.equal(computeTourQuote(dirty, { adults: 1 }).total, 6600);
 });
 
 /**

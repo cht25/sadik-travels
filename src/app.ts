@@ -13,7 +13,17 @@ import { verifyFirebaseIdToken, firebasePublicConfig, isFirebaseConfigured } fro
 import { AppError, assert } from './errors.js';
 import { createStore, type Store, type TourFilters, type CreateTour, type UpdateTour, type BookingStatus, type Booking, type ContentType, type ContentStatus } from './store.js';
 import { hashOtp, hashPassword, issueSession, normalizeIdentity, setAuthCookies, clearAuthCookies, verifyOtpHash, verifyPassword, verifyToken, REFRESH_COOKIE } from './security.js';
-import { computeTourQuote, BD_VAT_PCT, BD_AIT_PCT } from './booking-schema.js';
+import { formatBdt } from './pricing.js';
+import { resolveTourQuote, resolveBookingTourAmount, normalizeTourPaymentMethod, tourPaymentMethodLabel } from './tour-quotes.js';
+import { createNotificationService, type NotificationService } from './notifications/service.js';
+import { NOTIFICATION_EVENT } from './notifications/events.js';
+import { preferencesView, sanitizePreferenceInput, applyPreferencePatch } from './notifications/preferences.js';
+import { welcomeEmail, bookingReceivedEmail, staffBookingEmail, bookingStatusEmail, passwordResetEmail, passwordChangedEmail, newDeviceLoginEmail, announcementEmail, codPaymentConfirmedEmail, row } from './notifications/templates.js';
+import { createPushSubscriptionStore } from './push/store.js';
+import { createPushSender, ensureVapidKeys, isWebPushEnabled } from './push/vapid.js';
+import { registerPushRoutes } from './push/routes.js';
+import { createSecurityEventService, describeUserAgent } from './security-events.js';
+import { createPasswordResetService, resetTokenTtlMinutes } from './auth-tokens.js';
 import { MessagingProvider, PaymentProvider } from './providers.js';
 import { optionalAuth, requireAuth, requireAdmin, requireFinePermission, requireInternalOperator, requireSuperAdmin, permissionsFor, notFound, requestContext } from './middleware.js';
 import { effectiveFinePermissions, sanitizePermissions, PERMISSION_CATALOG, ALL_FINE_PERMISSIONS, ROLE_PERMISSION_PRESETS } from './permissions.js';
@@ -68,8 +78,11 @@ const paymentStatusSchema = z.enum(['created', 'pending', 'paid', 'failed', 'ref
 const trackBookingRequest = z.object({ bookingReference: z.string().uuid(), identity: z.string().min(3).max(160) });
 const notificationRequest = z.object({ userId: z.string().optional(), identity: z.string().optional(), allUsers: z.boolean().default(false), confirmMassSend: z.boolean().default(false), title: z.string().trim().min(2).max(160), message: z.string().trim().min(2).max(4000), channels: z.array(z.enum(['in_app', 'sms', 'email'])).min(1).default(['in_app']) });
 const isSafeBrandLogo = (value: string) => { if (!value) return true; if (value.startsWith('/')) return true; try { const url = new URL(value); return url.protocol === 'http:' || url.protocol === 'https:'; } catch { return false; } };
-const settingPatchSchema = z.object({ brand_name: z.string().max(120).optional(), brand_logo_url: z.string().max(500).refine(isSafeBrandLogo, 'Logo URL must be an https URL or a local path').optional(), support_email: z.string().email().or(z.literal('')).optional(), support_phone: z.string().max(40).optional(), feature_hotels: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_homes: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_tours: z.union([z.boolean(), z.enum(['true','false'])]).optional(), payment_provider: z.enum(['sslcommerz', 'bkash']).optional(), payment_webhook_secret: z.string().max(500).optional(), sslcommerz_store_id: z.string().max(160).optional(), sslcommerz_store_password: z.string().max(500).optional(), sslcommerz_api_url: z.string().url().or(z.literal('')).optional(), sslcommerz_validation_url: z.string().url().or(z.literal('')).optional(), sslcommerz_ipn_url: z.string().url().or(z.literal('')).optional(), bkash_base_url: z.string().url().or(z.literal('')).optional(), bkash_app_key: z.string().max(500).optional(), bkash_app_secret: z.string().max(500).optional(), bkash_username: z.string().max(200).optional(), bkash_password: z.string().max(500).optional(), sms_provider: z.enum(['custom_gateway', 'bulksmsbd']).optional(), sms_gateway_url: z.string().url().or(z.literal('')).optional(), sms_gateway_username: z.string().max(200).optional(), sms_gateway_password: z.string().max(500).optional(), sms_api_key: z.string().max(500).optional(), sms_sender_id: z.string().max(120).optional(), smtp_host: z.string().max(200).optional(), smtp_port: z.coerce.number().int().min(1).max(65535).optional(), smtp_user: z.string().max(240).optional(), smtp_password: z.string().max(500).optional(), smtp_from: z.string().email().or(z.literal('')).optional(), }).strict();
+const settingPatchSchema = z.object({ brand_name: z.string().max(120).optional(), brand_logo_url: z.string().max(500).refine(isSafeBrandLogo, 'Logo URL must be an https URL or a local path').optional(), support_email: z.string().email().or(z.literal('')).optional(), support_phone: z.string().max(40).optional(), feature_hotels: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_homes: z.union([z.boolean(), z.enum(['true','false'])]).optional(), feature_tours: z.union([z.boolean(), z.enum(['true','false'])]).optional(), payment_provider: z.enum(['sslcommerz', 'bkash']).optional(), payment_webhook_secret: z.string().max(500).optional(), sslcommerz_store_id: z.string().max(160).optional(), sslcommerz_store_password: z.string().max(500).optional(), sslcommerz_api_url: z.string().url().or(z.literal('')).optional(), sslcommerz_validation_url: z.string().url().or(z.literal('')).optional(), sslcommerz_ipn_url: z.string().url().or(z.literal('')).optional(), bkash_base_url: z.string().url().or(z.literal('')).optional(), bkash_app_key: z.string().max(500).optional(), bkash_app_secret: z.string().max(500).optional(), bkash_username: z.string().max(200).optional(), bkash_password: z.string().max(500).optional(), sms_provider: z.enum(['custom_gateway', 'bulksmsbd']).optional(), sms_gateway_url: z.string().url().or(z.literal('')).optional(), sms_gateway_username: z.string().max(200).optional(), sms_gateway_password: z.string().max(500).optional(), sms_api_key: z.string().max(500).optional(), sms_sender_id: z.string().max(120).optional(), smtp_host: z.string().max(200).optional(), smtp_port: z.coerce.number().int().min(1).max(65535).optional(), smtp_user: z.string().max(240).optional(), smtp_password: z.string().max(500).optional(), smtp_from: z.string().email().or(z.literal('')).optional(), smtp_from_name: z.string().trim().max(120).optional(), tour_vat_pct: z.coerce.number().min(0).max(100).optional(), tour_ait_pct: z.coerce.number().min(0).max(100).optional(), tour_service_fee_pct: z.coerce.number().min(0).max(100).optional(), tour_season_surcharge_pct: z.coerce.number().min(0).max(100).optional() }).strict();
 const passwordLoginRequest = z.object({ identity: z.string().email(), password: z.string().min(8).max(200) });
+const forgotPasswordRequest = z.object({ email: z.string().trim().toLowerCase().email().max(240) });
+const resetPasswordRequest = z.object({ token: z.string().min(20).max(200), newPassword: z.string().min(12).max(200).regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$/, 'Use 12+ characters with upper, lower, number and symbol') });
+const notificationPreferencesRequest = z.object({ preferences: z.record(z.unknown()) }).strict();
 const firebaseLoginRequest = z.object({ idToken: z.string().min(20).max(20000) });
 const messageTestRequest = z.object({ destination: z.string().min(3).max(240), subject: z.string().max(160).optional(), message: z.string().min(1).max(4000) });
 const adminBookingPatchRequest = z.object({ status: bookingStatusSchema.optional(), internalNote: z.string().max(4000).optional(), ownerId: z.string().uuid().nullable().optional(), request: z.record(z.unknown()).optional() }).strict();
@@ -83,7 +96,7 @@ const navigationReorderSchema = z.object({ ids: z.array(z.string().uuid()).min(1
 const agentInputSchema = z.object({ fullName: z.string().trim().min(2).max(160), agencyName: z.string().max(160).optional(), photoUrl: z.string().url().or(z.literal('')).optional(), photoPublicId: z.string().max(300).optional(), mediaId: z.string().uuid().nullable().optional(), jobTitle: z.string().max(120).optional(), department: z.string().max(120).optional(), phone: z.string().max(40).optional(), whatsapp: z.string().max(40).optional(), email: z.string().email().or(z.literal('')).optional(), officeLocation: z.string().max(200).optional(), city: z.string().max(120).optional(), shortBio: z.string().max(500).optional(), fullDescription: z.string().max(5000).optional(), languages: z.array(z.string().max(60)).max(20).default([]), experienceYears: z.number().int().min(0).max(80).optional(), specialization: z.string().max(160).optional(), workingHours: z.string().max(160).optional(), status: z.enum(['active','hidden','archived']).default('active'), featured: z.boolean().default(false), displayOrder: z.number().int().min(-100000).max(100000).default(0) });
 const agentPatchSchema = agentInputSchema.partial();
 const FEATURE_KEYS = ['feature_hotels','feature_homes','feature_tours'];
-const SETTING_KEYS = ['brand_name','brand_logo_url','support_email','support_phone','payment_provider','payment_webhook_secret','sslcommerz_store_id','sslcommerz_store_password','sslcommerz_api_url','sslcommerz_validation_url','sslcommerz_ipn_url','bkash_base_url','bkash_app_key','bkash_app_secret','bkash_username','bkash_password','sms_provider','sms_gateway_url','sms_gateway_username','sms_gateway_password','sms_api_key','sms_sender_id','smtp_host','smtp_port','smtp_user','smtp_password','smtp_from',...FEATURE_KEYS];
+const SETTING_KEYS = ['brand_name','brand_logo_url','support_email','support_phone','smtp_from_name','tour_vat_pct','tour_ait_pct','tour_service_fee_pct','tour_season_surcharge_pct','push_vapid_public_key','payment_provider','payment_webhook_secret','sslcommerz_store_id','sslcommerz_store_password','sslcommerz_api_url','sslcommerz_validation_url','sslcommerz_ipn_url','bkash_base_url','bkash_app_key','bkash_app_secret','bkash_username','bkash_password','sms_provider','sms_gateway_url','sms_gateway_username','sms_gateway_password','sms_api_key','sms_sender_id','smtp_host','smtp_port','smtp_user','smtp_password','smtp_from',...FEATURE_KEYS];
 const SETTING_SECRET_KEYS = new Set(['sslcommerz_store_password','payment_webhook_secret','sslcommerz_api_key','bkash_app_key','bkash_app_secret','bkash_username','bkash_password','bkash_token','sms_api_key','sms_gateway_username','sms_gateway_password','smtp_password','payment_provider_api_key']);
 const ADMIN_ROLES = ['admin', 'manager', 'super_admin', 'support', 'content_manager', 'finance', 'staff', 'hotel_owner', 'home_owner', 'travel_agent'] as const;
 const PRIVILEGED_ROLES = ['admin', 'super_admin'] as const;
@@ -104,32 +117,93 @@ const isPublicContentLive = (item: any) => { const startsAt=item.metadata?.start
 const trustedBookingQuote = async (store: Store, booking: Booking): Promise<{ amount: number; currency: string } | undefined> => {
   const request = booking.request && typeof booking.request === 'object' ? booking.request as Record<string, unknown> : {};
   if (booking.vertical === 'tour') {
-    const tour = request.tourId ? await store.findTour(String(request.tourId)) : undefined;
-    if (!tour || tour.status !== 'published') return undefined;
-    const meta = (tour.metadata || {}) as Record<string, any>;
-    const adults = Math.max(1, Math.min(60, Number(request.adults || request.travellers || 1)));
-    const children = Math.max(0, Math.min(30, Number(request.children || 0)));
-    const infants = Math.max(0, Math.min(15, Number(request.infants || 0)));
-    const quote = computeTourQuote({
-      adultPrice: Number(tour.priceBdt || 0),
-      childPrice: Number(meta.childPrice) || undefined,
-      infantPrice: Number(meta.infantPrice) || undefined,
-      seasonSurchargePct: Number(meta.seasonSurchargePct) || undefined,
-      vatPct: BD_VAT_PCT, aitPct: BD_AIT_PCT
-    }, { adults, children, infants });
-    let discount = 0;
-    const promoCode = String(request.promoCode || '').trim();
-    if (promoCode && String(meta.promoCode || '').toUpperCase() === promoCode.toUpperCase()) {
-      discount = Math.round(quote.baseFare * (Number(meta.promoPct || 10) / 100));
+    // Delegated to the shared resolver so this path, the public quote endpoint
+    // and payment initiation can never disagree about the amount.
+    try {
+      const { amount } = await resolveBookingTourAmount(store, request);
+      return { amount, currency: 'BDT' };
+    } catch {
+      return undefined;
     }
-    const amount = Math.max(0, quote.total - discount);
-    return Number.isFinite(amount) && amount > 0 ? { amount, currency: 'BDT' } : undefined;
   }
   const response = booking.response && typeof booking.response === 'object' ? booking.response as Record<string, any> : {};
   const total = response.total && typeof response.total === 'object' ? response.total as Record<string, unknown> : {};
   const amount = Number(response.quotedAmount ?? response.amount ?? total.amount);
   const currency = String(response.quotedCurrency ?? response.currency ?? total.currency ?? 'BDT').toUpperCase();
   return Number.isFinite(amount) && amount > 0 && /^[A-Z]{3}$/.test(currency) ? { amount, currency } : undefined;
+};
+
+/**
+ * Post-sign-in security check (Parts 17 & 18).
+ *
+ * Records the device, and when it is one this account has never been used on
+ * before, writes a security event and sends a security alert. The alert email
+ * is always delivered — it is not gated by a marketing preference.
+ *
+ * The location shown is APPROXIMATE and derived from network information; it is
+ * labelled that way in the email and is omitted entirely when no geolocation
+ * provider is configured. It is never presented as an exact physical location.
+ *
+ * Never throws: a security alert must not be able to block a sign-in.
+ */
+const runPostLoginSecurity = async (deps: {
+  store: Store; securityEvents: ReturnType<typeof createSecurityEventService>; notifications: NotificationService;
+  user: { id: string; fullName?: string; email?: string }; meta: { ip?: string; userAgent?: string };
+}): Promise<{ newDevice: boolean }> => {
+  try {
+    const { store, securityEvents, notifications, user, meta } = deps;
+    const result = await securityEvents.recordLogin({ userId: user.id, ip: meta.ip, userAgent: meta.userAgent });
+    if (!result.isNewDevice) return { newDevice: false };
+
+    const device = describeUserAgent(meta.userAgent);
+    const event = await securityEvents.recordEvent({
+      userId: user.id,
+      type: 'new_device_login',
+      ip: meta.ip,
+      approximateLocation: result.approximateLocation,
+      deviceLabel: device.label,
+      userAgent: meta.userAgent
+    });
+
+    const approximateLocation = result.approximateLocation
+      ? `${result.approximateLocation} (approximate, based on network information)`
+      : undefined;
+    const summary = await notifications.emit({
+      event: NOTIFICATION_EVENT.NEW_DEVICE_LOGIN,
+      title: 'New sign-in to your Sadik Travels account',
+      message: `We detected a sign-in from ${device.label}${result.approximateLocation ? ` near ${result.approximateLocation} (approximate)` : ''}. If this wasn't you, change your password immediately.`,
+      recipients: [{ userId: user.id, audience: user.email ? 'customer' : 'customer' }],
+      context: { route: '/account' },
+      email: user.email
+        ? newDeviceLoginEmail({ name: user.fullName, loginAt: new Date(), approximateLocation, ip: meta.ip, device: device.label, url: `${config.appOrigin}/account` })
+        : undefined,
+      push: { tag: 'security-new-device' }
+    });
+    await securityEvents.markNotified(event.id, summary.email.sent > 0 || summary.push.delivered > 0, summary.email.failed > 0 ? 'Email delivery failed' : undefined);
+    await store.audit('auth.new_device_login', { ip: meta.ip, userAgent: meta.userAgent, userId: user.id, metadata: { deviceId: result.device.id, device: device.label, approximateLocation: result.approximateLocation } });
+    return { newDevice: true };
+  } catch (error) {
+    console.error('[security] post-login device check failed:', error instanceof Error ? error.message : error);
+    return { newDevice: false };
+  }
+};
+
+/** Welcome email sent once, when an account row is first created. */
+const sendWelcomeEmail = async (deps: { notifications: NotificationService; user: { id: string; fullName?: string; email?: string } }): Promise<void> => {
+  const { notifications, user } = deps;
+  if (!user.email) return;
+  try {
+    await notifications.emit({
+      event: NOTIFICATION_EVENT.ACCOUNT_CREATED,
+      title: 'Welcome to Sadik Travels',
+      message: 'Your Sadik Travels account is ready. You can book hotels, tours and holiday packages, and track every reservation.',
+      recipients: [{ userId: user.id, audience: 'customer' }],
+      context: { route: '/' },
+      email: welcomeEmail({ name: user.fullName, email: user.email, url: config.appOrigin })
+    });
+  } catch (error) {
+    console.error('[auth] welcome email failed:', error instanceof Error ? error.message : error);
+  }
 };
 
 const publicTourView = (tour: any) => ({ id:tour.id, slug:tour.slug, title:tour.title, country:tour.country, tourType:tour.tourType, destinations:tour.destinations, durationDays:tour.durationDays, durationNights:tour.durationNights, description:tour.description, metadata:tour.metadata, imageUrl:optimizedMediaUrl(tour.imageUrl,{width:1200}), priceBdt:tour.priceBdt, status:tour.status, featured:tour.featured, createdAt:tour.createdAt, updatedAt:tour.updatedAt });
@@ -162,10 +236,42 @@ export function buildApp() {
   const chatStore = createChatStore();
   const chatService = new ChatService({ store: chatStore, directory: createStoreDirectory(store, hotelStore), firebase: firebaseChatBridge(), brandName: 'Sadik Travels' });
   const chatHub = new ChatRealtimeHub(chatService);
+
+  /* ------------------------------------------------- notification subsystem
+   * One service, three deliveries: persisted in-app rows, SMTP email and VAPID
+   * Web Push. Nothing else in the codebase decides how a notification travels.
+   * SMTP is email only — push never touches it.                                     */
+  const pushSubscriptions = createPushSubscriptionStore();
+  const pushSender = createPushSender(store, pushSubscriptions);
+  const notifications: NotificationService = createNotificationService(store, messaging, pushSender);
+  const securityEvents = createSecurityEventService();
+  const passwordResets = createPasswordResetService();
+
   connection.then(async () => {
     try { await hotelStore.ensureIndexes(); } catch { /* index creation is best-effort */ }
     try { await commerce.ensureIndexes(); } catch { /* index creation is best-effort */ }
+    try { await pushSubscriptions.ensureIndexes(); } catch { /* index creation is best-effort */ }
+    try { await securityEvents.ensureIndexes(); } catch { /* index creation is best-effort */ }
+    try { await passwordResets.ensureIndexes(); } catch { /* index creation is best-effort */ }
+    try {
+      // Generate/persist the VAPID pair once so the browser can subscribe.
+      const keys = await ensureVapidKeys(store);
+      if (!keys) console.warn('Web Push is disabled: no VAPID keys available');
+      const smtp = await messaging.verifyEmailConfig();
+      if (!smtp.configured) console.warn('SMTP email is not configured: transactional emails will not send until SMTP_HOST/USER/PASSWORD/FROM are set');
+      else if (!smtp.reachable) console.warn(`SMTP is configured (${smtp.host}:${smtp.port}) but the relay is not reachable: ${smtp.error}`);
+    } catch (error) {
+      console.warn('Notification subsystem startup check failed:', error instanceof Error ? error.message : error);
+    }
   });
+
+  // Retire dead push endpoints and expired reset tokens on an interval. Both are
+  // best-effort housekeeping; a failure must not affect request handling.
+  const housekeeping = setInterval(() => {
+    pushSender.prune().catch(() => undefined);
+    passwordResets.pruneExpired().catch(() => undefined);
+  }, 6 * 60 * 60 * 1000);
+  housekeeping.unref();
   const mediaUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.mediaMaxUploadBytes, files: 10 }, fileFilter: (_req: Request, file: Express.Multer.File, callback: FileFilterCallback) => { if (!['image/jpeg','image/png','image/webp'].includes(file.mimetype)) callback(new AppError(415, 'UNSUPPORTED_IMAGE_FORMAT', 'Unsupported image format')); else callback(null, true); } });
   const app = express();
   app.disable('x-powered-by');
@@ -207,7 +313,17 @@ export function buildApp() {
   app.get('/api/v1/site/agents/:id', async (req,res)=>{ const agent=await store.findTravelAgent(String(req.params.id)); assert(agent && agent.status==='active',404,'AGENT_NOT_FOUND','Agent not found'); res.json({agent:{id:agent.id,fullName:agent.fullName,agencyName:agent.agencyName,photoUrl:agent.photoUrl,photoPublicId:agent.photoPublicId,jobTitle:agent.jobTitle,department:agent.department,phone:agent.phone,whatsapp:agent.whatsapp,email:agent.email,officeLocation:agent.officeLocation,shortBio:agent.shortBio,fullDescription:agent.fullDescription,languages:agent.languages,experienceYears:agent.experienceYears,specialization:agent.specialization,workingHours:agent.workingHours,featured:agent.featured,displayOrder:agent.displayOrder}}); });
 
   // Authentication: Bangladesh phone OTP first, email OTP as a fallback.
-  app.post('/api/v1/auth/password-login', rateLimit('password-login', 10, 300), async (req, res) => { const input = toInput(passwordLoginRequest, req.body); const identity = normalizeIdentity(input.identity).identity; const user = await store.findUserByIdentity(identity); assert(user && ADMIN_ROLES.includes(user.role as typeof ADMIN_ROLES[number]) && user.status === 'active', 401, 'ADMIN_LOGIN_INVALID', 'Invalid admin credentials'); const hash = await store.getPasswordHash(identity); assert(hash && await verifyPassword(input.password, hash), 401, 'ADMIN_LOGIN_INVALID', 'Invalid admin credentials'); const session = await issueSession(store, user, clientMeta(req)); await store.updateLastLogin(user.id, req.ip); setAuthCookies(res, session.accessToken, session.refreshToken); await store.audit('auth.password_login', { ...clientMeta(req), userId: user.id }); res.json({ accessToken: session.accessToken, expiresIn: config.accessTokenTtl, user: userView(user, true) }); });
+  app.post('/api/v1/auth/password-login', rateLimit('password-login', 10, 300), async (req, res) => { const input = toInput(passwordLoginRequest, req.body); const identity = normalizeIdentity(input.identity).identity; const user = await store.findUserByIdentity(identity);
+    assert(user && user.status === 'active', 401, 'ADMIN_LOGIN_INVALID', 'Invalid credentials');
+    // Staff sign in with a password by role. A customer may also sign in with a
+    // password, but only once one has actually been set through a reset — an
+    // OTP-only customer account has no hash and therefore cannot use this path.
+    const isStaff = ADMIN_ROLES.includes(user.role as typeof ADMIN_ROLES[number]);
+    const hash = await store.getPasswordHash(identity);
+    assert(hash && await verifyPassword(input.password, hash), 401, 'ADMIN_LOGIN_INVALID', 'Invalid credentials');
+    assert(isStaff || user.role === 'customer', 401, 'ADMIN_LOGIN_INVALID', 'Invalid credentials'); const session = await issueSession(store, user, clientMeta(req)); await store.updateLastLogin(user.id, req.ip); setAuthCookies(res, session.accessToken, session.refreshToken); await store.audit('auth.password_login', { ...clientMeta(req), userId: user.id });
+    const security = await runPostLoginSecurity({ store, securityEvents, notifications, user, meta: clientMeta(req) });
+    res.json({ accessToken: session.accessToken, expiresIn: config.accessTokenTtl, user: userView(user, true), newDevice: security.newDevice }); });
 
   // Public (browser-safe) Firebase web config used by the admin console's Google sign-in.
   app.get('/api/v1/site/firebase-config', (_req, res) => res.json({ configured: isFirebaseConfigured(), firebase: firebasePublicConfig() }));
@@ -231,7 +347,8 @@ export function buildApp() {
     await store.updateLastLogin(user.id, req.ip);
     setAuthCookies(res, session.accessToken, session.refreshToken);
     await store.audit('auth.google_login', { ...clientMeta(req), userId: user.id, metadata: { firebaseUid: decoded.uid } });
-    res.json({ accessToken: session.accessToken, expiresIn: config.accessTokenTtl, user: userView(user) });
+    const security = await runPostLoginSecurity({ store, securityEvents, notifications, user, meta: clientMeta(req) });
+    res.json({ accessToken: session.accessToken, expiresIn: config.accessTokenTtl, user: userView(user), newDevice: security.newDevice });
   });
 
   // Public customer navigation: the admin toggles items on/off; hidden items
@@ -256,6 +373,86 @@ export function buildApp() {
     res.status(202).json({ challengeId, channel: normalized.channel, maskedDestination: normalized.channel === 'sms' ? `${normalized.identity.slice(0, 7)}••••` : `${normalized.identity.slice(0, 2)}•••${normalized.identity.slice(normalized.identity.indexOf('@'))}`, expiresIn: 300, ...(delivery.devCode && !config.isProduction ? { devCode: delivery.devCode } : {}) });
   });
 
+  /* ------------------------------------------------------------ PASSWORD RESET
+   * Secure, single-use, hashed, expiring reset tokens.
+   *
+   * The request endpoint answers 202 identically whether or not the address
+   * belongs to an account, so it cannot be used to enumerate registered users.
+   * A password is never sent by email — only a link.                                 */
+  app.post('/api/v1/auth/forgot-password', rateLimit('forgot-password', 5, 900), async (req, res) => {
+    const input = toInput(forgotPasswordRequest, req.body);
+    const user = await store.findUserByIdentity(input.email);
+    // Always the same answer: no confirmation that the address exists.
+    const generic = { received: true, message: 'If that email has a Sadik Travels account, a password reset link is on its way. The link expires in 30 minutes and can be used once.', expiresInMinutes: resetTokenTtlMinutes() };
+    if (!user || user.status !== 'active') return res.status(202).json(generic);
+
+    const issued = await passwordResets.issue(user.id, clientMeta(req));
+    if ('throttled' in issued) {
+      await store.audit('auth.password_reset_throttled', { ...clientMeta(req), userId: user.id });
+      return res.status(202).json(generic);
+    }
+
+    const resetUrl = `${config.appOrigin}/reset-password?token=${encodeURIComponent(issued.token)}`;
+    const summary = await notifications.emit({
+      event: NOTIFICATION_EVENT.PASSWORD_RESET_REQUESTED,
+      title: 'Reset your Sadik Travels password',
+      message: 'Use the link in the email we just sent to choose a new password. The link expires in 30 minutes and can be used once.',
+      recipients: [{ userId: user.id, audience: 'customer' }],
+      context: { route: '/reset-password' },
+      email: passwordResetEmail({ name: user.fullName, resetUrl, expiresMinutes: resetTokenTtlMinutes(), url: config.appOrigin })
+    });
+    await securityEvents.recordEvent({
+      userId: user.id, type: 'password_reset_requested', ip: req.ip,
+      deviceLabel: describeUserAgent(req.get('user-agent')).label, userAgent: req.get('user-agent')?.slice(0, 400),
+      notifiedByEmail: summary.email.sent > 0, emailError: summary.email.failed > 0 ? 'Email delivery failed' : undefined
+    });
+    await store.audit('auth.password_reset_requested', { ...clientMeta(req), userId: user.id, metadata: { delivered: summary.email.sent > 0 } });
+    res.status(202).json(generic);
+  });
+
+  /** Validate a token so the reset form can be shown before a password is typed. */
+  app.post('/api/v1/auth/validate-reset-token', rateLimit('reset-validate', 20, 300), async (req, res) => {
+    const input = toInput(z.object({ token: z.string().min(20).max(200) }), req.body);
+    const pending = await passwordResets.peek(input.token);
+    if (!pending) return res.status(400).json({ valid: false, reason: 'This reset link is invalid, already used, or has expired. Please request a new one.' });
+    const user = await store.findUserById(pending.userId);
+    res.json({ valid: true, expiresAt: pending.expiresAt, account: user?.email ? user.email.replace(/^(.{2}).*(@.*)$/, '$1•••$2') : undefined });
+  });
+
+  app.post('/api/v1/auth/reset-password', rateLimit('reset-password', 8, 900), async (req, res) => {
+    const input = toInput(resetPasswordRequest, req.body);
+    // Atomic consume: a second concurrent redemption finds nothing to update.
+    const consumed = await passwordResets.consume(input.token);
+    if (!consumed) throw new AppError(400, 'RESET_TOKEN_INVALID', 'This reset link is invalid, already used, or has expired. Please request a new one.');
+    const user = await store.findUserById(consumed.userId);
+    if (!user || user.status !== 'active') throw new AppError(403, 'ACCOUNT_UNAVAILABLE', 'This account is not available');
+
+    await store.setPasswordHash(user.id, await hashPassword(input.newPassword));
+    await passwordResets.markCompleted(consumed.id);
+    // Every other session is revoked so a stolen session cannot survive the reset.
+    await store.revokeOtherSessions(user.id, 'none');
+    // Outstanding tokens are invalidated too — one reset per request.
+    await passwordResets.invalidateAll(user.id);
+    await securityEvents.recordEvent({
+      userId: user.id, type: 'password_changed', ip: req.ip,
+      deviceLabel: describeUserAgent(req.get('user-agent')).label, userAgent: req.get('user-agent')?.slice(0, 400)
+    });
+    await store.audit('auth.password_reset_completed', { ...clientMeta(req), userId: user.id });
+
+    await notifications.emit({
+      event: NOTIFICATION_EVENT.PASSWORD_CHANGED,
+      title: 'Your password was changed',
+      message: 'Your Sadik Travels password was changed and all other sessions were signed out. If this wasn\u2019t you, contact support immediately.',
+      recipients: [{ userId: user.id, audience: 'customer' }],
+      context: { route: '/account' },
+      email: user.email
+        ? passwordChangedEmail({ name: user.fullName, email: user.email, changedAt: new Date(), supportEmail: (await store.getSetting('support_email')) || undefined, url: config.appOrigin })
+        : undefined
+    }).catch(error => console.error('[auth] password-changed email failed', error));
+
+    res.json({ reset: true, message: 'Your password has been changed. Please sign in with your new password.' });
+  });
+
   app.post('/api/v1/auth/verify-otp', rateLimit('otp-verify', 15, 300), async (req, res) => {
     const input = toInput(verifyOtpRequest, req.body);
     const challenge = await store.findOtp(input.challengeId);
@@ -267,15 +464,26 @@ export function buildApp() {
     if (!valid) { const updated = await store.incrementOtpAttempts(challenge.id); const remaining = Math.max(0, (updated?.maxAttempts ?? challenge.maxAttempts) - (updated?.attempts ?? challenge.attempts + 1)); throw new AppError(400, 'OTP_INVALID', remaining ? `Incorrect code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.` : 'Too many incorrect attempts'); }
     await store.consumeOtp(challenge.id);
     const isConfiguredAdmin = config.adminIdentities.includes(challenge.identity);
-    let user = await store.findUserByIdentity(challenge.identity);
+    const existingUser = await store.findUserByIdentity(challenge.identity);
+    // True only when the account row is created by this request, so the welcome
+    // email is sent exactly once and never again on a later sign-in.
+    const accountCreated = !existingUser;
+    let user = existingUser;
     if (!user) user = await store.createUser({ identity: challenge.identity, channel: challenge.channel, role: isConfiguredAdmin ? 'admin' : 'customer' });
     else if (isConfiguredAdmin && !['admin', 'super_admin'].includes(user.role)) user = (await store.setUserRole(user.id, 'admin')) ?? user;
     assert(user.status === 'active', 403, 'ACCOUNT_UNAVAILABLE', 'This account is suspended or disabled. Contact a Super Admin.');
     const session = await issueSession(store, user, clientMeta(req));
     await store.updateLastLogin(user.id, req.ip);
     setAuthCookies(res, session.accessToken, session.refreshToken);
-    await store.audit('auth.login', { ...clientMeta(req), userId: user.id, metadata: { channel: challenge.channel } });
-    res.json({ accessToken: session.accessToken, expiresIn: config.accessTokenTtl, user: userView(user, true) });
+    await store.audit('auth.login', { ...clientMeta(req), userId: user.id, metadata: { channel: challenge.channel, accountCreated } });
+
+    // Account created → welcome email. New device → security alert.
+    // The first sign-in on a brand-new account is not a "new device" alert:
+    // `recordLogin` only reports novelty once an account has prior devices.
+    if (accountCreated) await sendWelcomeEmail({ notifications, user });
+    const security = await runPostLoginSecurity({ store, securityEvents, notifications, user, meta: clientMeta(req) });
+
+    res.json({ accessToken: session.accessToken, expiresIn: config.accessTokenTtl, user: userView(user, true), accountCreated, newDevice: security.newDevice });
   });
 
   app.post('/api/v1/auth/refresh', rateLimit('refresh', 30, 60), async (req, res) => {
@@ -304,8 +512,56 @@ export function buildApp() {
   });
   app.get('/api/v1/account/preferences', requireAuth(store), async (req,res)=>{const user=await store.findUserById(req.user!.id);res.json({preferences:{marketingEmailOptIn:user?.marketingEmailOptIn!==false,marketingSmsOptIn:user?.marketingSmsOptIn!==false,marketingInAppOptIn:user?.marketingInAppOptIn!==false}});});
   app.patch('/api/v1/account/preferences', requireAuth(store), async (req,res)=>{const input=toInput(preferencesPatchRequest,req.body);const user=await store.updateUserProfile(req.user!.id,input);assert(user,404,'USER_NOT_FOUND','Account not found');await store.audit('account.preferences_updated',{...clientMeta(req),userId:req.user!.id,metadata:{keys:Object.keys(input)}});res.json({preferences:{marketingEmailOptIn:user.marketingEmailOptIn!==false,marketingSmsOptIn:user.marketingSmsOptIn!==false,marketingInAppOptIn:user.marketingInAppOptIn!==false}});});
-  app.get('/api/v1/notifications', requireAuth(store), async (req, res) => { const notifications = await store.listNotifications(req.user!.id); res.json({ notifications, unread: notifications.filter(item => !item.readAt).length }); });
+  app.get('/api/v1/notifications', requireAuth(store), async (req, res) => {
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+    const rows = await store.listNotifications(req.user!.id, limit);
+    res.json({ notifications: rows, unread: await store.countUnreadNotifications(req.user!.id) });
+  });
   app.patch('/api/v1/notifications/:id/read', requireAuth(store), async (req, res) => { const notification = await store.markNotificationRead(String(req.params.id), req.user!.id); assert(notification, 404, 'NOTIFICATION_NOT_FOUND', 'Notification not found'); res.json({ notification }); });
+  app.post('/api/v1/notifications/read-all', requireAuth(store), async (req, res) => { await store.markAllNotificationsRead(req.user!.id); res.json({ unread: 0 }); });
+  /**
+   * Fired by the service worker when a push notification is dismissed without
+   * being opened. Unauthenticated (the browser may be signed out), so it only
+   * records the dismissal when a session is present and never throws.
+   */
+  app.post('/api/v1/notifications/dismissed', optionalAuth(store), async (req, res) => {
+    try {
+      const id = String((req.body as Record<string, unknown>)?.notificationId || '');
+      if (req.user?.id && id) await store.markNotificationRead(id, req.user.id);
+      res.json({ received: true });
+    } catch { res.json({ received: false }); }
+  });
+
+  /* ------------------------------------------------- notification preferences
+   * Per-category channel switches. Security alerts are reported as locked:
+   * they are always delivered and the UI must not pretend otherwise.             */
+  app.get('/api/v1/notifications/preferences', requireAuth(store), (req, res) => {
+    res.json({ preferences: preferencesView(req.user!) });
+  });
+  app.put('/api/v1/notifications/preferences', requireAuth(store), rateLimit('notification-prefs', 20, 300), async (req, res) => {
+    const patch = sanitizePreferenceInput((req.body as Record<string, unknown>)?.preferences ?? req.body);
+    const next = applyPreferencePatch(req.user!, patch);
+    const updated = await store.updateNotificationPreferences(req.user!.id, next);
+    assert(updated, 404, 'USER_NOT_FOUND', 'Account not found');
+    await store.audit('account.notification_preferences_updated', { ...clientMeta(req), userId: req.user!.id, metadata: { categories: Object.keys(patch) } });
+    res.json({ preferences: preferencesView(updated) });
+  });
+
+  /* ------------------------------------------------------- account security
+   * Devices the account has signed in from, and the security events raised for
+   * it. Both are scoped to the signed-in user.                                     */
+  app.get('/api/v1/account/devices', requireAuth(store), async (req, res) => {
+    res.json({ devices: await securityEvents.listDevices(req.user!.id) });
+  });
+  app.delete('/api/v1/account/devices/:id', requireAuth(store), async (req, res) => {
+    const removed = await securityEvents.forgetDevice(req.user!.id, String(req.params.id));
+    assert(removed, 404, 'DEVICE_NOT_FOUND', 'That device is no longer remembered');
+    await store.audit('account.device_forgotten', { ...clientMeta(req), userId: req.user!.id, metadata: { deviceId: String(req.params.id) } });
+    res.json({ removed: true });
+  });
+  app.get('/api/v1/account/security-events', requireAuth(store), async (req, res) => {
+    res.json({ events: await securityEvents.listEvents(req.user!.id, 30) });
+  });
 
   // Account: transaction ledger and support tickets (self-owned records only).
   app.get('/api/v1/account/payments', requireAuth(store), async (req, res) => {
@@ -448,7 +704,46 @@ export function buildApp() {
   app.post('/api/v1/admin/profile/verify-contact-otp', requireAdmin(store), rateLimit('profile-contact-verify', 10, 300), async (req, res) => { const input = toInput(verifyContactOtpRequest, req.body); const challenge = await store.findOtp(input.challengeId); assert(challenge && challenge.userId === req.user!.id && challenge.targetIdentity && ['profile_email_change','profile_phone_change'].includes(challenge.purpose || ''), 404, 'OTP_NOT_FOUND', 'This contact verification is no longer available'); assert(!challenge.consumedAt && new Date(challenge.expiresAt)>new Date(), 400, 'OTP_EXPIRED', 'This verification code has expired'); assert(challenge.attempts < challenge.maxAttempts, 429, 'OTP_LOCKED', 'Too many incorrect attempts'); const valid = await verifyOtpHash(input.code, challenge.codeHash); if(!valid){await store.incrementOtpAttempts(challenge.id); throw new AppError(400,'OTP_INVALID','Incorrect verification code');} await store.consumeOtp(challenge.id); const patch = challenge.channel === 'email' ? { email: challenge.targetIdentity } : { phone: challenge.targetIdentity }; const user = await store.updateUserProfile(req.user!.id, patch); await store.audit(challenge.channel === 'email' ? 'admin.email_changed' : 'admin.phone_changed', { ...clientMeta(req), userId: req.user!.id, metadata: { channel: challenge.channel } }); res.json({ user: userView(user, true) }); });
   app.get('/api/v1/admin/profile/sessions', requireAdmin(store), async (req, res) => res.json({ sessions: await store.listSessions(req.user!.id), currentSessionId: req.auth?.sid }));
   app.post('/api/v1/admin/profile/sessions/revoke-others', requireAdmin(store), async (req, res) => { assert(req.auth?.sid, 401, 'SESSION_INVALID', 'Current session is not available'); await store.revokeOtherSessions(req.user!.id, req.auth.sid); await store.audit('admin.sessions_revoked', { ...clientMeta(req), userId: req.user!.id }); res.json({ revoked: true }); });
-  app.get('/api/v1/admin/system-status', requireFinePermission(store, 'settings.view'), async (_req,res)=>{ await store.health(); const smsProvider=await store.getSetting('sms_provider')||config.smsProvider; const emailConfigured=Boolean((await store.getSetting('smtp_host'))||config.smtpHost) && Boolean((await store.getSetting('smtp_from'))||config.smtpFrom); const smsConfigured=smsProvider==='custom_gateway'?Boolean((await store.getSetting('sms_gateway_url'))||config.smsGatewayUrl):Boolean((await store.getSetting('sms_api_key'))||config.bulkSmsApiKey); const paymentConfigured=Boolean(await store.getSetting('sslcommerz_store_id')||await store.getSetting('bkash_base_url')); res.json({services:{database:{status:'connected'},cloudinary:{status:media.isConfigured()?'connected':'not_configured'},email:{status:emailConfigured?'configured':'not_configured'},sms:{status:smsConfigured?'configured':'not_configured'},payment:{status:paymentConfigured?'configured':'not_configured'}}}); });
+  /**
+   * Deployment health for every integration.
+   *
+   * Email and push are *actively verified*, not just checked for the presence of
+   * a variable: SMTP performs a real handshake with the relay and Web Push
+   * reports whether a usable VAPID key pair exists. Credentials themselves are
+   * never returned — only booleans, host/port and a failure reason.
+   */
+  app.get('/api/v1/admin/system-status', requireFinePermission(store, 'settings.view'), async (_req, res) => {
+    await store.health();
+    const smsProvider = await store.getSetting('sms_provider') || config.smsProvider;
+    const smsConfigured = smsProvider === 'custom_gateway'
+      ? Boolean((await store.getSetting('sms_gateway_url')) || config.smsGatewayUrl)
+      : Boolean((await store.getSetting('sms_api_key')) || config.bulkSmsApiKey);
+    const paymentConfigured = Boolean(await store.getSetting('sslcommerz_store_id') || await store.getSetting('bkash_base_url'));
+    const email = await messaging.verifyEmailConfig();
+    const pushKey = await pushSender.publicKey().catch(() => '');
+    res.json({
+      services: {
+        database: { status: 'connected' },
+        cloudinary: { status: media.isConfigured() ? 'connected' : 'not_configured' },
+        email: {
+          status: !email.configured ? 'not_configured' : email.reachable ? 'connected' : 'unreachable',
+          host: email.host || undefined,
+          port: email.port,
+          secure: email.secure,
+          // Only whether credentials exist — never the values.
+          credentialsPresent: email.authPresent,
+          error: email.error
+        },
+        sms: { status: smsConfigured ? 'configured' : 'not_configured' },
+        payment: { status: paymentConfigured ? 'configured' : 'not_configured' },
+        webPush: {
+          status: pushKey ? 'configured' : 'not_configured',
+          // Public key only; the private key never leaves the server.
+          publicKeyConfigured: Boolean(pushKey)
+        }
+      }
+    });
+  });
   app.get('/api/v1/admin/stats', requireFinePermission(store, 'dashboard.view'), async (req, res) => {
     if (req.user?.role === 'hotel_owner') {
       const stats = await hotelStore.adminStats(req.user.id);
@@ -474,7 +769,6 @@ export function buildApp() {
   app.get('/api/v1/admin/customers/:id', requireFinePermission(store, 'customer.view'), async (req, res) => { const customer = await store.findAdminCustomer(String(req.params.id)); assert(customer, 404, 'CUSTOMER_NOT_FOUND', 'Customer not found'); res.json({ customer }); });
   app.post('/api/v1/admin/customers/:id/notes', requireFinePermission(store, 'customer.view'), async (req, res) => { const input = toInput(customerNoteRequest, req.body); const customer = await store.findUserById(String(req.params.id)); assert(customer && customer.role === 'customer', 404, 'CUSTOMER_NOT_FOUND', 'Customer not found'); const note = await store.addCustomerNote({ userId: customer.id, authorId: req.user!.id, note: input.note }); await store.audit('admin.customer_note_added', { ...clientMeta(req), userId: req.user!.id, metadata: { customerId: customer.id, noteId: note.id } }); res.status(201).json({ note }); });
 
-  app.get('/api/v1/admin/payments', requireFinePermission(store, 'payment.view'), async (req, res) => res.json(await store.listAdminPayments({ q: req.query.q ? String(req.query.q) : undefined, status: paymentStatusSchema.safeParse(String(req.query.status || '')).success ? paymentStatusSchema.parse(String(req.query.status)) : 'all', provider: req.query.provider ? String(req.query.provider) : undefined, page: Number(req.query.page) || 1, pageSize: Number(req.query.pageSize) || 20 })));
   app.post('/api/v1/admin/payments/:id/refund', requireFinePermission(store, 'payment.manage'), async (req, res, next) => {
     try {
       const input = toInput(z.object({ amount: z.number().positive().max(100000000).optional(), reason: z.string().max(500).optional() }).strict(), req.body ?? {});
@@ -489,6 +783,143 @@ export function buildApp() {
       await store.updatePayment(payment.id, { refundStatus: 'requested', refundAmount: amount, refundReason: input.reason });
       await store.audit('payment.refund_requested', { ...clientMeta(req), userId: req.user!.id, metadata: { paymentId: payment.id, amount, reason: input.reason } });
       throw new AppError(503, 'REFUNDS_NOT_CONFIGURED', `Refund request for ${amount} ${payment.currency} was recorded, but no refund has been issued: the configured gateway does not expose a working refund contract.`);
+    } catch (error) { next(error); }
+  });
+
+  /* ------------------------------------------------- ADMIN PAYMENT MANAGEMENT
+   * Cash / pay-later and other offline payments are created `pending` with
+   * `paymentMethod: cod`. They are NEVER created as paid. An operator with
+   * `payment.manage` confirms them only once the money was actually received,
+   * and every action writes an audit entry.                                         */
+  app.get('/api/v1/admin/payments', requireFinePermission(store, 'payment.view'), async (req, res) => res.json(await store.listAdminPayments({
+    q: req.query.q ? String(req.query.q) : undefined,
+    status: paymentStatusSchema.safeParse(String(req.query.status || '')).success ? paymentStatusSchema.parse(String(req.query.status)) : 'all',
+    provider: req.query.provider ? String(req.query.provider) : undefined,
+    paymentMethod: req.query.paymentMethod ? String(req.query.paymentMethod) : undefined,
+    pendingManualOnly: req.query.pendingManual === 'true',
+    page: Number(req.query.page) || 1,
+    pageSize: Number(req.query.pageSize) || 20
+  })));
+
+  /** Cash / bank / office payments that still need an operator decision. */
+  app.get('/api/v1/admin/payments/manual-queue', requireFinePermission(store, 'payment.view'), async (_req, res) => {
+    res.json(await store.listAdminPayments({ pendingManualOnly: true, page: 1, pageSize: 50 }));
+  });
+
+  /**
+   * Confirm an offline payment was received.
+   *
+   * This is the only path that turns a COD reservation into `paid`, and it
+   * requires the operator to state how the money was received.
+   */
+  app.post('/api/v1/admin/payments/:id/confirm', requireFinePermission(store, 'payment.manage'), async (req, res, next) => {
+    try {
+      const input = toInput(z.object({
+        reference: z.string().trim().max(120).optional(),
+        method: z.enum(['cash', 'bank_transfer', 'mobile_banking', 'office', 'cheque']).default('cash'),
+        note: z.string().trim().max(500).optional()
+      }).strict(), req.body ?? {});
+      const payment = await store.findPaymentById(String(req.params.id));
+      assert(payment, 404, 'PAYMENT_NOT_FOUND', 'Payment not found');
+      assert(payment.status !== 'paid', 409, 'PAYMENT_ALREADY_PAID', 'This payment is already confirmed');
+      assert(['created', 'pending', 'failed'].includes(payment.status), 409, 'PAYMENT_NOT_CONFIRMABLE', 'Only a pending or failed payment can be confirmed manually');
+
+      const confirmedAt = new Date().toISOString();
+      const updated = await store.updatePayment(payment.id, {
+        status: 'paid',
+        completedAt: confirmedAt,
+        paymentMethod: payment.paymentMethod || input.method,
+        transactionRef: input.reference || payment.transactionRef,
+        gatewayTransactionId: `MANUAL-${payment.id.slice(0, 8).toUpperCase()}`,
+        providerPayload: { ...(typeof payment.providerPayload === 'object' && payment.providerPayload ? payment.providerPayload as Record<string, unknown> : {}), manualConfirmation: { by: req.user!.id, method: input.method, reference: input.reference, note: input.note, at: confirmedAt } }
+      });
+      assert(updated, 404, 'PAYMENT_NOT_FOUND', 'Payment not found');
+
+      // Advance the reservation the payment belongs to.
+      const hotelBooking = payment.provider === 'hotel' ? await hotelStore.findBooking(payment.bookingId).catch(() => undefined) : undefined;
+      if (hotelBooking) {
+        await hotelStore.patchBookingStatus(hotelBooking.id, { status: 'confirmed', paymentStatus: 'paid' });
+      } else {
+        const order = await commerce.findOrder(payment.bookingId).catch(() => undefined);
+        if (order) {
+          await commerce.updateOrder(order.id, { paymentStatus: 'paid', status: 'confirmed' }, { at: confirmedAt, status: 'payment_confirmed', note: `Manual payment confirmed (${input.method})`, actorId: req.user!.id });
+          await commerce.markInvoicePaid(order.id).catch(() => undefined);
+        } else {
+          const booking = await store.findBooking(payment.bookingId);
+          if (booking && booking.status !== 'confirmed') {
+            await store.updateBooking(booking.id, { status: 'confirmed' });
+            await store.addBookingEvent({ bookingId: booking.id, actorId: req.user!.id, action: 'manual_payment_confirmed', fromStatus: booking.status, toStatus: 'confirmed', note: input.note });
+          }
+        }
+      }
+
+      await store.audit('payment.manual_confirmed', { ...clientMeta(req), userId: req.user!.id, metadata: { paymentId: payment.id, amount: payment.amount, currency: payment.currency, method: input.method, reference: input.reference } });
+
+      const reference = payment.bookingId.slice(0, 8).toUpperCase();
+      const serviceName = hotelBooking?.hotelSnapshot?.name || 'your booking';
+      const serviceKind = hotelBooking ? 'Hotel booking' : 'Booking';
+      await notifications.emit({
+        event: NOTIFICATION_EVENT.PAYMENT_MANUALLY_CONFIRMED,
+        title: 'Payment confirmed',
+        message: `We recorded your ${formatBdt(payment.amount, payment.currency)} payment for ${serviceName}. Your booking ${reference} is confirmed.`,
+        context: { bookingId: payment.bookingId, route: `/orders/${payment.bookingId}` },
+        recipients: [{ userId: payment.userId, audience: 'customer' }, ...(await notifications.adminRecipients(NOTIFICATION_EVENT.PAYMENT_MANUALLY_CONFIRMED))],
+        email: user => (user.id === payment.userId
+          ? codPaymentConfirmedEmail({ reference, serviceName, serviceKind, total: payment.amount, currency: payment.currency, paymentStatus: 'paid', bookingStatus: 'CONFIRMED', confirmedAt: new Date(confirmedAt), methodLabel: input.method.replace('_', ' '), url: `${config.appOrigin}/orders/${payment.bookingId}` })
+          : undefined)
+      }).catch(error => console.error('[payments] manual confirmation notification failed', error));
+
+      res.json({ payment: updated, bookingStatus: hotelBooking ? 'confirmed' : 'confirmed' });
+    } catch (error) { next(error); }
+  });
+
+  /** Reject an offline payment claim: the reservation stays unpaid. */
+  app.post('/api/v1/admin/payments/:id/reject', requireFinePermission(store, 'payment.manage'), async (req, res, next) => {
+    try {
+      const input = toInput(z.object({ reason: z.string().trim().min(3).max(500) }).strict(), req.body ?? {});
+      const payment = await store.findPaymentById(String(req.params.id));
+      assert(payment, 404, 'PAYMENT_NOT_FOUND', 'Payment not found');
+      assert(payment.status !== 'paid', 409, 'PAYMENT_ALREADY_PAID', 'A confirmed payment cannot be rejected; use the refund flow instead');
+      const updated = await store.updatePayment(payment.id, { status: 'failed', failedAt: new Date().toISOString(), failureReason: `Rejected by operations: ${input.reason}` });
+      assert(updated, 404, 'PAYMENT_NOT_FOUND', 'Payment not found');
+      await store.audit('payment.manual_rejected', { ...clientMeta(req), userId: req.user!.id, metadata: { paymentId: payment.id, reason: input.reason } });
+      await notifications.emit({
+        event: NOTIFICATION_EVENT.PAYMENT_REJECTED,
+        title: 'We could not confirm your payment',
+        message: `We could not confirm the payment for booking ${payment.bookingId.slice(0, 8).toUpperCase()}: ${input.reason}. Please contact our support team.`,
+        context: { bookingId: payment.bookingId, route: '/payments' },
+        recipients: [{ userId: payment.userId, audience: 'customer' }]
+      }).catch(error => console.error('[payments] rejection notification failed', error));
+      res.json({ payment: updated });
+    } catch (error) { next(error); }
+  });
+
+  /** Cancel an unpaid reservation. A paid payment must go through a refund. */
+  app.post('/api/v1/admin/payments/:id/cancel', requireFinePermission(store, 'payment.manage'), async (req, res, next) => {
+    try {
+      const input = toInput(z.object({ reason: z.string().trim().min(3).max(500) }).strict(), req.body ?? {});
+      const payment = await store.findPaymentById(String(req.params.id));
+      assert(payment, 404, 'PAYMENT_NOT_FOUND', 'Payment not found');
+      assert(payment.status !== 'paid', 409, 'PAYMENT_ALREADY_PAID', 'A confirmed payment cannot be cancelled; issue a refund instead');
+      const updated = await store.updatePayment(payment.id, { status: 'failed', failedAt: new Date().toISOString(), failureReason: `Cancelled by operations: ${input.reason}` });
+      const hotelBooking = payment.provider === 'hotel' ? await hotelStore.findBooking(payment.bookingId).catch(() => undefined) : undefined;
+      if (hotelBooking) await hotelStore.patchBookingStatus(hotelBooking.id, { status: 'cancelled' });
+      else {
+        const booking = await store.findBooking(payment.bookingId);
+        if (booking && !['cancelled', 'rejected'].includes(booking.status)) {
+          await store.updateBooking(booking.id, { status: 'cancelled' });
+          await store.addBookingEvent({ bookingId: booking.id, actorId: req.user!.id, action: 'cancelled_by_operations', fromStatus: booking.status, toStatus: 'cancelled', note: input.reason });
+        }
+      }
+      await store.audit('payment.manual_cancelled', { ...clientMeta(req), userId: req.user!.id, metadata: { paymentId: payment.id, reason: input.reason } });
+      await notifications.emit({
+        event: NOTIFICATION_EVENT.BOOKING_CANCELLED,
+        title: 'Booking cancelled',
+        message: `Booking ${payment.bookingId.slice(0, 8).toUpperCase()} was cancelled: ${input.reason}`,
+        context: { bookingId: payment.bookingId, route: `/orders/${payment.bookingId}` },
+        recipients: [{ userId: payment.userId, audience: 'customer' }, ...(await notifications.adminRecipients(NOTIFICATION_EVENT.BOOKING_CANCELLED))]
+      }).catch(error => console.error('[payments] cancellation notification failed', error));
+      res.json({ payment: updated });
     } catch (error) { next(error); }
   });
 
@@ -548,13 +979,36 @@ export function buildApp() {
     const recipients = input.allUsers ? await store.listUsers() : [input.userId ? await store.findUserById(input.userId) : normalizedRecipient ? await store.findUserByIdentity(normalizedRecipient) : undefined].filter(Boolean);
     assert(recipients.length > 0, 404, 'RECIPIENT_NOT_FOUND', 'No notification recipient was found');
     const sent: string[] = []; const failed: Array<{ userId: string; reason: string }> = [];
+    // SMS is sent directly (the notification service does not own SMS); every
+    // other channel — in-app, push and email — goes through the service so an
+    // announcement reaches devices and honours each user's preferences.
+    const wantsPush = input.channels.includes('in_app') || input.channels.includes('email');
+    if (wantsPush) {
+      const summary = await notifications.emit({
+        event: NOTIFICATION_EVENT.ADMIN_ANNOUNCEMENT,
+        title: input.title,
+        message: input.message,
+        recipients: recipients.map(recipient => ({ userId: recipient!.id, audience: 'customer' as const })),
+        context: { route: '/' },
+        email: user => announcementEmail({ title: input.title, message: input.message, url: config.appOrigin }),
+        actorId: req.user!.id,
+        push: { tag: 'admin-announcement' }
+      });
+      for (const recipient of recipients) { if (summary.inApp > 0 || summary.email.sent > 0 || summary.push.delivered > 0) sent.push(recipient!.id); }
+      if (summary.email.failed > 0) failed.push({ userId: 'batch', reason: `${summary.email.failed} email delivery attempt(s) failed` });
+    }
     for (const recipient of recipients) {
       const user = recipient!;
+      if (!input.channels.includes('sms')) continue;
       try {
-        if (input.channels.includes('sms')) { assert(user.phone, 400, 'RECIPIENT_PHONE_MISSING', 'A phone number is required for SMS delivery'); await messaging.sendNotification('sms', user.phone, input.title, input.message); }
-        if (input.channels.includes('email')) { assert(user.email, 400, 'RECIPIENT_EMAIL_MISSING', 'An email address is required for email delivery'); await messaging.sendNotification('email', user.email, input.title, input.message); }
-        await store.createNotification({ userId: user.id, title: input.title, message: input.message, channels: input.channels, status: 'sent', sentAt: new Date().toISOString(), createdBy: req.user!.id }); sent.push(user.id);
-      } catch (error) { const reason = error instanceof Error ? error.message : 'Delivery failed'; await store.createNotification({ userId: user.id, title: input.title, message: input.message, channels: input.channels, status: 'failed', failureReason: reason, createdBy: req.user!.id }); failed.push({ userId: user.id, reason }); }
+        assert(user.phone, 400, 'RECIPIENT_PHONE_MISSING', 'A phone number is required for SMS delivery');
+        await messaging.sendNotification('sms', user.phone, input.title, input.message);
+        if (!sent.includes(user.id)) sent.push(user.id);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'Delivery failed';
+        await store.createNotification({ userId: user.id, title: input.title, message: input.message, channels: ['sms'], status: 'failed', failureReason: reason, createdBy: req.user!.id });
+        failed.push({ userId: user.id, reason });
+      }
     }
     await store.audit('admin.notification_sent', { ...clientMeta(req), userId: req.user!.id, metadata: { recipients: sent.length, failed: failed.length, channels: input.channels, allUsers: input.allUsers } }); res.status(201).json({ sent: sent.length, failed: failed.length, failures: failed.slice(0, 10), channels: input.channels });
   });
@@ -571,25 +1025,88 @@ export function buildApp() {
       // actually needs. Client-supplied totals (quotedTotal, priceBdt, total)
       // are ignored so a forged amount can never be charged later.
       const extra = (tourPayload as Record<string, any>);
-      const adults = Math.max(1, Math.min(30, Number(extra.adults ?? extra.travellers ?? 1)));
-      const children = Math.max(0, Math.min(20, Number(extra.children ?? 0)));
-      const infants = Math.max(0, Math.min(10, Number(extra.infants ?? 0)));
       const promoCode = typeof extra.promoCode === 'string' ? extra.promoCode.trim().slice(0, 40) : undefined;
+      const paymentMethod = normalizeTourPaymentMethod(extra.paymentMethod);
+
+      // The price is computed here, once, from the persisted tour row. The
+      // traveller counts are normalized inside `resolveTourQuote` — a missing
+      // count is exactly ONE adult, never a hidden default of two.
+      const resolved = await resolveTourQuote(store, tour.id, {
+        adults: Number(extra.adults ?? extra.travellers ?? 1),
+        children: Number(extra.children ?? 0),
+        infants: Number(extra.infants ?? 0)
+      }, promoCode);
+      const quote = resolved.quote;
+
       const request = {
         tourId: tour.id,
         slug: tour.slug,
         title: tour.title,
-        travellers: Math.max(1, Math.min(30, Number(extra.travellers || adults))),
-        adults,
-        children,
-        infants,
+        travellers: quote.travellerCount,
+        adults: quote.adults,
+        children: quote.children,
+        infants: quote.infants,
         travelDate: tourPayload.travelDate,
         priceBdt: tour.priceBdt,
+        paymentMethod,
         ...(promoCode ? { promoCode } : {})
       };
       const booking = await store.createBooking({ userId: req.user!.id, vertical: 'tour', status: 'new', request });
-      await store.audit('booking.created', { ...clientMeta(req), userId: req.user!.id, metadata: { bookingId: booking.id, vertical: input.vertical, workflow: 'operator_review' } });
-      res.status(201).json({ booking });
+      // Persist the server-computed breakdown with the booking so checkout, the
+      // invoice and the payment all quote exactly the same numbers.
+      const response = {
+        quotedAmount: quote.total,
+        quotedCurrency: 'BDT',
+        priceBreakdown: quote,
+        lines: resolved.breakdown,
+        quotedAt: new Date().toISOString(),
+        ...(quote.promoApplied && quote.promoCode ? { promoApplied: quote.promoCode } : {})
+      };
+      const saved = await store.updateBooking(booking.id, { response }) ?? booking;
+      await store.addBookingEvent({ bookingId: booking.id, actorId: req.user!.id, action: 'quote_attached', note: `${formatBdt(quote.total)} for ${quote.travellerCount} traveller(s)` });
+      await store.audit('booking.created', { ...clientMeta(req), userId: req.user!.id, metadata: { bookingId: booking.id, vertical: input.vertical, amount: quote.total, travellers: quote.travellerCount, paymentMethod, workflow: 'operator_review' } });
+
+      // ---- notifications: customer + operations, across in-app, push, email ----
+      const reference = booking.id.slice(0, 8).toUpperCase();
+      const guests = `${quote.adults} adult(s)${quote.children ? `, ${quote.children} child(ren)` : ''}${quote.infants ? `, ${quote.infants} infant(s)` : ''}`;
+      const facts = {
+        reference,
+        serviceName: tour.title,
+        serviceKind: 'Tour booking',
+        dates: tourPayload.travelDate,
+        guests,
+        total: quote.total,
+        currency: 'BDT',
+        paymentStatus: 'pending',
+        bookingStatus: 'NEW',
+        paymentMethod: tourPaymentMethodLabel(paymentMethod),
+        url: `${config.appOrigin}/orders/${booking.id}`,
+        customerName: req.user!.fullName,
+        customerEmail: req.user!.email,
+        customerPhone: req.user!.phone,
+        breakdown: resolved.breakdown.map(line => row(line.label, `${line.amount < 0 ? '−' : ''}${formatBdt(Math.abs(line.amount))}`))
+      };
+      const bookingUserId = req.user!.id;
+      await notifications.emit({
+        event: NOTIFICATION_EVENT.TOUR_BOOKING_CREATED,
+        title: paymentMethod === 'cod' ? 'Booking created — payment pending' : 'Booking received',
+        message: paymentMethod === 'cod'
+          ? `Your booking ${reference} for ${tour.title} is created for ${formatBdt(quote.total)}. Nothing has been charged; our team will contact you to arrange payment.`
+          : `We received your booking ${reference} for ${tour.title}. Total payable ${formatBdt(quote.total)} for ${quote.travellerCount} traveller(s).`,
+        context: { bookingId: booking.id, serviceId: tour.id, route: `/orders/${booking.id}` },
+        recipients: [{ userId: bookingUserId, audience: 'customer' }, ...(await notifications.adminRecipients(NOTIFICATION_EVENT.TOUR_BOOKING_CREATED))],
+        email: user => (user.id === bookingUserId ? bookingReceivedEmail(facts) : staffBookingEmail({ ...facts, audience: 'Operations team' })),
+        push: { tag: `booking-${booking.id}` }
+      }).catch(error => console.error('[bookings] tour notification failed', error));
+
+      res.status(201).json({
+        booking: { ...saved, response },
+        priceBreakdown: quote,
+        lines: resolved.breakdown,
+        paymentMethod,
+        amountDue: quote.total,
+        currency: 'BDT'
+      });
       return;
     }
     throw new AppError(400, 'UNSUPPORTED_VERTICAL', 'Only tour bookings are created through this endpoint. Hotels use /hotels and other products use the cart checkout.');
@@ -599,7 +1116,22 @@ export function buildApp() {
   app.get('/api/v1/bookings/:id', requireAuth(store), async (req, res) => { const booking = await store.findBooking(String(req.params.id), req.user!.id); assert(booking, 404, 'BOOKING_NOT_FOUND', 'Booking not found'); res.json({ booking }); });
   app.post('/api/v1/bookings/:id/cancel', requireAuth(store), async (req, res) => { const booking = await store.findBooking(String(req.params.id), req.user!.id); assert(booking, 404, 'BOOKING_NOT_FOUND', 'Booking not found'); assert(['new','reviewing','accepted','processing','pending','confirmed'].includes(booking.status), 409, 'BOOKING_NOT_CANCELLABLE', 'This booking cannot be cancelled at its current stage'); const result: unknown = { cancelledLocally: true }; const updated = await store.updateBooking(booking.id, { status: 'cancelled', response: result }); await store.addBookingEvent({ bookingId: booking.id, actorId: req.user!.id, action: 'customer_cancelled', fromStatus: booking.status, toStatus: 'cancelled', note: (req.body as any)?.reason }); await store.audit('booking.cancelled', { ...clientMeta(req), userId: req.user!.id, metadata: { bookingId: booking.id } }); res.json({ booking: updated ?? booking }); });
 
-  const notifyUser = async (userId: string, title: string, message: string) => { try { await store.createNotification({ userId, title, message, channels: ['in_app'], status: 'sent', sentAt: new Date().toISOString() } as any); } catch { /* notifications are best effort */ } };
+  /**
+   * Best-effort customer notification. Delivers in-app + push + email through
+   * the notification service; never throws, so a delivery problem can never
+   * fail the payment webhook that called it.
+   */
+  const notifyUser = async (userId: string, title: string, message: string, options: { event?: any; bookingId?: string; route?: string } = {}) => {
+    try {
+      await notifications.emit({
+        event: options.event || NOTIFICATION_EVENT.BOOKING_UPDATED,
+        title,
+        message,
+        recipients: [{ userId, audience: 'customer' }],
+        context: { bookingId: options.bookingId, route: options.route || '/orders' }
+      });
+    } catch { /* notifications are best effort */ }
+  };
 
   app.post('/api/v1/payments/intents', requireAuth(store), rateLimit('payment-intent', 20, 60), async (req, res) => {
     const input = toInput(paymentRequest, req.body);
@@ -704,13 +1236,16 @@ export function buildApp() {
   app.post('/api/v1/support/tickets', optionalAuth(store), rateLimit('support', 20, 60), async (req, res) => { const input = toInput(supportRequest, req.body); const ticket = await store.createSupportTicket({ ...input, userId: req.user?.id }); await store.audit('support.ticket_created', { ...clientMeta(req), userId: req.user?.id, metadata: { ticketId: ticket.id } }); res.status(201).json({ ticket: { id: ticket.id, status: ticket.status, createdAt: ticket.createdAt } }); });
 
   // Hotel booking ecosystem (search, rooms, inventory, booking engine, admin).
-  registerHotelRoutes(app, { store, hotelStore, media, payment });
+  registerHotelRoutes(app, { store, hotelStore, media, payment, notifications });
 
   // SSLCommerz / SurjoPay-style initiate + return + IPN surface.
-  registerPaymentGatewayRoutes(app, { store, payment, hotelStore });
+  registerPaymentGatewayRoutes(app, { store, payment, hotelStore, notifications });
+
+  // Web Push: public key, subscription lifecycle and a self-test endpoint.
+  registerPushRoutes(app, { store, subscriptions: pushSubscriptions, sender: pushSender });
 
   // Catalogue, cart, wishlist, coupons, orders, invoices and reviews.
-  registerCommerceRoutes(app, { store, commerce, payment });
+  registerCommerceRoutes(app, { store, commerce, payment, notifications });
 
   // Website analytics (page views, searches and business conversions).
   registerAnalyticsRoutes(app, { store });
@@ -764,5 +1299,5 @@ export function buildApp() {
     if (config.serveStatic && !req.path.startsWith('/api/')) return res.status(normalized.statusCode).type('html').send(errorPageHtml(normalized.statusCode));
     res.status(normalized.statusCode).json({ error: { code: normalized.code, message: safeExpose ? normalized.message : 'An unexpected error occurred', ...(safeExpose && normalized.details ? { details: normalized.details } : {}) }, requestId: req.requestId });
   });
-  return { app, store, connection, liveChat: chatHub, chatHub, chatService, chatStore };
+  return { app, store, connection, liveChat: chatHub, chatHub, chatService, chatStore, notifications, pushSender, pushSubscriptions, securityEvents, passwordResets, messaging };
 }
