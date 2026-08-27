@@ -15,7 +15,7 @@
     "audit": "npm audit --omit=dev --audit-level=high",
     "admin:create": "tsx src/admin-create.ts",
     "cleanup:legacy": "tsx src/cleanup-legacy.ts",
-    "test": "npm run build && node --test dist/smoke.test.js dist/chat.test.js dist/hotel-images.test.js dist/hotel-image-frontend.test.js dist/hotel-image-routes.test.js",
+    "test": "npm run build && node --test dist/smoke.test.js dist/chat.test.js dist/hotel-images.test.js dist/hotel-image-frontend.test.js dist/hotel-image-routes.test.js dist/notifications.test.js",
     "demo": "tsx src/demo-server.ts"
   },
   "dependencies": {
@@ -25,6 +25,7 @@
     "@types/multer": "^2.2.0",
     "@types/node": "^22.15.30",
     "@types/nodemailer": "^6.4.16",
+    "@types/web-push": "^3.6.4",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -40,6 +41,7 @@
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "typescript": "^5.8.3",
+    "web-push": "^3.6.7",
     "zod": "^3.25.76"
   },
   "devDependencies": {

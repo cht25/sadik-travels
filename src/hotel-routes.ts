@@ -6,7 +6,12 @@ import { optionalAuth, requireAuth, requireHotelManager } from './middleware.js'
 import { rateLimit } from './rate-limit.js';
 import type { Store } from './store.js';
 import type { PaymentProvider } from './providers.js';
-import { normalizeHotelImages, type HotelStore } from './hotel-store.js';
+import { normalizeHotelImages, type HotelBooking, type HotelStore } from './hotel-store.js';
+import { config } from './config.js';
+import { formatBdt } from './pricing.js';
+import { NOTIFICATION_EVENT } from './notifications/events.js';
+import type { NotificationService, NotificationRecipient } from './notifications/service.js';
+import { bookingReceivedEmail, staffBookingEmail, bookingStatusEmail, row } from './notifications/templates.js';
 import type { MediaService } from './media.js';
 
 const toInput = (schema: z.ZodTypeAny, value: unknown) => { try { return schema.parse(value); } catch (error) { if (error instanceof ZodError) throw new AppError(400, 'VALIDATION_ERROR', 'Please check the submitted fields', error.flatten()); throw error; } };
@@ -75,8 +80,90 @@ const bookingSchema = priceQuoteSchema.extend({
   roomGuests: z.array(z.object({ roomIndex: z.number().int().min(0), name: z.string().max(120), type: z.enum(['adult', 'child']) })).max(100).optional()
 });
 
-export function registerHotelRoutes(app: Express, deps: { store: Store; hotelStore: HotelStore; media: MediaService; payment: PaymentProvider }) {
-  const { store, hotelStore, payment } = deps;
+export function registerHotelRoutes(app: Express, deps: { store: Store; hotelStore: HotelStore; media: MediaService; payment: PaymentProvider; notifications: NotificationService }) {
+  const { store, hotelStore, payment, notifications } = deps;
+
+  /**
+   * Fan a hotel booking event out to the guest, the operations team and the
+   * property owner.
+   *
+   * The owner is resolved from the persisted `hotel.ownerId` — never from
+   * request input — so an owner can only ever be notified about their own
+   * property's bookings. Delivery failures are logged, never thrown: a hotel
+   * booking must not fail because an email did not send.
+   */
+  const notifyHotelBooking = async (opts: {
+    event: 'created' | 'cancelled' | 'updated';
+    booking: HotelBooking;
+    userId: string;
+    actorId?: string;
+    message?: string;
+  }) => {
+    try {
+      const { booking, userId } = opts;
+      const customer = await store.findUserById(userId).catch(() => undefined);
+      const hotel = await hotelStore.adminFindHotel(booking.hotelId).catch(() => undefined);
+      const ownerRecipients: NotificationRecipient[] = hotel?.ownerId ? [{ userId: hotel.ownerId, audience: 'hotel_owner' }] : [];
+
+      const roomRows = booking.rooms.map(room => row(
+        `${room.roomName} × ${room.quantity}`,
+        `${formatBdt(room.subtotal, booking.priceBreakdown.currency)} · ${room.nights} night(s)`
+      ));
+      const facts = {
+        reference: booking.bookingNumber,
+        serviceName: booking.hotelSnapshot?.name || 'Hotel stay',
+        serviceKind: 'Hotel booking',
+        dates: `${booking.checkIn} → ${booking.checkOut}`,
+        guests: `${booking.rooms.reduce((sum, room) => sum + room.quantity, 0)} room(s), ${booking.nights} night(s)`,
+        total: booking.priceBreakdown.total,
+        currency: booking.priceBreakdown.currency || 'BDT',
+        paymentStatus: booking.paymentStatus,
+        bookingStatus: booking.status.toUpperCase(),
+        paymentMethod: booking.paymentMethod,
+        url: `${config.appOrigin}/orders/${booking.id}`,
+        customerName: customer?.fullName || booking.primaryGuest?.firstName,
+        customerEmail: customer?.email || booking.primaryGuest?.email,
+        customerPhone: customer?.phone || booking.primaryGuest?.phone,
+        breakdown: [
+          row('Room total', formatBdt(booking.priceBreakdown.roomTotal, booking.priceBreakdown.currency)),
+          ...(booking.priceBreakdown.discount ? [row('Discount', `−${formatBdt(booking.priceBreakdown.discount, booking.priceBreakdown.currency)}`)] : []),
+          ...(booking.priceBreakdown.taxes ? [row('Taxes', formatBdt(booking.priceBreakdown.taxes, booking.priceBreakdown.currency))] : []),
+          ...(booking.priceBreakdown.serviceFee ? [row('Service fee', formatBdt(booking.priceBreakdown.serviceFee, booking.priceBreakdown.currency))] : []),
+          row('Total payable', formatBdt(booking.priceBreakdown.total, booking.priceBreakdown.currency)),
+          ...roomRows
+        ]
+      };
+
+      const event = opts.event === 'created' ? NOTIFICATION_EVENT.HOTEL_BOOKING_CREATED
+        : opts.event === 'cancelled' ? NOTIFICATION_EVENT.BOOKING_CANCELLED
+          : NOTIFICATION_EVENT.HOTEL_BOOKING_UPDATED;
+
+      await notifications.emit({
+        event,
+        title: opts.event === 'created' ? 'Hotel booking received' : opts.event === 'cancelled' ? 'Hotel booking cancelled' : 'Hotel booking update',
+        message: opts.message || (opts.event === 'created'
+          ? `Your booking at ${facts.serviceName} is received. Total ${formatBdt(facts.total, facts.currency)} for ${facts.guests}.`
+          : opts.event === 'cancelled'
+            ? `Your booking ${booking.bookingNumber} at ${facts.serviceName} has been cancelled.`
+            : `Your booking ${booking.bookingNumber} at ${facts.serviceName} was updated.`),
+        context: { bookingId: booking.id, serviceId: booking.hotelId, route: `/orders/${booking.id}` },
+        recipients: [
+          { userId, audience: 'customer' },
+          ...(opts.event === 'cancelled' ? [] : await notifications.adminRecipients(event)),
+          ...ownerRecipients
+        ],
+        email: user => (user.id === userId
+          ? (opts.event === 'created'
+            ? bookingReceivedEmail(facts)
+            : bookingStatusEmail({ ...facts, heading: opts.event === 'cancelled' ? 'Booking cancelled' : 'Booking update', message: opts.message }))
+          : staffBookingEmail({ ...facts, audience: user.role === 'hotel_owner' ? 'Hotel owner' : 'Operations team' })),
+        push: { tag: `hotel-${booking.id}` },
+        actorId: opts.actorId
+      });
+    } catch (error) {
+      console.error('[hotels] booking notification failed:', error instanceof Error ? error.message : error);
+    }
+  };
   const ownerScope = (req: any) => req.user?.role === 'hotel_owner' ? req.user.id : undefined;
   const assertHotelAccess = async (req: any, hotelId: string) => {
     const hotel = await hotelStore.adminFindHotel(hotelId);
@@ -168,6 +255,7 @@ export function registerHotelRoutes(app: Express, deps: { store: Store; hotelSto
       const input = toInput(bookingSchema, req.body);
       const booking = await hotelStore.createBooking((req as any).user.id, input);
       await store.audit('hotel.booking_created', { ...clientMeta(req), userId: (req as any).user.id, metadata: { bookingId: booking.id, bookingNumber: booking.bookingNumber, hotelId: input.hotelId, total: booking.priceBreakdown.total } });
+      await notifyHotelBooking({ event: 'created', booking, userId: (req as any).user.id, actorId: (req as any).user.id });
       res.status(201).json({ success: true, booking });
     } catch (error) { next(error); }
   });
@@ -183,6 +271,7 @@ export function registerHotelRoutes(app: Express, deps: { store: Store; hotelSto
     try {
       const booking = await hotelStore.cancelBooking(String(req.params.id), (req as any).user.id, false);
       await store.audit('hotel.booking_cancelled', { ...clientMeta(req), userId: (req as any).user.id, metadata: { bookingId: booking.id, bookingNumber: booking.bookingNumber } });
+      await notifyHotelBooking({ event: 'cancelled', booking, userId: (req as any).user.id, actorId: (req as any).user.id });
       res.json({ success: true, booking });
     } catch (error) { next(error); }
   });

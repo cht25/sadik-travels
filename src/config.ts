@@ -54,6 +54,28 @@ export const config = {
   smtpUser: env('SMTP_USER'),
   smtpPassword: env('SMTP_PASSWORD'),
   smtpFrom: env('SMTP_FROM'),
+  /** Display name used for the `From:` header; never a credential. */
+  smtpFromName: env('SMTP_FROM_NAME', 'Sadik Travels'),
+  /** Force implicit TLS. Defaults to true only for the implicit-TLS port. */
+  smtpSecure: isTrue(process.env.SMTP_SECURE, Number(env('SMTP_PORT', '587')) === 465),
+  /** Reject unsigned/self-signed certificates. On in production; off only for a local test relay. */
+  smtpRejectUnauthorized: isTrue(process.env.SMTP_REJECT_UNAUTHORIZED, isProduction),
+  // Web Push (VAPID) — real phone/desktop push notifications.
+  // Keys may also be persisted in the `settings` collection; see push/vapid.ts.
+  vapidPublicKey: env('VAPID_PUBLIC_KEY'),
+  vapidPrivateKey: env('VAPID_PRIVATE_KEY'),
+  vapidSubject: env('VAPID_SUBJECT'),
+  // Password reset: single-use, hashed, short-lived tokens.
+  passwordResetTtlMinutes: Number(env('PASSWORD_RESET_TTL_MINUTES', '30')),
+  // Optional IP geolocation. Any response is APPROXIMATE and is always
+  // labelled as such; leave blank to omit location from security emails.
+  ipGeoUrl: env('IP_GEO_URL'),
+  ipGeoToken: env('IP_GEO_TOKEN'),
+  // Tour surcharge defaults. Zero means "no charge unless an operator opts in"
+  // — the historic 6,000 → 14,400 overcharge came from implicit tax defaults.
+  tourVatPct: Number(env('TOUR_VAT_PCT', '0')),
+  tourAitPct: Number(env('TOUR_AIT_PCT', '0')),
+  tourServiceFeePct: Number(env('TOUR_SERVICE_FEE_PCT', '0')),
   providerTimeoutMs: Number(env('OUTBOUND_TIMEOUT_MS', env('TRAVEL_PROVIDER_TIMEOUT_MS', '12000'))),
   paymentMode: env('PAYMENT_MODE', 'live') as 'live',
   paymentBaseUrl: env('PAYMENT_PROVIDER_BASE_URL'),
@@ -93,6 +115,23 @@ export function validateConfig() {
     if (firebaseDbUrl.protocol !== 'https:') throw new Error('FIREBASE_DATABASE_URL must use HTTPS');
   }
   if (!Number.isInteger(config.smtpPort) || config.smtpPort < 1 || config.smtpPort > 65535) throw new Error('SMTP_PORT must be a valid TCP port');
+  if (!Number.isInteger(config.passwordResetTtlMinutes) || config.passwordResetTtlMinutes < 5 || config.passwordResetTtlMinutes > 1440) throw new Error('PASSWORD_RESET_TTL_MINUTES must be between 5 and 1440');
+  if (config.ipGeoUrl) {
+    let geo: URL;
+    try { geo = new URL(config.ipGeoUrl.replace('{ip}', '203.0.113.1')); } catch { throw new Error('IP_GEO_URL must be a valid URL template containing {ip}'); }
+    if (geo.protocol !== 'https:') throw new Error('IP_GEO_URL must use HTTPS');
+    if (!config.ipGeoUrl.includes('{ip}')) throw new Error('IP_GEO_URL must contain the {ip} placeholder');
+  }
+  for (const [name, value] of [['TOUR_VAT_PCT', config.tourVatPct], ['TOUR_AIT_PCT', config.tourAitPct], ['TOUR_SERVICE_FEE_PCT', config.tourServiceFeePct]] as Array<[string, number]>) {
+    if (!Number.isFinite(value) || value < 0 || value > 100) throw new Error(`${name} must be a percentage between 0 and 100`);
+  }
+  const vapid = [config.vapidPublicKey, config.vapidPrivateKey];
+  if (vapid.some(Boolean) && !vapid.every(Boolean)) throw new Error('VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY must be provided together');
+  if (config.vapidSubject) {
+    const subject = config.vapidSubject.trim();
+    const valid = subject.startsWith('mailto:') || subject.startsWith('https://');
+    if (!valid) throw new Error('VAPID_SUBJECT must be a mailto: or https: URL');
+  }
   if (!Number.isInteger(config.mediaMaxUploadBytes) || config.mediaMaxUploadBytes < 1_000_000 || config.mediaMaxUploadBytes > 25_000_000) throw new Error('MEDIA_MAX_UPLOAD_BYTES must be between 1MB and 25MB');
   if (!Number.isInteger(config.mediaTimeoutMs) || config.mediaTimeoutMs < 1000 || config.mediaTimeoutMs > 120000) throw new Error('MEDIA_TIMEOUT_MS must be between 1000 and 120000');
   if (config.isProduction) {

@@ -74,6 +74,9 @@ type EmailConfig = {
   user: string;
   password: string;
   from: string;
+  fromName: string;
+  secure: boolean;
+  rejectUnauthorized: boolean;
 };
 
 type PaymentSettings = {
@@ -122,13 +125,54 @@ export class MessagingProvider {
   }
 
   private async emailConfig(): Promise<EmailConfig> {
+    const port = Number(await runtime(this.store, 'smtp_port', String(config.smtpPort)));
     return {
       host: await runtime(this.store, 'smtp_host', config.smtpHost),
-      port: Number(await runtime(this.store, 'smtp_port', String(config.smtpPort))),
+      port,
       user: await runtime(this.store, 'smtp_user', config.smtpUser),
       password: await runtime(this.store, 'smtp_password', config.smtpPassword),
-      from: await runtime(this.store, 'smtp_from', config.smtpFrom)
+      from: await runtime(this.store, 'smtp_from', config.smtpFrom),
+      fromName: (await runtime(this.store, 'smtp_from_name', config.smtpFromName)) || 'Sadik Travels',
+      // Implicit TLS only on 465; 587 upgrades with STARTTLS automatically.
+      secure: port === 465 ? true : config.smtpSecure,
+      rejectUnauthorized: config.smtpRejectUnauthorized
     };
+  }
+
+  private buildTransport(c: EmailConfig) {
+    return nodemailer.createTransport({
+      host: c.host,
+      port: c.port,
+      secure: c.secure,
+      connectionTimeout: config.providerTimeoutMs,
+      greetingTimeout: config.providerTimeoutMs,
+      socketTimeout: config.providerTimeoutMs,
+      auth: c.user && c.password ? { user: c.user, pass: c.password } : undefined,
+      tls: { rejectUnauthorized: c.rejectUnauthorized }
+    });
+  }
+
+  /** RFC-5322 `From:` header. The address is quoted so a name with a comma is safe. */
+  private formatFrom(c: EmailConfig): string {
+    const name = c.fromName.replace(/["\\]/g, '').trim();
+    return name ? `"${name}" <${c.from}>` : c.from;
+  }
+
+  /**
+   * Deployment check used by Admin → System Status and by the smoke test.
+   * Never exposes the password: only whether credentials exist and whether the
+   * relay completed a handshake.
+   */
+  async verifyEmailConfig(): Promise<{ configured: boolean; host: string; port: number; secure: boolean; authPresent: boolean; reachable: boolean; error?: string }> {
+    const c = await this.emailConfig();
+    const base = { configured: Boolean(c.host && c.from && c.user && c.password), host: c.host, port: c.port, secure: c.secure, authPresent: Boolean(c.user && c.password) };
+    if (!base.configured) return { ...base, reachable: false, error: 'SMTP_HOST, SMTP_USER, SMTP_PASSWORD and SMTP_FROM must all be set' };
+    try {
+      await this.buildTransport(c).verify();
+      return { ...base, reachable: true };
+    } catch (error) {
+      return { ...base, reachable: false, error: error instanceof Error ? error.message : 'SMTP verification failed' };
+    }
   }
 
   async sendSms(destination: string, message: string): Promise<{ delivered: boolean; providerResponse: string }> {
@@ -155,16 +199,7 @@ export class MessagingProvider {
   async sendEmail(destination: string, subject: string, message: string, html?: string): Promise<{ delivered: boolean }> {
     const c = await this.emailConfig();
     if (!c.host || !c.user || !c.password || !c.from) throw new AppError(503, 'EMAIL_NOT_CONFIGURED', 'SMTP email delivery is not configured');
-    const transporter = nodemailer.createTransport({
-      host: c.host,
-      port: c.port,
-      secure: c.port === 465,
-      connectionTimeout: config.providerTimeoutMs,
-      greetingTimeout: config.providerTimeoutMs,
-      socketTimeout: config.providerTimeoutMs,
-      auth: { user: c.user, pass: c.password }
-    });
-    await transporter.sendMail({ from: c.from, to: destination, subject, text: message, ...(html ? { html } : {}) });
+    await this.buildTransport(c).sendMail({ from: this.formatFrom(c), to: destination, subject, text: message, ...(html ? { html } : {}) });
     return { delivered: true };
   }
 
@@ -273,6 +308,85 @@ export class PaymentProvider {
       checkoutUrl,
       raw: result
     };
+  }
+
+  /**
+   * Ask the gateway directly whether a transaction really settled.
+   *
+   * A browser landing on the success URL is *not* proof of payment: the URL is
+   * guessable and the customer controls their own browser. This method is the
+   * server-side confirmation step. It returns a verdict; only `verified`
+   * callers are allowed to mark a payment paid.
+   *
+   *   - `verified`   the gateway says the transaction is VALID / EXECUTED
+   *   - `failed`     the gateway explicitly rejected it
+   *   - `unknown`    no verification path is configured, or the gateway did not
+   *                  answer. The caller must leave the payment pending and wait
+   *                  for the signed webhook/IPN.
+   */
+  async validateTransaction(refs: { paymentId: string; valId?: string; gatewayTransactionId?: string; amount?: number; currency?: string }): Promise<{ verdict: 'verified' | 'failed' | 'unknown'; gatewayStatus?: string; detail?: string; payload?: Record<string, unknown> }> {
+    const s = await this.paymentSettings();
+
+    if (s.provider === 'bkash') {
+      if (!s.bkashBaseUrl || !s.bkashAppKey || !s.bkashAppSecret || !s.bkashUsername || !s.bkashPassword) return { verdict: 'unknown', detail: 'bKash credentials are not configured' };
+      const paymentId = refs.gatewayTransactionId || refs.valId;
+      if (!paymentId) return { verdict: 'unknown', detail: 'No bKash payment id to verify' };
+      try {
+        const base = s.bkashBaseUrl.replace(/\/$/, '');
+        const authResponse = await fetchWithTimeout(`${base}/tokenized/checkout/token/grant`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json', username: s.bkashUsername, password: s.bkashPassword },
+          body: JSON.stringify({ app_key: s.bkashAppKey, app_secret: s.bkashAppSecret })
+        });
+        const auth = await responseJsonObject(authResponse);
+        const idToken = asString(auth.id_token);
+        if (!authResponse.ok || !idToken) return { verdict: 'unknown', detail: 'bKash authentication failed' };
+        const response = await fetchWithTimeout(`${base}/tokenized/checkout/execute`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json', authorization: idToken, 'x-app-key': s.bkashAppKey },
+          body: JSON.stringify({ paymentID: paymentId })
+        });
+        const result = await responseJsonObject(response);
+        const status = asString(result.transactionStatus).toUpperCase();
+        if (response.ok && (status === 'COMPLETED' || status === 'SUCCESS')) return { verdict: 'verified', gatewayStatus: status, payload: result };
+        if (response.ok && status) return { verdict: 'failed', gatewayStatus: status, detail: asString(result.statusMessage), payload: result };
+        return { verdict: 'unknown', detail: 'bKash returned no verdict', payload: result };
+      } catch (error) {
+        return { verdict: 'unknown', detail: error instanceof Error ? error.message : 'bKash verification failed' };
+      }
+    }
+
+    // SSLCommerz order_validate.
+    if (!s.sslStoreId || !s.sslStorePassword || !s.sslValidationUrl) return { verdict: 'unknown', detail: 'SSLCommerz validation is not configured' };
+    const params = new URLSearchParams({
+      store_id: s.sslStoreId,
+      store_passwd: s.sslStorePassword,
+      ...(refs.valId ? { val_id: refs.valId } : {}),
+      ...(refs.gatewayTransactionId && !refs.valId ? { tran_id: refs.gatewayTransactionId } : {}),
+      format: 'json'
+    });
+    if (!refs.valId && !refs.gatewayTransactionId) return { verdict: 'unknown', detail: 'No gateway transaction reference to verify' };
+    try {
+      const response = await fetchWithTimeout(s.sslValidationUrl, { method: 'GET', headers: { accept: 'application/json' }, ...(params.toString() ? { body: undefined } : {}) } as RequestInit & { body?: undefined }).catch(() => undefined);
+      // order_validate is a GET with a query string in the live API.
+      const queryUrl = s.sslValidationUrl.includes('?') ? `${s.sslValidationUrl}&${params}` : `${s.sslValidationUrl}?${params}`;
+      const validated = response && response.ok ? await responseJsonObject(response) : await responseJsonObject(await fetchWithTimeout(queryUrl, { method: 'GET', headers: { accept: 'application/json' } }));
+      const status = asString(validated.status).toUpperCase();
+      if (['VALID', 'VALIDATED', 'SUCCESS', 'GWVERSION_3'].includes(status)) {
+        // Cross-check the amount when the gateway returned one, so a tampered
+        // success URL pointing at a cheaper transaction cannot settle a pricier one.
+        const gatewayAmount = Number(validated.amount ?? validated.currency_amount);
+        const expectedAmount = Number(refs.amount);
+        if (Number.isFinite(gatewayAmount) && Number.isFinite(expectedAmount) && expectedAmount > 0 && Math.abs(gatewayAmount - expectedAmount) > 1) {
+          return { verdict: 'failed', gatewayStatus: status, detail: `Gateway amount ${gatewayAmount} does not match the booking amount ${expectedAmount}`, payload: validated };
+        }
+        return { verdict: 'verified', gatewayStatus: status, payload: validated };
+      }
+      if (status) return { verdict: 'failed', gatewayStatus: status, detail: asString(validated.error ?? validated.failedreason), payload: validated };
+      return { verdict: 'unknown', detail: 'SSLCommerz returned no verdict', payload: validated };
+    } catch (error) {
+      return { verdict: 'unknown', detail: error instanceof Error ? error.message : 'SSLCommerz verification failed' };
+    }
   }
 
   async verifyWebhook(rawBody: Buffer, signature: string | undefined): Promise<boolean> {

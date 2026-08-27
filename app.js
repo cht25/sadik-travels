@@ -831,7 +831,7 @@ function openTourDetails(tour) {
   publicNavigate(`/tours/${encodeURIComponent(tour.id)}`);
   return;
   const modal = $('#genericModal');
-  $('#modalContent').innerHTML = `<div class="tour-detail-modal"><img class="tour-detail-image" src="${escapeHtml(tourImage(tour))}" alt="${escapeHtml(tour.title)}" /><div class="modal-heading"><div class="modal-icon blue">${icon('i-map')}</div><h2 id="modalTitle">${escapeHtml(tour.title)}</h2></div><p class="modal-subtitle">${escapeHtml(tour.durationDays)} days / ${escapeHtml(tour.durationNights)} nights · ${escapeHtml(tour.country)}</p><p class="tour-detail-description">${escapeHtml(tour.description || 'A carefully planned journey with Sadik Travels support.')}</p><div class="result-summary"><strong>Starting from ৳${Number(tour.priceBdt).toLocaleString('en-BD')} per person</strong><br><span>${tour.destinations.map(escapeHtml).join(' · ')}</span></div><form id="tourBookForm"><label class="modal-field"><span>Travellers</span><input id="tourTravellers" type="number" min="1" max="30" value="2" required /></label><label class="modal-field"><span>Preferred travel date</span><input id="tourTravelDate" type="date" required /></label><button class="btn btn-primary full-btn" type="submit">Book this tour</button></form></div>`;
+  $('#modalContent').innerHTML = `<div class="tour-detail-modal"><img class="tour-detail-image" src="${escapeHtml(tourImage(tour))}" alt="${escapeHtml(tour.title)}" /><div class="modal-heading"><div class="modal-icon blue">${icon('i-map')}</div><h2 id="modalTitle">${escapeHtml(tour.title)}</h2></div><p class="modal-subtitle">${escapeHtml(tour.durationDays)} days / ${escapeHtml(tour.durationNights)} nights · ${escapeHtml(tour.country)}</p><p class="tour-detail-description">${escapeHtml(tour.description || 'A carefully planned journey with Sadik Travels support.')}</p><div class="result-summary"><strong>Starting from ৳${Number(tour.priceBdt).toLocaleString('en-BD')} per person</strong><br><span>${tour.destinations.map(escapeHtml).join(' · ')}</span></div><form id="tourBookForm"><label class="modal-field"><span>Travellers</span><input id="tourTravellers" type="number" min="1" max="30" value="1" required /></label><label class="modal-field"><span>Preferred travel date</span><input id="tourTravelDate" type="date" required /></label><button class="btn btn-primary full-btn" type="submit">Book this tour</button></form></div>`;
   openModal(modal);
   $('#tourBookForm')?.addEventListener('submit', async event => {
     event.preventDefault();
@@ -889,13 +889,77 @@ function renderNotifications() {
   const unread = notificationsCache.filter(item => !item.readAt).length;
   count.textContent = unread > 99 ? '99+' : String(unread);
   count.hidden = unread === 0;
-  list.innerHTML = notificationsCache.length ? notificationsCache.map(item => `<button type="button" class="notification-item ${item.readAt ? 'read' : 'unread'}" data-notification-id="${escapeHtml(item.id)}"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.message)}</span><small>${new Date(item.createdAt).toLocaleString()}</small></button>`).join('') : '<div class="notification-empty">No notifications yet.</div>';
-  $$('.notification-item', list).forEach(item => item.addEventListener('click', async () => { if (item.classList.contains('unread')) { await apiRequest(`/notifications/${item.dataset.notificationId}/read`, { method: 'PATCH' }).catch(() => undefined); await loadNotifications(); } }));
+  list.innerHTML = notificationsCache.length ? notificationsCache.map(item => `<button type="button" class="notification-item ${item.readAt ? 'read' : 'unread'}" data-notification-id="${escapeHtml(item.id)}" data-notification-route="${escapeHtml(item.route || '')}"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.message)}</span><small>${new Date(item.createdAt).toLocaleString()}</small></button>`).join('') : '<div class="notification-empty">No notifications yet.</div>';
+  $$('.notification-item', list).forEach(item => item.addEventListener('click', async () => {
+    if (item.classList.contains('unread')) { await apiRequest(`/notifications/${item.dataset.notificationId}/read`, { method: 'PATCH' }).catch(() => undefined); await loadNotifications(); }
+    const target = item.dataset.notificationRoute;
+    if (target) { $('#notificationPanel')?.setAttribute('hidden', ''); publicNavigate(target); }
+  }));
 }
 async function loadNotifications() { if (!currentUser) { notificationsCache = []; renderNotifications(); return; } try { const response = await apiRequest('/notifications'); notificationsCache = response.notifications || []; renderNotifications(); } catch { notificationsCache = []; renderNotifications(); } }
 function openNotificationModal() { const modal = $('#genericModal'); const list = notificationsCache.length ? notificationsCache.map(item => `<button type="button" class="notification-item ${item.readAt ? 'read' : 'unread'}" data-notification-id="${escapeHtml(item.id)}"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.message)}</span><small>${new Date(item.createdAt).toLocaleString()}</small></button>`).join('') : '<div class="notification-empty">No notifications yet.</div>'; $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-bell')}</div><h2 id="modalTitle">Notifications</h2></div><div class="notification-modal-list">${list}</div><button type="button" class="btn btn-primary full-btn" data-close-modal>Close</button>`; openModal(modal); $$('.notification-item', modal).forEach(item => item.addEventListener('click', async () => { await apiRequest(`/notifications/${item.dataset.notificationId}/read`, { method: 'PATCH' }).catch(() => undefined); await loadNotifications(); openNotificationModal(); })); }
-$('#notificationBtn')?.addEventListener('click', async event => { event.stopPropagation(); if (!currentUser) { openLogin(); return; } const panel = $('#notificationPanel'); panel.hidden = !panel.hidden; $('#notificationBtn').setAttribute('aria-expanded', String(!panel.hidden)); if (!panel.hidden) await loadNotifications(); });
-$('#markNotificationsRead')?.addEventListener('click', async () => { await Promise.all(notificationsCache.filter(item => !item.readAt).map(item => apiRequest(`/notifications/${item.id}/read`, { method: 'PATCH' }).catch(() => undefined))); await loadNotifications(); });
+/* Notification bell: the panel also owns the push opt-in, because a user who
+ * opens the bell is the user who wants notifications. We explain first and ask
+ * the browser for permission only when they tap the button. */
+const NOTIFICATION_PREFERENCE_ROWS = [
+  ['booking', 'Booking updates'],
+  ['payment', 'Payment updates'],
+  ['message', 'Messages'],
+  ['promotion', 'Promotions']
+];
+
+async function renderPushOptIn(container) {
+  if (!container || !window.SadikNotifications) return;
+  const state = await window.SadikNotifications.state();
+  if (!state.supported) { container.innerHTML = '<p class="notification-hint">This browser does not support device notifications. You will still get in-app notifications and email.</p>'; return; }
+  if (state.permission === 'denied') {
+    container.innerHTML = '<p class="notification-hint">Device notifications are blocked in your browser settings. In-app notifications and email still work.</p>';
+    return;
+  }
+  if (state.subscribed) {
+    container.innerHTML = `<div class="notification-push-on"><span>✓ Device notifications are on${state.devices.length ? ` (${state.devices.length} device${state.devices.length === 1 ? '' : 's'})` : ''}</span><button type="button" class="text-btn" id="pushTestBtn">Send a test</button><button type="button" class="text-btn" id="pushOffBtn">Turn off</button></div>`;
+    container.querySelector('#pushTestBtn')?.addEventListener('click', async () => { const result = await window.SadikNotifications.sendTest(); showToast(result.success ? 'Test notification sent — check your device.' : (result.reason || 'No device is registered for notifications yet.'), result.success ? 'success' : 'error'); });
+    container.querySelector('#pushOffBtn')?.addEventListener('click', async () => { await window.SadikNotifications.disable(); showToast('Device notifications turned off.', 'success'); await renderPushOptIn(container); });
+    return;
+  }
+  container.innerHTML = `<div class="notification-push-off"><p class="notification-hint">Get booking updates, payment updates and messages on this device.</p><button type="button" class="btn btn-outline" id="pushEnableBtn">Enable notifications</button></div>`;
+  container.querySelector('#pushEnableBtn')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true; button.textContent = 'Enabling…';
+    const result = await window.SadikNotifications.enable();
+    if (result.status === 'enabled') { showToast('Notifications enabled on this device.', 'success'); }
+    else if (result.status === 'signed_out') { showToast(result.reason, 'error'); openLogin(); }
+    else { showToast(result.reason || 'Notifications could not be enabled.', 'error'); }
+    await renderPushOptIn(container);
+  });
+}
+
+async function renderNotificationPreferences(container) {
+  if (!container) return;
+  let prefs;
+  try { prefs = (await apiRequest('/notifications/preferences')).preferences; } catch { container.innerHTML = ''; return; }
+  container.innerHTML = `<div class="notification-prefs"><strong>Notification preferences</strong>
+    <table class="pref-table"><thead><tr><th></th><th>In-app</th><th>Push</th><th>Email</th></tr></thead><tbody>
+    ${NOTIFICATION_PREFERENCE_ROWS.map(([key, label]) => `<tr><th scope="row">${escapeHtml(label)}</th>${['inApp', 'push', 'email'].map(channel => `<td><label class="pref-cell"><input type="checkbox" data-pref-category="${key}" data-pref-channel="${channel}" ${prefs[key]?.[channel] ? 'checked' : ''} /><span class="sr-only">${escapeHtml(label)} ${escapeHtml(channel)}</span></label></td>`).join('')}</tr>`).join('')}
+    <tr class="pref-locked"><th scope="row">Security alerts</th><td colspan="3">Always on — sign-in and password alerts cannot be turned off</td></tr>
+    </tbody></table>
+    <button type="button" class="btn btn-outline" id="saveNotificationPrefs">Save preferences</button></div>`;
+  container.querySelector('#saveNotificationPrefs')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const preferences = {};
+    container.querySelectorAll('[data-pref-category]').forEach(input => {
+      const category = input.dataset.prefCategory; const channel = input.dataset.prefChannel;
+      preferences[category] = { ...(preferences[category] || {}), [channel]: input.checked };
+    });
+    button.disabled = true; button.textContent = 'Saving…';
+    try { await apiRequest('/notifications/preferences', { method: 'PUT', body: JSON.stringify({ preferences }) }); showToast('Notification preferences saved.', 'success'); }
+    catch (error) { showToast(error.message || 'Could not save preferences.', 'error'); }
+    finally { button.disabled = false; button.textContent = 'Save preferences'; }
+  });
+}
+
+$('#notificationBtn')?.addEventListener('click', async event => { event.stopPropagation(); if (!currentUser) { openLogin(); return; } const panel = $('#notificationPanel'); panel.hidden = !panel.hidden; $('#notificationBtn').setAttribute('aria-expanded', String(!panel.hidden)); if (!panel.hidden) { await loadNotifications(); await renderPushOptIn($('#notificationPushOptIn')); await renderNotificationPreferences($('#notificationPreferences')); } });
+$('#markNotificationsRead')?.addEventListener('click', async () => { await apiRequest('/notifications/read-all', { method: 'POST' }).catch(() => undefined); await loadNotifications(); });
 document.addEventListener('click', event => { if (!event.target.closest('.notification-wrap')) { $('#notificationPanel')?.setAttribute('hidden', ''); $('#notificationBtn')?.setAttribute('aria-expanded', 'false'); } });
 
 function updateAuthUi(user) {
@@ -959,7 +1023,77 @@ $('#loginForm')?.addEventListener('submit', async event => {
     $('#requestOtpBtn').disabled = false;
   } catch (error) { showToast(error.message || 'Unable to verify OTP.', 'error'); }
 });
-$('#forgotPassword')?.addEventListener('click', () => showToast('Sadik Travels uses passwordless OTP login. Contact support if you cannot access your number or email.'));
+/* ------------------------------------------------------------- FORGOT PASSWORD
+ *
+ * Customers normally sign in with a one-time code, so most never need a
+ * password. But an account that has a password set (through an admin, or a
+ * previous reset) must be recoverable by its owner — not only by a Super Admin.
+ *
+ * The server issues a single-use, hashed, expiring token and emails a link. It
+ * answers identically whether or not the address exists, so this flow cannot be
+ * used to discover who has an account. A password is never emailed.            */
+function openForgotPasswordModal() {
+  const modal = $('#genericModal');
+  const suggested = $('#loginIdentity')?.value?.trim() || '';
+  $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-shield')}</div><h2 id="modalTitle">Reset your password</h2></div>
+    <p class="modal-subtitle">Enter the email on your Sadik Travels account. If the address has an account, we will send a reset link that expires in 30 minutes and can be used once.</p>
+    <p class="modal-subtitle">Most travellers sign in with a one-time code instead — if you have never set a password, just close this and use “Send verification code”.</p>
+    <form id="forgotPasswordForm">
+      <label class="modal-field"><span>Account email</span><input id="forgotEmail" type="email" autocomplete="email" required value="${escapeHtml(suggested.includes('@') ? suggested : '')}" placeholder="you@example.com" /></label>
+      <button class="btn btn-primary full-btn" type="submit">Email me a reset link</button>
+    </form>`;
+  openModal(modal);
+  $('#forgotPasswordForm')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = event.submitter;
+    const email = $('#forgotEmail').value.trim();
+    button.disabled = true; button.textContent = 'Sending…';
+    try {
+      const result = await apiRequest('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
+      $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon green">${icon('i-shield')}</div><h2 id="modalTitle">Check your inbox</h2></div>
+        <p class="modal-subtitle">${escapeHtml(result.message || 'If that email has a Sadik Travels account, a password reset link is on its way.')}</p>
+        <p class="modal-subtitle">The link can be used once. We never send passwords by email.</p>
+        <button class="btn btn-primary full-btn" type="button" data-close-modal>Close</button>`;
+      // Modal closing is handled by the global [data-close-modal] delegate.
+    } catch (error) {
+      showToast(error.message || 'Could not send a reset link. Please try again.', 'error');
+      button.disabled = false; button.textContent = 'Email me a reset link';
+    }
+  });
+}
+
+/** Handles `/reset-password?token=…` arriving from the emailed link. */
+async function renderResetPasswordPage(root) {
+  const token = new URL(location.href).searchParams.get('token') || '';
+  if (!token) { root.innerHTML = publicPageHeader('Account', 'Reset your password', 'This reset link is missing its token. Please request a new one.', ''); return; }
+  let valid = false; let reason = '';
+  try { const result = await apiRequest('/auth/validate-reset-token', { method: 'POST', body: JSON.stringify({ token }) }); valid = Boolean(result.valid); reason = result.reason || ''; }
+  catch (error) { reason = error.message || 'This reset link is not valid.'; }
+  if (!valid) { root.innerHTML = publicPageHeader('Account', 'Reset your password', reason, '') + `<section class="public-page-card"><button type="button" class="btn btn-primary" data-public-route="/" data-open-forgot>Request a new link</button></section>`; root.querySelector('[data-open-forgot]')?.addEventListener('click', openForgotPasswordModal); return; }
+  root.innerHTML = publicPageHeader('Account', 'Choose a new password', 'Use at least 12 characters with an uppercase letter, a lowercase letter, a number and a symbol.', '') + `
+    <section class="public-page-card"><form id="resetPasswordForm" class="account-form">
+      <label class="modal-field"><span>New password</span><input id="resetNew" type="password" minlength="12" autocomplete="new-password" required /></label>
+      <label class="modal-field"><span>Confirm new password</span><input id="resetConfirm" type="password" minlength="12" autocomplete="new-password" required /></label>
+      <button class="btn btn-primary full-btn" type="submit">Update password</button>
+    </form></section>`;
+  $('#resetPasswordForm')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = event.submitter;
+    const newPassword = $('#resetNew').value;
+    if (newPassword !== $('#resetConfirm').value) { showToast('The two passwords do not match.', 'error'); return; }
+    button.disabled = true; button.textContent = 'Updating…';
+    try {
+      await apiRequest('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, newPassword }) });
+      showToast('Your password has been changed. Please sign in with your new password.', 'success');
+      publicNavigate('/', true);
+    } catch (error) {
+      showToast(error.message || 'Could not update the password.', 'error');
+      button.disabled = false; button.textContent = 'Update password';
+    }
+  });
+}
+window.SadikOpenForgotPassword = openForgotPasswordModal;
+$('#forgotPassword')?.addEventListener('click', openForgotPasswordModal);
 $('#createAccount')?.addEventListener('click', () => { showToast('New accounts are created automatically after OTP verification.'); $('#loginIdentity')?.focus(); });
 
 /* ------------------------------------------------------ customer Google login */
@@ -1258,13 +1392,20 @@ async function openTourCheckoutWizard(tour) {
     <div class="tour-tab-panel" data-tpanel="in" hidden><p><strong>Includes</strong></p><ul>${(inclusions.length?inclusions:['Hotel stay','Breakfast','Airport transfer']).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul><p><strong>Excludes</strong></p><ul>${(exclusions.length?exclusions:['Personal expenses','Optional activities']).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>
     <div class="tour-tab-panel" data-tpanel="no" hidden><p>${escapeHtml(notes || 'Standard Sadik Travels booking and cancellation policies apply. VAT 15% and AIT 5% are added at checkout.')}</p></div>
     <form id="tourBookForm">
-      <label class="modal-field"><span>Adults</span><input id="tourAdults" type="number" min="1" max="30" value="2" required /></label>
+      <label class="modal-field"><span>Adults</span><input id="tourAdults" type="number" min="1" max="30" value="1" required /></label>
       <label class="modal-field"><span>Children</span><input id="tourChildren" type="number" min="0" max="20" value="0" /></label>
       <label class="modal-field"><span>Infants</span><input id="tourInfants" type="number" min="0" max="10" value="0" /></label>
       <label class="modal-field"><span>Travel date</span><input id="tourTravelDate" type="date" required /></label>
       <label class="modal-field"><span>Promo code</span><input id="tourPromo" placeholder="Optional" /></label>
-      <div class="result-summary" id="tourQuoteBox">Calculating…</div>
+      <label class="modal-field"><span>Payment method</span>
+        <select id="tourPaymentMethod">
+          <option value="online">Online payment (bKash / Nagad / card)</option>
+          <option value="cod">Cash / pay later — our team will contact you</option>
+        </select>
+      </label>
+      <div class="result-summary tour-price-breakdown" id="tourQuoteBox" aria-live="polite">Calculating price…</div>
       <button class="btn btn-primary full-btn" type="submit">Confirm booking</button>
+      <p class="tour-price-note">The amount charged is calculated by Sadik Travels from the published package price and the travellers you select. Every charge is listed above — there are no hidden fees.</p>
     </form>
   </div>`;
   openModal(modal);
@@ -1272,11 +1413,32 @@ async function openTourCheckoutWizard(tour) {
     $$('[data-ttab]', modal).forEach(b => b.classList.toggle('active', b === btn));
     $$('[data-tpanel]', modal).forEach(p => { p.hidden = p.dataset.tpanel !== btn.dataset.ttab; });
   }));
+  const taka = value => `৳${Math.round(Number(value) || 0).toLocaleString('en-BD')}`;
+
+  /**
+   * Renders the price breakdown returned by the server, line by line.
+   *
+   * The storefront never computes a total. `/api/v1/tours/quote` derives it
+   * from the published tour row and the traveller counts, and returns the
+   * individual lines that sum to exactly that total — so what the customer
+   * reads here is what the gateway is asked to charge.
+   */
   const refreshQuote = async () => {
     try {
       const q = await apiRequest('/tours/quote', { method: 'POST', body: JSON.stringify({ tourId: tour.id, adults: Number($('#tourAdults').value)||1, children: Number($('#tourChildren').value)||0, infants: Number($('#tourInfants').value)||0, promoCode: $('#tourPromo').value || undefined }) });
       const b = q.quote;
-      $('#tourQuoteBox').innerHTML = `<strong>৳${Number(b.total).toLocaleString('en-BD')}</strong><br><span>Base ৳${b.baseFare.toLocaleString('en-BD')} · VAT ${b.vatPct}% ৳${b.vat.toLocaleString('en-BD')} · AIT ${b.aitPct}% ৳${b.ait.toLocaleString('en-BD')}${b.discount?` · Promo −৳${b.discount.toLocaleString('en-BD')}`:''}</span>${b.emi?.length?`<br><small>EMI from ৳${b.emi[0].installment.toLocaleString('en-BD')} / mo</small>`:''}`;
+      const lines = Array.isArray(b.lines) ? b.lines : [];
+      const rows = lines.length
+        ? lines.map(line => `<div class="price-line"><span>${escapeHtml(line.label)}</span><strong>${line.amount < 0 ? '−' : ''}${taka(Math.abs(line.amount))}</strong></div>`).join('')
+        : `<div class="price-line"><span>Tour price</span><strong>${taka(b.total)}</strong></div>`;
+      $('#tourQuoteBox').innerHTML = `
+        <div class="price-lines">
+          ${rows}
+          ${b.serviceFee ? `<div class="price-line"><span>Service fee</span><strong>${taka(b.serviceFee)}</strong></div>` : ''}
+          <div class="price-line price-total"><span>Total payable</span><strong>${taka(b.total)}</strong></div>
+        </div>
+        <span class="price-summary">${b.adults} adult${b.adults === 1 ? '' : 's'}${b.children ? ` · ${b.children} child${b.children === 1 ? '' : 'ren'}` : ''}${b.infants ? ` · ${b.infants} infant${b.infants === 1 ? '' : 's'}` : ''} · unit price ${taka(b.adultUnit)}</span>
+        ${b.emi?.length ? `<small>EMI from ${taka(b.emi[0].installment)} / month over ${b.emi[0].months} months</small>` : ''}`;
       return b;
     } catch (error) { $('#tourQuoteBox').textContent = error.message || 'Unable to price this tour.'; return null; }
   };
@@ -1285,11 +1447,20 @@ async function openTourCheckoutWizard(tour) {
   $('#tourBookForm')?.addEventListener('submit', async event => {
     event.preventDefault();
     try {
-      const quote = await refreshQuote();
-      const response = await apiRequest('/bookings', { method: 'POST', body: JSON.stringify({ vertical: 'tour', payload: { tourId: tour.id, slug: tour.slug, title: tour.title, travellers: Number($('#tourAdults').value)||1, adults: Number($('#tourAdults').value)||1, children: Number($('#tourChildren').value)||0, infants: Number($('#tourInfants').value)||0, travelDate: $('#tourTravelDate').value, priceBdt: tour.priceBdt, quotedTotal: quote?.total, promoCode: $('#tourPromo').value.trim() || undefined } }) });
+      // Refresh once more so the customer confirms against the latest price.
+      await refreshQuote();
+      const method = $('#tourPaymentMethod')?.value === 'cod' ? 'cod' : 'online';
+      // Only selections are sent. No price, no total — the server recomputes
+      // the payable amount from the published tour record.
+      const response = await apiRequest('/bookings', { method: 'POST', body: JSON.stringify({ vertical: 'tour', payload: { tourId: tour.id, slug: tour.slug, title: tour.title, travellers: Number($('#tourAdults').value)||1, adults: Number($('#tourAdults').value)||1, children: Number($('#tourChildren').value)||0, infants: Number($('#tourInfants').value)||0, travelDate: $('#tourTravelDate').value, paymentMethod: method, promoCode: $('#tourPromo').value.trim() || undefined } }) });
       closeModal(modal);
+      if (method === 'cod') {
+        showToast(`Booking created for ${taka(response.amountDue)}. Nothing has been charged — our team will contact you to arrange payment.`, 'success');
+        openBookingNextSteps(response.booking);
+        return;
+      }
       try {
-        const pay = await apiRequest('/initiate-payment', { method: 'POST', body: JSON.stringify({ bookingId: response.booking.id, kind: 'tour' }) });
+        const pay = await apiRequest('/initiate-payment', { method: 'POST', body: JSON.stringify({ bookingId: response.booking.id, kind: 'tour', method: 'online' }) });
         if (pay.checkoutUrl) { window.location.href = pay.checkoutUrl; return; }
       } catch { /* fall through to operator review */ }
       openBookingNextSteps(response.booking);
@@ -1533,6 +1704,7 @@ async function renderPublicRoute() {
       wrapPublicRouteContent(root);
       return;
     }
+    if (route.parts[0] === 'reset-password') { await renderResetPasswordPage(root); return; }
     if (route.parts[0] === 'payment') { await renderPaymentReturn(root, route.query); return; }
     if (route.parts[0] === 'booking') {
       if (route.parts[1] === 'checkout') { await renderHotelCheckout(root); }
@@ -2869,6 +3041,10 @@ window.renderPublicRoute = renderPublicRoute;
 window.publicNavigate = publicNavigate;
 window.openLogin = openLogin;
 window.showToast = showToast;
+// Used by pwa.js: push subscriptions are bound to the signed-in account, so the
+// PWA layer needs to know whether someone is signed in — never to guess.
+window.SadikCurrentUser = () => currentUser;
+window.SadikRefreshNotifications = () => { void loadNotifications(); };
 window.updateAuthUi = updateAuthUi;
 bindPublicRouter();
 document.addEventListener('click', (event) => {
