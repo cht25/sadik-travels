@@ -586,4 +586,58 @@ if (!testMongoUri) {
       store.close();
     }
   });
+
+  test('PWA surfaces: public install page, admin install page, admin manifest and admin service worker', async () => {
+    const { store, server, base } = await runServer();
+    try {
+      // Public install landing page.
+      const publicPwa = await fetch(`${base}/pwa`);
+      assert.equal(publicPwa.status, 200);
+      const publicPwaHtml = await publicPwa.text();
+      assert.match(publicPwaHtml, /Install the Sadik Travels app/);
+      assert.match(publicPwaHtml, /href="\/manifest\.webmanifest"/);
+      assert.match(publicPwaHtml, /src="\/pwa-install-page\.js/);
+
+      // Admin install landing page (must NOT be swallowed by the admin SPA catch-all).
+      const adminPwa = await fetch(`${base}/admin/pwa`);
+      assert.equal(adminPwa.status, 200);
+      const adminPwaHtml = await adminPwa.text();
+      assert.match(adminPwaHtml, /Install the Admin Console/);
+      assert.match(adminPwaHtml, /href="\/admin\/manifest\.webmanifest"/);
+
+      // Admin manifest: scoped to /admin/, standalone, with admin icons.
+      const adminManifestResponse = await fetch(`${base}/admin/manifest.webmanifest`);
+      assert.equal(adminManifestResponse.status, 200);
+      assert.match(adminManifestResponse.headers.get('content-type') || '', /application\/manifest\+json/);
+      assert.equal(adminManifestResponse.headers.get('cache-control'), 'no-cache, max-age=0');
+      const adminManifest = JSON.parse(await adminManifestResponse.text());
+      assert.equal(adminManifest.scope, '/admin/');
+      assert.match(adminManifest.start_url, /^\/admin\//);
+      assert.ok(adminManifest.icons.some((iconItem: any) => String(iconItem.src).includes('admin-icon-512')));
+
+      // Admin service worker: served un-cached at /admin/sw.js.
+      const adminSw = await fetch(`${base}/admin/sw.js`);
+      assert.equal(adminSw.status, 200);
+      assert.equal(adminSw.headers.get('cache-control'), 'no-cache, max-age=0');
+      assert.match(await adminSw.text(), /sta-v/);
+
+      // Public manifest and worker keep working.
+      const publicManifest = await (await fetch(`${base}/manifest.webmanifest`)).json();
+      assert.equal(publicManifest.scope, '/');
+      assert.equal((await fetch(`${base}/sw.js`)).status, 200);
+
+      // The admin SPA catch-all still serves the console shell for other /admin routes.
+      const adminShell = await fetch(`${base}/admin`);
+      assert.equal(adminShell.status, 200);
+      assert.match(await adminShell.text(), /Sadik Travels Admin Console/);
+
+      // admin.html wires the admin PWA bootstrap and manifest.
+      const adminHtml = await (await fetch(`${base}/admin/`)).text();
+      assert.match(adminHtml, /src="\/admin-pwa\.js/);
+      assert.match(adminHtml, /data-pwa-install/);
+    } finally {
+      await new Promise<void>(resolve => server.close(() => resolve()));
+      store.close();
+    }
+  });
 }

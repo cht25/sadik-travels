@@ -6,7 +6,14 @@
   <meta name="description" content="Sadik Travels operations and management console" />
   <title>Sadik Travels Admin Console</title>
   <link rel="icon" type="image/png" href="/assets/sadik-travels-favicon-chat.png" />
-  <link rel="stylesheet" href="/admin.css?v=15" />
+  <link rel="manifest" href="/admin/manifest.webmanifest" />
+  <meta name="theme-color" content="#1438b8" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Sadik Admin" />
+  <link rel="apple-touch-icon" href="/assets/admin-icon-192.png" />
+  <link rel="stylesheet" href="/admin.css?v=16" />
   <link rel="stylesheet" href="/admin-livechat.css?v=1" />
 </head>
 <body>
@@ -40,7 +47,7 @@
       <div class="sidebar-brand-row"><a class="sidebar-brand" href="/" aria-label="Sadik Travels home"><img data-brand-logo src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels" /><span>Admin Console</span></a><button class="sidebar-close" id="sidebarClose" type="button" aria-label="Close navigation">×</button></div>
       <div class="sidebar-workspace"><span class="workspace-dot"></span><div><strong>Sadik Travels</strong><small>Live operations</small></div><span class="workspace-chevron">⌄</span></div>
       <nav class="admin-nav" id="adminNav"><div class="loading-state">Loading navigation…</div></nav>
-      <div class="sidebar-bottom"><a href="/" class="sidebar-bottom-link"><span data-icon="external"></span>View website</a><button type="button" class="sidebar-bottom-link" id="sidebarLogout"><span data-icon="logout"></span>Sign out</button></div>
+      <div class="sidebar-bottom"><button type="button" class="sidebar-bottom-link" data-pwa-install hidden><span data-icon="download"></span>Install app</button><a href="/" class="sidebar-bottom-link"><span data-icon="external"></span>View website</a><button type="button" class="sidebar-bottom-link" id="sidebarLogout"><span data-icon="logout"></span>Sign out</button></div>
     </aside>
     <div class="admin-scrim" id="adminScrim" hidden></div>
     <div class="admin-main">
@@ -54,6 +61,7 @@
   <script src="/api.js?v=3"></script>
   <script src="/chat-client.js?v=1"></script>
   <script src="/admin-commerce.js?v=2"></script>
-  <script src="/admin.js?v=18"></script>
+  <script src="/admin.js?v=19"></script>
+  <script src="/admin-pwa.js?v=1" defer></script>
 </body>
 </html>

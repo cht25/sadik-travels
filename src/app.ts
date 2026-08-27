@@ -1273,6 +1273,14 @@ export function buildApp() {
 
   if (!config.serveStatic) app.get('/', (_req, res) => res.json({ service: 'Sadik Travels backend', status: 'online', health: '/healthz', ready: '/readyz' }));
   if (config.serveStatic) {
+    // PWA install landing pages (domain.com/pwa and domain.com/admin/pwa) plus
+    // the admin console's own service worker and manifest. These must be
+    // registered BEFORE the admin SPA catch-all below, which would otherwise
+    // answer every /admin/* URL with admin.html.
+    app.get('/pwa', (_req, res) => { res.setHeader('Cache-Control', 'no-cache, max-age=0'); res.sendFile(path.join(config.publicDir, 'pwa.html')); });
+    app.get('/admin/pwa', (_req, res) => { res.setHeader('Cache-Control', 'no-cache, max-age=0'); res.sendFile(path.join(config.publicDir, 'admin-pwa.html')); });
+    app.get('/admin/sw.js', (_req, res) => { res.setHeader('Cache-Control', 'no-cache, max-age=0'); res.type('text/javascript'); res.sendFile(path.join(config.publicDir, 'admin-sw.js')); });
+    app.get('/admin/manifest.webmanifest', (_req, res) => { res.setHeader('Cache-Control', 'no-cache, max-age=0'); res.type('application/manifest+json'); res.sendFile(path.join(config.publicDir, 'admin-manifest.webmanifest')); });
     app.get(/^\/admin(?:\/.*)?$/, (_req, res) => res.sendFile(path.join(config.publicDir, 'admin.html')));
     // The service worker must never be cached long-term or PWA updates stall.
     app.get('/sw.js', (_req, res) => { res.setHeader('Cache-Control', 'no-cache, max-age=0'); res.sendFile(path.join(config.publicDir, 'sw.js')); });
