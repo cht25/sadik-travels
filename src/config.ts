@@ -4,13 +4,15 @@ const isTrue = (value: string | undefined, fallback = false) => value === undefi
 const env = (key: string, fallback = '') => process.env[key] ?? fallback;
 const normalizeAdminIdentity = (value: string) => { const raw = value.trim(); if (raw.includes('@')) return raw.toLowerCase(); const digits = raw.replace(/[\s()-]/g, ''); if (digits.startsWith('01') && digits.length === 11) return `+880${digits.slice(1)}`; if (digits.startsWith('8801') && digits.length === 13) return `+${digits}`; return digits; };
 const normalizeOrigin = (value: string) => { try { return new URL(value.trim()).origin; } catch { return ''; } };
+const nodeEnv = env('NODE_ENV', 'development');
+const isProduction = nodeEnv === 'production';
 const configuredOrigin = env('APP_ORIGIN') || env('RENDER_EXTERNAL_URL') || (env('RENDER_EXTERNAL_HOSTNAME') ? `https://${env('RENDER_EXTERNAL_HOSTNAME')}` : 'http://localhost:8787');
 const appOrigin = normalizeOrigin(configuredOrigin) || 'http://localhost:8787';
 const configuredCors = env('CORS_ORIGINS', '').split(',').map(normalizeOrigin).filter(Boolean);
 
 export const config = {
-  nodeEnv: env('NODE_ENV', 'development'),
-  isProduction: env('NODE_ENV', 'development') === 'production',
+  nodeEnv,
+  isProduction,
   host: env('HOST', '0.0.0.0'),
   port: Number(env('PORT', '8787')),
   appOrigin,
@@ -24,7 +26,11 @@ export const config = {
   accessTokenTtl: env('ACCESS_TOKEN_TTL', '15m'),
   refreshTokenTtl: env('REFRESH_TOKEN_TTL', '30d'),
   cookieDomain: env('COOKIE_DOMAIN') || undefined,
-  cookieSecure: isTrue(process.env.COOKIE_SECURE, false),
+  // Render terminates TLS before forwarding requests to Node. Default cookies
+  // to Secure in production so a missing dashboard variable cannot silently
+  // create transportable authentication cookies. An explicit false is still
+  // rejected by validateConfig() below.
+  cookieSecure: isTrue(process.env.COOKIE_SECURE, isProduction),
   cookieSameSite: env('COOKIE_SAMESITE', 'lax') as 'lax' | 'strict' | 'none',
   adminIdentities: env('ADMIN_IDENTITIES').split(',').map(normalizeAdminIdentity).filter(Boolean),
   superAdminEmail: env('SUPER_ADMIN_EMAIL'),

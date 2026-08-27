@@ -8,9 +8,9 @@ services:
     healthCheckPath: /healthz
     envVars:
       - key: NODE_VERSION
-        value: 20.20.2
+        value: "20.20.2"
       - key: NODE_ENV
-        value: production
+        value: "production"
       - key: APP_ORIGIN
         sync: false
       - key: CORS_ORIGINS
@@ -49,14 +49,14 @@ services:
       - key: CLOUDINARY_API_SECRET
         sync: false
       - key: SERVE_STATIC
-        value: true
+        value: "true"
       - key: MONGODB_URI
         sync: false
       - key: TRUST_PROXY
-        value: true
+        value: "true"
       - key: COOKIE_SECURE
-        value: true
+        value: "true"
       - key: COOKIE_SAMESITE
-        value: lax
+        value: "lax"
       - key: DEV_OTP_ECHO
-        value: false
+        value: "false"
