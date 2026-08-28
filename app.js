@@ -96,12 +96,12 @@ async function applySiteSettings() {
 async function applyPublicContent() {
   const empty = (title, message) => `<div class="public-content-empty"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span></div>`;
   try {
-    const [response, agentsResponse, toursResponse] = await Promise.all([apiRequest('/site/content'), apiRequest('/site/agents').catch(() => ({ agents: [] })), apiRequest('/tours').catch(() => ({ tours: [] }))]);
+    const [response, slidersResponse, agentsResponse, toursResponse] = await Promise.all([apiRequest('/site/content'), apiRequest('/site/sliders').catch(() => ({ sliders: [] })), apiRequest('/site/agents').catch(() => ({ agents: [] })), apiRequest('/tours').catch(() => ({ tours: [] }))]);
     const items = response.content || [];
-    const banners = items.filter(item => item.type === 'banner' && item.imageUrl);
+    const banners = slidersResponse.sliders || [];
     const bannerTrack = $('#bannerTrack');
     $$('[data-slider-prev="banners"],[data-slider-next="banners"]').forEach(button => { button.hidden = !banners.length; });
-    if (bannerTrack) { bannerTrack.innerHTML = banners.length ? banners.map(item => `<a class="banner-slide" data-live-banner="true" href="${escapeHtml(item.metadata?.ctaUrl || '#offers')}" target="${item.metadata?.external ? '_blank' : '_self'}" rel="${item.metadata?.external ? 'noopener' : ''}"><img src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.title)}" loading="lazy" /><span class="banner-copy"><small>Sadik Travels</small><strong>${escapeHtml(item.title)}</strong><em>${escapeHtml(item.subtitle || '')}</em></span></a>`).join('') : empty('No published offers yet', 'Promotional banners will appear here after an admin publishes them.'); state.bannerIndex = 0; bindPromotionalInteractions(bannerTrack); updateBannerSlider(); }
+    if (bannerTrack) { bannerTrack.innerHTML = banners.length ? banners.map(sliderSlideHtml).join('') : empty('No published offers yet', 'Promotional banners will appear here after an admin publishes them.'); state.bannerIndex = 0; bindSliderBanners(bannerTrack); updateBannerSlider(); }
     renderHomeSections(items, toursResponse.tours || []);
     renderAgentsCarousel(agentsResponse.agents || []);
     const appItem = items.find(item => item.type === 'app');
@@ -1189,18 +1189,35 @@ document.addEventListener('keydown', event => {
   }
 });
 
-function openHotelDetails(title) {
-  const modal = $('#genericModal');
-  $('#modalContent').innerHTML = `<div class="modal-heading"><div class="modal-icon blue">${icon('i-hotel')}</div><h2 id="modalTitle">${escapeHtml(title)}</h2></div><p class="modal-subtitle">Featured hotel inspiration from Sadik Travels.</p><div class="result-summary"><strong>Promotional information</strong><br><span>Availability, room rates and booking confirmation come only from the configured live hotel provider. This card does not represent live inventory.</span></div><button type="button" class="btn btn-primary full-btn" id="hotelBookCta">Search live rooms</button>`;
-  openModal(modal);
-  $('#hotelBookCta')?.addEventListener('click', () => { closeModal(modal); activateTab('hotels', true); showToast('Hotel search is ready. Submit your dates to request live availability.'); });
+
+function sliderSlideHtml(item) {
+  const primaryHref = String(item.primaryButtonLink || '').trim();
+  const secondaryHref = String(item.secondaryButtonLink || '').trim();
+  const image = (src, alt) => `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" loading="lazy" onerror="this.style.display='none'" />`;
+  const media = item.mobileImageUrl
+    ? `<picture><source media="(max-width:760px)" srcset="${escapeHtml(item.mobileImageUrl)}">${image(item.imageUrl, item.title)}</picture>`
+    : image(item.imageUrl, item.title);
+  const button = (text, href, external, primary) => `<a class="banner-btn${primary ? ' banner-btn-primary' : ''}" href="${escapeHtml(href)}"${external ? ' target="_blank" rel="noopener"' : ` data-public-route="${escapeHtml(href)}"`}>${escapeHtml(text)}</a>`;
+  const primaryText = String(item.primaryButtonText || '').trim() || (primaryHref ? 'Learn more' : '');
+  const secondaryText = String(item.secondaryButtonText || '').trim() || (secondaryHref ? 'View details' : '');
+  const actions = (primaryHref || secondaryHref)
+    ? `<span class="banner-actions">${primaryHref ? button(primaryText, primaryHref, item.primaryExternal, true) : ''}${secondaryHref ? button(secondaryText, secondaryHref, item.secondaryExternal, false) : ''}</span>`
+    : '';
+  return `<div class="banner-slide" data-live-banner="true" data-banner-href="${escapeHtml(primaryHref)}" data-banner-external="${item.primaryExternal ? '1' : ''}">${media}<span class="banner-copy"><small>Sadik Travels</small><strong>${escapeHtml(item.title)}</strong>${item.subtitle ? `<em>${escapeHtml(item.subtitle)}</em>` : '<em></em>'}${item.description ? `<em class="banner-desc">${escapeHtml(item.description)}</em>` : ''}${actions}</span></div>`;
 }
-function bindPromotionalInteractions(scope = document) {
-  $$('.travel-card', scope).forEach(card => { if (card.dataset.interactionBound) return; card.dataset.interactionBound = 'true'; card.addEventListener('click', event => { event.preventDefault(); openHotelDetails(card.dataset.cardTitle || card.textContent.trim()); }); });
-  $$('.destination-card', scope).forEach(card => { if (card.dataset.interactionBound) return; card.dataset.interactionBound = 'true'; card.addEventListener('click', event => { event.preventDefault(); showToast(`Destination selected: ${card.dataset.destination}.`); activateTab('hotels', true); if ($('#hotelDestination')) $('#hotelDestination').value = card.dataset.destination; }); });
-  $$('.banner-slide', scope).forEach(slide => { if (slide.dataset.liveBanner || slide.dataset.interactionBound) return; slide.dataset.interactionBound = 'true'; slide.addEventListener('click', event => { event.preventDefault(); showToast(`${slide.querySelector('img')?.alt || 'Offer'} selected.`); }); });
+function bindSliderBanners(track) {
+  $$('.banner-slide', track).forEach(slide => {
+    slide.addEventListener('click', event => {
+      if (event.target.closest('a')) return; // the buttons handle their own navigation
+      const href = slide.dataset.bannerHref;
+      if (!href) return;
+      event.preventDefault();
+      if (slide.dataset.bannerExternal === '1') window.open(href, '_blank', 'noopener');
+      else publicNavigate(href);
+    });
+  });
 }
-bindPromotionalInteractions();
+
 
 let sidebarReturnFocus = null;
 let desktopSidebarCollapsed = false;
@@ -1758,30 +1775,47 @@ function hsTourCard(tour) {
 }
 function renderHomeSections(items, tours) {
   setTimeout(() => void window.SadikPages?.hydrateHomeSections(), 0);
+  setTimeout(() => void hydrateHomeHotels(), 0);
   const root = $('#homeSections');
   if (!root) return;
   root.innerHTML = HOME_SECTIONS.map(section => {
     let cards = [];
-    if (section.id === 'home-hotels') cards = [];
+    let isHotelSection = false;
+    if (section.id === 'home-hotels') isHotelSection = true;
     else if (section.source === 'tours') cards = tours.slice(0, section.limit || 4).map(hsTourCard);
     else { const types = (section.extraTypes || []).concat(section.type); cards = items.filter(item => types.includes(item.type)).slice(0, section.limit || 4).map(hsContentCard); }
-    const grid = cards.length ? `<div class="hs-grid">${cards.join('')}</div>` : sectionEmpty(`No ${section.title.toLowerCase()} yet`, 'Published content will appear here after an administrator saves and publishes it.');
+    // Hotels are hydrated asynchronously from the SAME real source as the
+    // Hotels page (GET /api/v1/hotels) — never from editorial content items.
+    // Until that response arrives this section shows a loading state, then the
+    // canonical hotel card or an explicit empty/error state.
+    const grid = isHotelSection
+      ? `<div class="public-public-loading"><span class="spinner"></span>Loading featured hotels…</div>`
+      : cards.length ? `<div class="hs-grid">${cards.join('')}</div>` : sectionEmpty(`No ${section.title.toLowerCase()} yet`, 'Published content will appear here after an administrator saves and publishes it.');
     return `<section class="content-section hs-section" id="${section.id}" aria-labelledby="${section.id}Title"><div class="container panel-block section-bg"><div class="section-heading"><div><span class="hs-eyebrow">${icon(section.icon)} ${escapeHtml(section.eyebrow)}</span><h2 id="${section.id}Title">${escapeHtml(section.title)}</h2><p>${escapeHtml(section.subtitle)}</p></div>${section.viewAll ? `<a class="btn btn-outline" href="${escapeHtml(section.viewAll)}" data-public-route="${escapeHtml(section.viewAll)}">View all</a>` : ''}</div>${grid}</div></section>`;
   }).join('');
 }
 async function hydrateHomeHotels() {
   const section = document.getElementById('home-hotels');
   if (!section) return;
+  const replaceState = (markup) => {
+    const state = section.querySelector('.public-public-loading, .public-content-empty, .hotel-results-grid');
+    if (state) state.outerHTML = markup;
+  };
+  const loading = '<div class="public-public-loading"><span class="spinner"></span>Loading featured hotels…</div>';
   try {
     const result = await apiRequest('/hotels?pageSize=8&sort=recommended');
-    const hotels = result.hotels || [];
-    if (!hotels.length) return;
-    const grid = section.querySelector('.hs-grid');
-    const emptyBox = section.querySelector('.public-content-empty, .section-empty');
-    const markup = `<div class="hs-grid">${hotels.slice(0, 4).map(hsHotelCard).join('')}</div>`;
-    if (emptyBox) emptyBox.outerHTML = markup;
-    else if (grid) grid.outerHTML = markup;
-  } catch { /* keep editorial hotel cards if live list is empty */ }
+    const hotels = (result.hotels || []).slice(0, 4);
+    if (!hotels.length) {
+      replaceState(sectionEmpty('No featured hotels yet', 'Published hotels will appear here after an administrator adds and activates them.'));
+      return;
+    }
+    // The exact same card renderer and grid as the Hotels page: same real
+    // source, same live pricing, same detail links, no duplicate hotel list.
+    replaceState(`<div class="hotel-results-grid">${hotels.map(hotel => hotelCardHtml(hotel, {})).join('')}</div>`);
+  } catch (error) {
+    replaceState(`<div class="public-content-empty"><strong>Featured hotels could not be loaded</strong><span>${escapeHtml(error?.message || 'Something went wrong. Please try again.')}</span><button type="button" class="btn btn-outline" data-home-hotels-retry>Try again</button></div>`);
+    section.querySelector('[data-home-hotels-retry]')?.addEventListener('click', () => { replaceState(loading); void hydrateHomeHotels(); });
+  }
 }
 
 function renderAgentsCarousel(agents) {
@@ -2052,8 +2086,13 @@ function hotelReadQuery(query) {
 function hotelBuildUrl(params) {
   const p = new URLSearchParams();
   if (params.destination) p.set('destination', params.destination);
-  p.set('checkIn', params.checkIn); p.set('checkOut', params.checkOut);
-  p.set('adults', params.adults); p.set('children', params.children); p.set('rooms', params.rooms);
+  // Only persisted/defined values are serialised. A bare `hotelCardHtml(hotel, {})`
+  // call must link to `/hotels/:slug` — never `?checkIn=undefined`.
+  if (params.checkIn) p.set('checkIn', params.checkIn);
+  if (params.checkOut) p.set('checkOut', params.checkOut);
+  if (params.adults !== undefined && params.adults !== '') p.set('adults', params.adults);
+  if (params.children !== undefined && params.children !== '') p.set('children', params.children);
+  if (params.rooms !== undefined && params.rooms !== '') p.set('rooms', params.rooms);
   if (params.q) p.set('q', params.q);
   if (params.minPrice) p.set('minPrice', params.minPrice);
   if (params.maxPrice) p.set('maxPrice', params.maxPrice);

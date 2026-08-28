@@ -15,7 +15,7 @@
     "audit": "npm audit --omit=dev --audit-level=high",
     "admin:create": "tsx src/admin-create.ts",
     "cleanup:legacy": "tsx src/cleanup-legacy.ts",
-    "test": "npm run build && node --test dist/smoke.test.js dist/chat.test.js dist/hotel-images.test.js dist/hotel-image-frontend.test.js dist/hotel-image-routes.test.js dist/notifications.test.js",
+    "test": "npm run build && node --test dist/smoke.test.js dist/chat.test.js dist/hotel-images.test.js dist/hotel-image-frontend.test.js dist/hotel-image-routes.test.js dist/notifications.test.js dist/homepage-hotels.test.js dist/commerce-e2e.test.js dist/sliders.test.js dist/slider-frontend.test.js",
     "demo": "tsx src/demo-server.ts"
   },
   "dependencies": {

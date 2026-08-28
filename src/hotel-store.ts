@@ -384,7 +384,9 @@ export class HotelStore {
       const subtotal = nightly.reduce((sum, price) => sum + price, 0) * quantity;
       const originalNightly = room.originalPrice && room.originalPrice > room.pricePerNight ? room.originalPrice : room.pricePerNight;
       const taxes = Math.round(subtotal * (room.taxesPct || 0) / 100);
-      const serviceFee = (room.serviceFee || 0) * quantity;
+      // Service fee is a per-night charge: applied per night × quantity, exactly
+      // like the room price it accompanies (pinned: ৳200 × 2 nights = ৳400).
+      const serviceFee = (room.serviceFee || 0) * nights * quantity;
       const discount = Math.max(0, originalNightly * nights * quantity - subtotal);
       datedRooms.push({ roomId: room.id, roomName: room.name, quantity, adults, children, pricePerNight: Math.round(subtotal / nights / quantity), nights, subtotal, taxes, serviceFee, discount });
     }

@@ -244,3 +244,225 @@ Deploy checklist:
    `TOUR_VAT_PCT` / `TOUR_AIT_PCT` or per-tour metadata if a charge is intended.
 5. Bump the cache-busting query strings if you edit `app.js` or `pwa.js`, and
    `VERSION` in `sw.js`, so clients pick up the new service worker.
+
+## 10. Marketplace final audit (Holiday Packages → booking → payments)
+
+### Root causes found and fixed
+
+1. **Admin sidebar: Holiday Packages entry never rendered.** `MongoStore.listNavigation`
+   deduplicated navigation rows on the route *base path* (`/admin/catalog`), so
+   `/admin/catalog?type=home` (sortOrder 31) won and the holiday-package,
+   destination and every other vertical row collapsed into it. Fix: dedup key is
+   now the **full route** (path + query), and a bare `/admin/catalog` row without a
+   `?type=` discriminator is never rendered. Live `/api/v1/admin/navigation` now
+   returns exactly one entry per vertical — `Holiday Packages`, `Homes & Villas`,
+   `Destinations (Explore)` — each with the correct permission
+   (`catalog.view` / `home.view`).
+
+2. **Home page hotels were permanently empty.** `renderHomeSections()` rendered an
+   empty card list for the `home-hotels` section and `hydrateHomeHotels()` called
+   an **undefined** `hsHotelCard()` helper inside a bare `try/catch`, so the
+   ReferenceError was swallowed and the section stayed blank while the Hotels page
+   worked. Fix: the homepage now hydrates from the **same real source** as the
+   Hotels page (`GET /api/v1/hotels?pageSize=8&sort=recommended`) and renders with
+   the same canonical `hotelCardHtml(hotel, {})` into the same
+   `hotel-results-grid` — no separate list, no editorial fallback, no duplicates.
+   The section shows real loading / empty ("No featured hotels yet") / error
+   with retry states. `hotelBuildUrl` also no longer serialises `undefined`/
+   empty search params into detail links.
+
+3. **Hard-coded demo hotel catalogue in the sandbox server.** `src/demo-server.ts`
+   carried an in-memory hotel catalogue with Cloudinary demo photos and
+   `demoPriceFrom` pricing, plus demo hotel/destination endpoints — mock data that
+   could be served in place of the real store. Fix: the demo server now boots only
+   the chat harness and returns honest empty hotel responses; all content lives in
+   MongoDB (`src/app.ts` / `src/index.ts`). Sandbox-only file, production unaffected.
+
+4. **Hotel image validation rejected legacy image rows.** The admin hotel schema
+   accepted only image *objects*; plain-string URLs (used by seeded records and
+   the admin "one URL per line" list) failed with 400 — the same payload the smoke
+   suite uses. Fix: the hotel/room image list now accepts canonical objects **or**
+   plain URL strings, then normalises them (https upgrade, dedupe, primary flag)
+   via `normalizeHotelImages`; entries that can never produce a usable URL are
+   still rejected with 400 (existing contract kept).
+
+5. **Room service fee was charged once per stay instead of per night.** The smoke
+   suite pins `৳200 × 2 nights = ৳400`; `priceQuote` returned 200. Fix: service
+   fee is now `fee × nights × quantity`, and the admin room field is labelled
+   "Service fee (per night)".
+
+6. **Checkout could be raced past availability and offline payments were
+   unmanaged end-to-end.** Fixes in `commerce-routes.ts`:
+   - Cart add enforces quantity ≤ persisted availability (no overselling the cart).
+   - Checkout re-reads every line product from MongoDB and rejects unpublished,
+     non-bookable or sold-out (quantity-aware) items — the client cannot bypass.
+   - Every successful booking decrements the real `availability` counter; customer
+     and admin cancellations restore it (admin cancellation is guarded so a
+     repeat cancel can never double-restore).
+   - Offline methods (`bank_transfer`, `office`, cash) stay `pending` →
+     `processing` only, and can only be marked `paid` by an admin action; the
+     frontend/redirect can never mark payment successful.
+
+7. **Admin catalogue editor Cancel button did nothing.** The commerce module used
+   `data-close-modal`, but the admin shell binds `data-modal-close`; and
+   `.admin-modal-actions` had no CSS. Fixed both: buttons close the modal and the
+   action row is styled (right-aligned desktop, full-width stacked on ≤760px).
+
+8. **QA/fixture data removed from the sandbox database.** Deleted seeded fixtures
+   (Hotel Sunset Test, Cox Bazar Holiday) and all automated-test artifacts
+   (hotels, rooms, inventory, catalogue products, orders, invoices, payments,
+   bookings, test customers) — `scripts/cleanup-qa-data.mjs` (manual, one-off).
+
+### Changed files
+
+| File | Change |
+|---|---|
+| `src/store.ts` | `listNavigation` dedup → full route; bare `/admin/catalog` filtered |
+| `app.js` | `renderHomeSections`/`hydrateHomeHotels` rewrite; `hotelBuildUrl` optional params |
+| `src/hotel-routes.ts` | hotel/room image lists accept objects **or** string URLs |
+| `src/hotel-store.ts` | room service fee charged per night × quantity |
+| `src/commerce-routes.ts` | checkout re-validation, availability consume/restore, admin-cancel guard |
+| `admin-commerce.js` | permanent delete action; `data-modal-close` fix |
+| `admin.css` | `.admin-modal-actions` styles + mobile stacking |
+| `src/demo-server.ts` | mock hotel catalogue removed (chat harness only) |
+| `src/smoke.test.ts` | image payload fixed; notification assertion matches feed semantics |
+| `src/commerce-e2e.test.ts` | **new** — MongoDB-gated E2E (admin create/list/detail/pricing/booking/payment/edit/unpublish/delete/hotel sync/nav) |
+| `src/homepage-hotels.test.ts` | **new** — homepage hotel source/renderer/URL regression tests |
+| `package.json` | new test files wired into `npm test` |
+| `AUDIT.md` | this report |
+
+### Verified end-to-end (79/79 tests, 0 skip with TEST_MONGODB_URI; 75 pass / 3
+MongoDB-gated skips without it)
+
+- Admin create → refresh list → public list → detail (published only)
+- Server-side price: 2 × ৳12,000 + 5% tax + 2 × ৳500 = **৳26,200**, computed from
+  the DB record even when the browser sends `total: 1`
+- Availability: booking consumes seats; cancellation restores them
+- Payment: online intent amount = DB order total; `bank_transfer`/`office` never
+  auto-confirm; admin confirm → invoice `paid`
+- Edit price propagates; unpublish hides from public (admin keeps drafts);
+  permanent delete removes the record
+- Sold-out / non-bookable refused at cart and checkout
+- Admin hotel create → public `/api/v1/hotels` (homepage source) immediately
+- Sidebar: exactly one entry per vertical, permissions correct, retired verticals
+  still blocked
+- Click-through: `/`, `/hotels`, `/holiday-packages`, `/homes`, `/destinations`
+  all render the storefront shell (200 + SPA HTML)
+- Live curl QA on the running stack (steps 1–15 of the requested checklist)
+
+### Remaining notes
+
+- Payment gateways (SSLCommerz/bKash) return `503 *_NOT_CONFIGURED` until real
+  credentials are set; the intent flow is otherwise verified with a stub and the
+  offline/admin-confirm path is fully operational.
+- No product "compare" tool exists in the current frontend; the "compare" QA item
+  was covered by verifying the homepage and catalogue share the same real sources
+  and pricing (no duplicate/mock data anywhere).
+- Browsers are not installed in this environment, so UI checks were done by
+  code inspection + API/JS-level tests instead of Playwright.
+
+---
+
+## Round 2 — Home Sliders, admin design system, compact sidebar (complete)
+
+### Root causes
+
+1. **No slider admin.** Home banners had no management UI; only generic
+   `content` CRUD existed. The promo carousel was therefore either empty or
+   unmanageable.
+2. **Separate legacy banner rendering.** `app.js` still filtered generic
+   content items (`type === 'banner'`) into the carousel, risking a second
+   code path and draft leakage; `bindPromotionalInteractions` + a fake
+   `openHotelDetails` modal were dead code with no matching markup.
+3. **No public filtering contract.** The carousel needed a single endpoint
+   that returns only `active + published + valid` sliders in `displayOrder`.
+4. **Inconsistent admin layout.** Pages mixed raw `<section>`/`<form>` blocks
+   with ad-hoc styling; Coupons had no filter card or empty state.
+5. **Wide public sidebar.** `330px` fixed width and `.side-link` 8px+ padding;
+   mobile drawer lacked a dedicated responsive lock/offscreen behavior.
+6. **Admin icon fallback.** The `icon()` map lacked `sliders` and `archive`,
+   silently rendering the grid glyph; `admin-commerce.js` referenced
+   `window.icon` which was never exported, so empty-state icons were blank.
+7. **Nav seed-merge gap.** `listNavigation` only seeded defaults into an empty
+   `admin_navigation` collection; existing deployments never received new
+   entries (e.g. Home Sliders).
+
+### Changes
+
+- **API (src/app.ts):** one `content` model (`type: 'banner'`,
+  `metadata.sliderSource === 'home'`) — no duplicate endpoints/tables.
+  - `sliderFieldsSchema` (strict, safe-href validation: `/` internal only,
+    https/http external only, `javascript:`/`data:`/protocol-relative
+    rejected), `sliderInputSchema` (full-document guard: published requires
+    cover image), `sliderPatchSchema` (partial, merged-document re-validation
+    on PATCH so publishing an existing draft works).
+  - Admin routes: `GET/POST /api/v1/admin/sliders`,
+    `PATCH /api/v1/admin/sliders/:id`, `POST .../:id/publish|unpublish`,
+    `DELETE .../:id` (archive), `DELETE .../:id/permanent` (archive-then-
+    delete only) — all behind `offer.*` fine permissions + audit events.
+  - Public `GET /api/v1/site/sliders`: filter
+    `sliderSource === 'home' && status === 'published' && active !== false &&
+    imageUrl && date-valid`, sorted by `sortOrder`; Cloudinary-optimized URLs.
+  - `sliderContentPatch` writes only defined keys; POST normalizes defaults.
+- **Admin UI (admin.js / admin.css):** "Home Sliders" module under
+  WEBSITE (one entry, breadcrumb, permission map); stats row, filter card,
+  card list with thumbnails, move-up/down ordering, edit/preview/
+  publish/unpublish/enable/disable/archive/restore/permanent delete;
+  editor with cover+mobile uploads (media library, `banners` folder),
+  button text/link + external flag, display order, status, start/end dates.
+  Icon map now includes `sliders` and `archive`; `window.icon` exported.
+- **Admin design system (admin.css):** `.admin-card` + content/section/
+  stats/filter/table/form/empty cards, `.admin-action-bar`, modal card,
+  hover states; applied across every admin page (all filter bars now live
+  inside an `admin-filter-card`; tables in `admin-table-card`; forms in
+  `admin-form-card`). Coupons: Filter Card + Empty State Card
+  ("No coupons yet" + explanation + "+ New Coupon").
+- **Public carousel (app.js / styles.css):** `applyPublicContent` fetches
+  `/site/sliders` only; `sliderSlideHtml` renders `<picture>` mobile image,
+  sanitized copy, one slide container with `data-public-route` buttons;
+  `bindSliderBanners` handles slide-level clicks; `bindPublicRouter`
+  delegation + `publicNavigate` keep SPA routing (no reload, no 404).
+  Dead `bindPromotionalInteractions` and `openHotelDetails` removed.
+- **Sidebar (styles.css):** shell layout 232px (226px ≤1440, 220px ≤1180),
+  `.side-link` min-height 36px, 8px gap, 0.85rem; mobile drawer 280px with
+  `body.sidebar-open{overflow:hidden}`, no horizontal scroll
+  (`overflow-x:clip`), all items/routes/active/dropdowns preserved.
+- **Nav seed (src/store.ts):** `listNavigation` merges missing default
+  rows into a populated `admin_navigation` collection (dedup on full route,
+  legacy remap, canonical permission refresh, retired filter).
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/app.ts` | slider schemas, admin CRUD/publish/archive/permanent, public `/site/sliders` |
+| `src/store.ts` | `listNavigation` seed-merge into existing persisted nav |
+| `admin.js` | slider module, icon map (`sliders`, `archive`), `window.icon`, card classes |
+| `admin-commerce.js` | catalog/order/coupon/review filter cards; `window.icon` empty states |
+| `admin.css` | card design system, slider cards, modal actions, mobile stacking |
+| `admin.html` | cache-bust versions |
+| `app.js` | public `/site/sliders` carousel, data-public-route SPA delegation, dead code removed |
+| `index.html` | carousel container `#bannerTrack`/`#offers`; cache-bust |
+| `styles.css` | compact sidebar + drawer/responsive overflow rules |
+| `src/sliders.test.ts` | **new** MongoDB E2E: CRUD → DB → public feed, publish guard, ordering, media lifecycle |
+| `src/slider-frontend.test.ts` | **new** app.js static contract tests |
+| `package.json` | new tests in `npm test` |
+
+### Verified end-to-end
+
+- `npm test`: **82/82 pass** (incl. new suites), `npm run typecheck` clean.
+- Live server QA (port 8787): **23/23 checks** — invalid-link rejections,
+  create published → public feed, ordering, edit propagation, disable hides,
+  publish-without-image blocked, archive hides, permanent delete, homepage
+  `#bannerTrack` + `#offers`, app.js uses `/site/sliders` + `banner-actions`,
+  storefront home data-driven; test fixtures cleaned to zero.
+- Admin nav: 22 entries, exactly one Home Sliders, one Holiday Packages, no
+  duplicate routes; seed-merge verified against a simulated old DB.
+- All 22 admin page renderers confirmed using the card classes; 15/15 filter
+  bars inside `admin-*-card`; Coupons has Filter Card + Empty State Card.
+
+### Remaining notes
+
+- Same browser limitation as Round 1: UI verified by code inspection + API/
+  JS-level tests; no Playwright available.
+- Gateway stubs unchanged (payment provider config required in production).
