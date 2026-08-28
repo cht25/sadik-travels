@@ -375,6 +375,24 @@ export function createCommerceStore() {
     clean<CatalogProduct>(await CatalogModel.findOneAndUpdate({ id }, { $set: { status: 'archived', updatedAt: now() } }, { new: true }).lean());
   const deleteCatalogProduct = async (id: string) => (await CatalogModel.deleteOne({ id })).deletedCount > 0;
 
+  /**
+   * Atomically reserve seats. The filter `availability >= quantity` makes the
+   * update conditional, so two concurrent checkouts can never oversell below
+   * zero; a lost update returns undefined and the caller aborts the checkout.
+   */
+  const consumeCatalogAvailability = async (id: string, quantity: number) =>
+    clean<CatalogProduct>(await CatalogModel.findOneAndUpdate(
+      { id, availability: { $gte: quantity } },
+      { $inc: { availability: -quantity }, $set: { updatedAt: now() } },
+      { new: true }
+    ).lean());
+  const restoreCatalogAvailability = async (id: string, quantity: number) =>
+    clean<CatalogProduct>(await CatalogModel.findOneAndUpdate(
+      { id },
+      { $inc: { availability: quantity }, $set: { updatedAt: now() } },
+      { new: true }
+    ).lean());
+
   const catalogStats = async (filters: { type?: CatalogType; ownerId?: string } = {}) => {
     // Retired verticals are excluded so they cannot appear as a dashboard card.
     const match: Record<string, unknown> = { type: { $nin: [...RETIRED_VERTICAL_TYPES] } };
@@ -718,6 +736,7 @@ export function createCommerceStore() {
   return {
     ensureIndexes,
     listCatalog, findCatalogProduct, catalogFacets, createCatalogProduct, updateCatalogProduct, archiveCatalogProduct, deleteCatalogProduct, catalogStats,
+    consumeCatalogAvailability, restoreCatalogAvailability,
     listWishlist, addWishlist, removeWishlist,
     getCart, saveCart, clearCart,
     listCoupons, findCoupon, createCoupon, updateCoupon, deleteCoupon, evaluateCoupon, redeemCoupon,

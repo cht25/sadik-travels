@@ -46,6 +46,17 @@ export const imageSchema = z.object({
   const [normalized] = normalizeHotelImages([{ ...value, url: value.url ?? value.secureUrl ?? value.secure_url ?? value.imageUrl ?? value.image_url ?? value.src ?? value.path }]);
   return normalized ?? { url: '' };
 }).refine((value: any) => typeof value.url === 'string' && value.url.trim().length > 0, { message: 'Image URL is required', path: ['url'] });
+/**
+ * Image list accepted from the admin UI and legacy records: canonical objects
+ * or plain string URLs. Entries that cannot ever produce a usable URL
+ * (empty object, bare junk string) are REJECTED with a 400 — never silently
+ * dropped — so save and shown photos always match. Valid entries are then
+ * normalized (https upgrade, dedup, primary flag) by `normalizeHotelImages`.
+ */
+const imageListSchema = z.array(z.union([
+  z.string().max(2000).refine(value => /^(https?:\/\/|\/\/|data:image\/|\/)/i.test(value.trim()), { message: 'Invalid image URL' }),
+  imageSchema
+])).max(30).transform(normalizeHotelImages);
 const seasonalDiscountSchema = z.object({ name: z.string().trim().min(2).max(120), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), percentage: z.number().min(0).max(100) }).refine(value => value.endDate >= value.startDate, { message: 'Discount end date must not precede its start date', path: ['endDate'] });
 const cancellationSchema = z.object({ type: z.enum(['free', 'non_refundable']).default('free'), freeUntilDays: z.number().int().min(0).max(365).optional(), description: z.string().max(500).optional() });
 export const hotelInputSchema = z.object({
@@ -54,14 +65,14 @@ export const hotelInputSchema = z.object({
   propertyType: z.string().max(80).default('Hotel'), address: z.string().max(300).optional(), city: z.string().trim().min(2).max(120), country: z.string().max(120).default('Bangladesh'), area: z.string().max(120).optional(),
   latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional(), phone: z.string().max(40).optional(), email: z.string().email().max(160).optional(), website: z.string().max(200).optional(),
   starRating: z.number().int().min(0).max(5).default(3), guestRating: z.number().min(0).max(5).optional(),
-  amenities: z.array(z.string().max(80)).default([]), facilities: z.array(z.string().max(80)).default([]), images: z.array(imageSchema).default([]),
+  amenities: z.array(z.string().max(80)).default([]), facilities: z.array(z.string().max(80)).default([]), images: imageListSchema.default([]),
   roomTypes: z.array(z.string().trim().min(1).max(120)).max(50).default([]), pricePerNight: z.number().nonnegative().max(1000000).optional(), seasonalDiscounts: z.array(seasonalDiscountSchema).max(30).default([]), available: z.boolean().default(true), ownerId: z.string().uuid().optional(),
   checkInTime: z.string().max(20).optional(), checkOutTime: z.string().max(20).optional(), cancellationPolicy: cancellationSchema.optional(),
   status: z.enum(['draft', 'active', 'hidden', 'archived']).default('active'), featured: z.boolean().default(false), sortOrder: z.number().int().min(-100000).max(100000).default(0)
 });
 export const roomInputSchema = z.object({
   name: z.string().trim().min(2).max(160), slug: z.string().trim().min(2).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9-]+)*$/), description: z.string().max(3000).optional(),
-  images: z.array(imageSchema).default([]), size: z.number().int().min(0).max(100000).optional(), bedType: z.string().max(60).optional(), numBeds: z.number().int().min(0).max(20).optional(),
+  images: imageListSchema.default([]), size: z.number().int().min(0).max(100000).optional(), bedType: z.string().max(60).optional(), numBeds: z.number().int().min(0).max(20).optional(),
   maxAdults: z.number().int().min(1).max(20).default(2), maxChildren: z.number().int().min(0).max(20).default(0), maxGuests: z.number().int().min(1).max(30).default(3),
   amenities: z.array(z.string().max(80)).default([]), inventory: z.number().int().min(0).max(1000).default(5),
   pricePerNight: z.number().nonnegative().max(1000000), originalPrice: z.number().nonnegative().max(1000000).optional(), taxesPct: z.number().min(0).max(100).default(0), serviceFee: z.number().min(0).max(100000).default(0),

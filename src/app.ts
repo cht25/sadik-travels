@@ -11,7 +11,7 @@ import { z, ZodError } from 'zod';
 import { config } from './config.js';
 import { verifyFirebaseIdToken, firebasePublicConfig, isFirebaseConfigured } from './firebase.js';
 import { AppError, assert } from './errors.js';
-import { createStore, type Store, type TourFilters, type CreateTour, type UpdateTour, type BookingStatus, type Booking, type ContentType, type ContentStatus } from './store.js';
+import { createStore, type Store, type TourFilters, type CreateTour, type UpdateTour, type BookingStatus, type Booking, type ContentType, type ContentStatus, type ContentItem } from './store.js';
 import { hashOtp, hashPassword, issueSession, normalizeIdentity, setAuthCookies, clearAuthCookies, verifyOtpHash, verifyPassword, verifyToken, REFRESH_COOKIE } from './security.js';
 import { formatBdt } from './pricing.js';
 import { resolveTourQuote, resolveBookingTourAmount, normalizeTourPaymentMethod, tourPaymentMethodLabel } from './tour-quotes.js';
@@ -88,6 +88,60 @@ const messageTestRequest = z.object({ destination: z.string().min(3).max(240), s
 const adminBookingPatchRequest = z.object({ status: bookingStatusSchema.optional(), internalNote: z.string().max(4000).optional(), ownerId: z.string().uuid().nullable().optional(), request: z.record(z.unknown()).optional() }).strict();
 const contentInputSchema = z.object({ type: contentTypeSchema, slug: z.string().trim().min(2).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9-]+)*$/), title: z.string().trim().min(2).max(180), subtitle: z.string().max(300).optional(), description: z.string().max(5000).optional(), imageUrl: z.string().max(500).optional(), mediaId: z.string().uuid().optional(), metadata: z.record(z.unknown()).default({}), status: contentStatusSchema.default('draft'), sortOrder: z.number().int().min(-100000).max(100000).default(0) });
 const contentPatchSchema = contentInputSchema.partial();
+
+/**
+ * Home Sliders live in the same `content` collection as type `banner` (one
+ * model, no duplicate tables). The dedicated schema below validates every
+ * slider-specific field, including button links: internal links must start
+ * with `/`, external links must be real http(s) URLs, and protocol-relative,
+ * `javascript:` or `data:` URLs are rejected so the carousel can never ship a
+ * broken or unsafe destination.
+ */
+const isSafeSliderHref = (value: string): boolean => {
+  const url = value.trim();
+  if (!url) return true;
+  if (url.startsWith('//') || /^(javascript|data|vbscript):/i.test(url) || /[\s\\<>"']/.test(url)) return false;
+  if (/^https?:\/\//i.test(url)) {
+    try { const parsed = new URL(url); return parsed.protocol === 'https:' || parsed.protocol === 'http:'; } catch { return false; }
+  }
+  return url.startsWith('/') && !url.startsWith('//');
+};
+const sliderHrefSchema = z.string().trim().max(500).refine(isSafeSliderHref, 'Use a full https:// link or an internal path starting with "/"');
+const sliderDateSchema = z.string().trim().max(40).refine(value => !value || !Number.isNaN(Date.parse(value)), 'Enter a valid date (YYYY-MM-DD)').optional();
+const sliderFieldsSchema = z.object({
+  title: z.string().trim().min(2).max(180),
+  subtitle: z.string().trim().max(300).optional(),
+  description: z.string().trim().max(2000).optional(),
+  imageUrl: z.string().trim().max(500).optional(),
+  mediaId: z.string().uuid().optional(),
+  mobileImageUrl: z.string().trim().max(500).optional(),
+  mobileMediaId: z.string().uuid().optional(),
+  primaryButtonText: z.string().trim().max(60).optional(),
+  primaryButtonLink: sliderHrefSchema.optional(),
+  primaryExternal: z.boolean().optional(),
+  secondaryButtonText: z.string().trim().max(60).optional(),
+  secondaryButtonLink: sliderHrefSchema.optional(),
+  secondaryExternal: z.boolean().optional(),
+  displayOrder: z.number().int().min(0).max(100000).optional(),
+  active: z.boolean().optional(),
+  status: contentStatusSchema.optional(),
+  startsAt: sliderDateSchema,
+  endsAt: sliderDateSchema
+}).strict();
+type SliderFieldValue = Partial<z.input<typeof sliderFieldsSchema>>;
+const refineSliderFields = (value: SliderFieldValue, ctx: z.RefinementCtx) => {
+  if (value.primaryButtonText && !value.primaryButtonLink) ctx.addIssue({ code: 'custom', path: ['primaryButtonLink'], message: 'Primary button needs a link when its label is set' });
+  if (value.secondaryButtonText && !value.secondaryButtonLink) ctx.addIssue({ code: 'custom', path: ['secondaryButtonLink'], message: 'Secondary button needs a link when its label is set' });
+  if (value.startsAt && value.endsAt && Date.parse(value.endsAt) <= Date.parse(value.startsAt)) ctx.addIssue({ code: 'custom', path: ['endsAt'], message: 'End date must be after the start date' });
+};
+// Full-document validation (create, publish, and merged patch results): a
+// slider can only be published with a cover image in place.
+const sliderInputSchema = sliderFieldsSchema.superRefine((value, ctx) => {
+  refineSliderFields(value, ctx);
+  if (value.status === 'published' && !value.imageUrl) ctx.addIssue({ code: 'custom', path: ['imageUrl'], message: 'Add a cover image before publishing' });
+});
+const sliderPatchSchema = sliderFieldsSchema.partial();
+const sliderSlug = (title: string) => `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 110) || 'home-slider'}-${randomUUID().slice(0, 8)}`;
 const mediaFolderSchema = z.enum(['banners','tours','hotels','homes','destinations','services','testimonials','logos','general']);
 const mediaPatchSchema = z.object({ altText: z.string().max(300).optional(), status: z.enum(['active','archived']).optional() }).strict();
 const navigationInputSchema = z.object({ groupName: z.string().trim().min(1).max(80), parentId: z.string().uuid().nullable().optional(), label: z.string().trim().min(1).max(120), route: z.string().regex(/^\/admin(?:[/?].*)?$/), icon: z.string().trim().min(1).max(40), permission: z.string().max(80).optional(), sortOrder: z.number().int().min(-100000).max(100000).default(0), visible: z.boolean().default(true), enabled: z.boolean().default(true) });
@@ -114,6 +168,32 @@ const clientMeta = (req: Request) => ({ ip: req.ip, userAgent: req.get('user-age
 const sanitizeEmailHtml = (value?: string) => value?.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<iframe[\s\S]*?<\/iframe>/gi,'').replace(/<object[\s\S]*?<\/object>/gi,'').replace(/<embed[^>]*>/gi,'').replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi,'').replace(/javascript:/gi,'') || undefined;
 const errorPageHtml = (status: number) => { const copy: Record<number, [string, string]> = { 403: ['Access restricted', 'You do not have permission to view this page.'], 404: ['Page not found', 'The page you are looking for does not exist or has moved.'], 503: ['Temporarily unavailable', 'We are having trouble reaching a required service. Please try again shortly.'], 500: ['Something went wrong', 'We are having trouble loading this page. Please try again.'] }; const [title, message] = copy[status] || copy[500]; return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Sadik Travels</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f7fb;color:#17253b;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}.card{width:min(460px,calc(100% - 36px));padding:38px 30px;text-align:center;background:#fff;border:1px solid #e3e8f0;border-radius:18px;box-shadow:0 24px 70px rgba(16,36,80,.12)}.code{font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:#1438b8;font-weight:800}.logo{width:72px;height:55px;object-fit:contain}.card h1{font-size:28px;line-height:1.2;margin:14px 0 8px}.card p{color:#68758a;font-size:13px;line-height:1.6;margin:0 auto 24px}.actions{display:flex;justify-content:center;gap:9px;flex-wrap:wrap}.actions a{display:inline-flex;padding:10px 16px;border-radius:8px;text-decoration:none;font-size:12px;font-weight:800;border:1px solid #cbd5e4;color:#17253b}.actions a.primary{background:#1438b8;border-color:#1438b8;color:#fff}</style></head><body><main class="card"><img class="logo" src="/assets/sadik-travels-logo.png?v=3" alt="Sadik Travels"><div class="code">Error ${status}</div><h1>${title}</h1><p>${message}</p><div class="actions"><a class="primary" href="/">Go home</a><a href="/">Try again</a></div></main></body></html>`; };
 const isPublicContentLive = (item: any) => { const startsAt=item.metadata?.startsAt; const expiresAt=item.metadata?.expiresAt; const nowMs=Date.now(); return (!startsAt || Number.isNaN(Date.parse(String(startsAt))) || Date.parse(String(startsAt))<=nowMs) && (!expiresAt || Number.isNaN(Date.parse(String(expiresAt))) || Date.parse(String(expiresAt))>nowMs); };
+const sliderFromContent = (item: ContentItem) => ({ id: item.id, type: item.type, title: item.title, subtitle: item.subtitle || '', description: item.description || '', imageUrl: item.imageUrl || '', mediaId: item.mediaId || undefined, mobileImageUrl: (item.metadata?.mobileImageUrl as string | undefined) || '', mobileMediaId: (item.metadata?.mobileMediaId as string | undefined) || undefined, primaryButtonText: (item.metadata?.ctaText as string | undefined) || '', primaryButtonLink: (item.metadata?.ctaUrl as string | undefined) || '', primaryExternal: item.metadata?.external === true, secondaryButtonText: (item.metadata?.secondaryCtaText as string | undefined) || '', secondaryButtonLink: (item.metadata?.secondaryCtaUrl as string | undefined) || '', secondaryExternal: item.metadata?.secondaryExternal === true, displayOrder: item.sortOrder, active: item.metadata?.active !== false, status: item.status, startsAt: (item.metadata?.startsAt as string | undefined) || '', endsAt: (item.metadata?.expiresAt as string | undefined) || '', createdAt: item.createdAt, updatedAt: item.updatedAt });
+const sliderContentPatch = (input: z.infer<typeof sliderInputSchema>, metadata: Record<string, unknown> = {}) => {
+  const next: Record<string, unknown> = { ...metadata, sliderSource: 'home' };
+  const set = (key: string, value: unknown) => { if (value !== undefined) next[key] = value; };
+  set('active', input.active);
+  set('ctaText', input.primaryButtonText || undefined);
+  set('ctaUrl', input.primaryButtonLink || undefined);
+  set('external', input.primaryExternal);
+  set('secondaryCtaText', input.secondaryButtonText || undefined);
+  set('secondaryCtaUrl', input.secondaryButtonLink || undefined);
+  set('secondaryExternal', input.secondaryExternal);
+  set('mobileImageUrl', input.mobileImageUrl || undefined);
+  set('mobileMediaId', input.mobileMediaId);
+  set('startsAt', input.startsAt || undefined);
+  set('expiresAt', input.endsAt || undefined);
+  return {
+    ...(input.title !== undefined ? { title: input.title } : {}),
+    ...(input.subtitle !== undefined ? { subtitle: input.subtitle || '' } : {}),
+    ...(input.description !== undefined ? { description: input.description || '' } : {}),
+    ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl || undefined } : {}),
+    ...(input.mediaId !== undefined ? { mediaId: input.mediaId } : {}),
+    ...(input.status !== undefined ? { status: input.status } : {}),
+    ...(input.displayOrder !== undefined ? { sortOrder: input.displayOrder } : {}),
+    metadata: next
+  };
+};
 const trustedBookingQuote = async (store: Store, booking: Booking): Promise<{ amount: number; currency: string } | undefined> => {
   const request = booking.request && typeof booking.request === 'object' ? booking.request as Record<string, unknown> : {};
   if (booking.vertical === 'tour') {
@@ -223,11 +303,11 @@ const bookingTransitions: Record<BookingStatus, BookingStatus[]> = {
   failed: ['reviewing', 'cancelled']
 };
 
-export function buildApp() {
+export function buildApp(deps: { media?: MediaService } = {}) {
   const { store, connection } = createStore();
   const messaging = new MessagingProvider(store);
   const payment = new PaymentProvider(store);
-  const media = new MediaService();
+  const media = deps.media ?? new MediaService();
   const hotelStore = createHotelStore();
   const commerce = createCommerceStore();
   // Messenger-style live chat: Firebase Realtime Database is the real-time
@@ -309,6 +389,21 @@ export function buildApp() {
   });
   app.get('/api/v1/site/content', async (req, res) => { const type = contentTypeSchema.safeParse(String(req.query.type || 'all')); const content = (await store.listContent({ type: type.success ? type.data : 'all', q: req.query.q ? String(req.query.q) : undefined })).filter(isPublicContentLive); res.json({ content: content.map(item => ({ id:item.id, type:item.type, slug:item.slug, title:item.title, subtitle:item.subtitle, description:item.description, metadata:item.metadata, imageUrl:optimizedMediaUrl(item.imageUrl,{width:1600}) })) }); });
   app.get('/api/v1/site/content/:type/:idOrSlug', async (req, res) => { const type=contentTypeSchema.safeParse(String(req.params.type)); assert(type.success,404,'CONTENT_NOT_FOUND','Content not found'); const items=(await store.listContent({type:type.data})).filter(isPublicContentLive); const item=items.find(entry=>entry.id===String(req.params.idOrSlug)||entry.slug===String(req.params.idOrSlug)); assert(item,404,'CONTENT_NOT_FOUND','Content not found'); res.json({ content:{ id:item.id,type:item.type,slug:item.slug,title:item.title,subtitle:item.subtitle,description:item.description,imageUrl:optimizedMediaUrl(item.imageUrl,{width:1600}),metadata:item.metadata } }); });
+  /**
+   * Home carousel feed: only sliders that are enabled (metadata.active), set
+   * to published, carry an image and are inside their scheduled window are
+   * returned, ordered by display order. Drafts, disabled and archived items
+   * never leave the server.
+   */
+  app.get('/api/v1/site/sliders', async (_req, res) => {
+    const items = (await store.listContent({ type: 'banner' }))
+      .filter(item => item.metadata?.sliderSource === 'home' && item.status === 'published' && item.metadata?.active !== false && Boolean(item.imageUrl) && isPublicContentLive(item))
+      .sort((a, b) => a.sortOrder - b.sortOrder || b.updatedAt.localeCompare(a.updatedAt));
+    res.json({ sliders: items.map(item => {
+      const slider = sliderFromContent(item);
+      return { id: slider.id, title: slider.title, subtitle: slider.subtitle, description: slider.description, imageUrl: optimizedMediaUrl(slider.imageUrl, { width: 1600 }), mobileImageUrl: slider.mobileImageUrl ? optimizedMediaUrl(slider.mobileImageUrl, { width: 900 }) : undefined, primaryButtonText: slider.primaryButtonText, primaryButtonLink: slider.primaryButtonLink, primaryExternal: slider.primaryExternal, secondaryButtonText: slider.secondaryButtonText, secondaryButtonLink: slider.secondaryButtonLink, secondaryExternal: slider.secondaryExternal, displayOrder: slider.displayOrder };
+    }) });
+  });
   app.get('/api/v1/site/agents', async (req, res) => { const result = await store.listTravelAgents({ publicOnly: true, featured: req.query.featured === 'true' ? true : undefined, page: Number(req.query.page) || 1, pageSize: Number(req.query.pageSize) || 50 }); res.json({ agents: result.agents.map(agent => ({ id:agent.id, fullName:agent.fullName, agencyName:agent.agencyName, photoUrl:agent.photoUrl, photoPublicId:agent.photoPublicId, jobTitle:agent.jobTitle, department:agent.department, phone:agent.phone, whatsapp:agent.whatsapp, email:agent.email, officeLocation:agent.officeLocation, city:agent.city, shortBio:agent.shortBio, fullDescription:agent.fullDescription, languages:agent.languages, experienceYears:agent.experienceYears, specialization:agent.specialization, workingHours:agent.workingHours, featured:agent.featured, displayOrder:agent.displayOrder })) }); });
   app.get('/api/v1/site/agents/:id', async (req,res)=>{ const agent=await store.findTravelAgent(String(req.params.id)); assert(agent && agent.status==='active',404,'AGENT_NOT_FOUND','Agent not found'); res.json({agent:{id:agent.id,fullName:agent.fullName,agencyName:agent.agencyName,photoUrl:agent.photoUrl,photoPublicId:agent.photoPublicId,jobTitle:agent.jobTitle,department:agent.department,phone:agent.phone,whatsapp:agent.whatsapp,email:agent.email,officeLocation:agent.officeLocation,shortBio:agent.shortBio,fullDescription:agent.fullDescription,languages:agent.languages,experienceYears:agent.experienceYears,specialization:agent.specialization,workingHours:agent.workingHours,featured:agent.featured,displayOrder:agent.displayOrder}}); });
 
@@ -663,6 +758,7 @@ export function buildApp() {
       '/admin/support': 'support.view',
       '/admin/notifications': 'notifications.send',
       '/admin/content': 'content.view',
+      '/admin/sliders': 'content.view',
       '/admin/media': 'media.view',
       '/admin/navigation': 'navigation.manage',
       '/admin/settings': 'settings.view',
@@ -952,6 +1048,71 @@ export function buildApp() {
   app.post('/api/v1/admin/content/:id/unpublish', requireFinePermission(store, 'offer.update'), async (req,res)=>{ const content=await store.updateContent(String(req.params.id),{status:'draft'}); assert(content,404,'CONTENT_NOT_FOUND','Content item not found'); await store.audit('admin.content_unpublished',{...clientMeta(req),userId:req.user!.id,metadata:{contentId:content.id}}); res.json({content}); });
   app.post('/api/v1/admin/content/:id/restore', requireFinePermission(store, 'offer.update'), async (req,res)=>{ const content=await store.updateContent(String(req.params.id),{status:'draft'}); assert(content,404,'CONTENT_NOT_FOUND','Content item not found'); await store.audit('admin.content_restored',{...clientMeta(req),userId:req.user!.id,metadata:{contentId:content.id}}); res.json({content}); });
   app.delete('/api/v1/admin/content/:id/permanent', requireFinePermission(store, 'offer.delete'), async (req,res)=>{ const current=await store.findContent(String(req.params.id)); assert(current?.status==='archived',409,'CONTENT_NOT_ARCHIVED','Archive content before permanent deletion'); const deleted=await store.deleteContent(String(req.params.id)); assert(deleted,404,'CONTENT_NOT_FOUND','Content item not found'); await store.audit('admin.content_deleted',{...clientMeta(req),userId:req.user!.id,metadata:{contentId:String(req.params.id)}}); res.status(204).send(); });
+
+  /* ==============================================  ADMIN: HOME SLIDERS  */
+  app.get('/api/v1/admin/sliders', requireFinePermission(store, 'offer.view'), async (req, res) => {
+    const items = (await store.listContent({ type: 'banner', includeArchived: true })).filter(item => item.metadata?.sliderSource === 'home');
+    res.json({ sliders: items.map(sliderFromContent) });
+  });
+  app.get('/api/v1/admin/sliders/:id', requireFinePermission(store, 'offer.view'), async (req, res) => {
+    const item = await store.findContent(String(req.params.id));
+    assert(item && item.type === 'banner' && item.metadata?.sliderSource === 'home', 404, 'SLIDER_NOT_FOUND', 'Slider not found');
+    res.json({ slider: sliderFromContent(item) });
+  });
+  app.post('/api/v1/admin/sliders', requireFinePermission(store, 'offer.create'), async (req, res) => {
+    const input = toInput(sliderInputSchema, req.body);
+    const normalized = { ...input, active: input.active ?? true, status: input.status ?? 'draft', displayOrder: input.displayOrder ?? 0, primaryExternal: input.primaryExternal ?? false, secondaryExternal: input.secondaryExternal ?? false };
+    const item = await store.createContent({ ...sliderContentPatch(normalized), type: 'banner', slug: sliderSlug(input.title), createdBy: req.user!.id } as Parameters<typeof store.createContent>[0]);
+    await store.audit('admin.slider_created', { ...clientMeta(req), userId: req.user!.id, metadata: { sliderId: item.id, title: item.title } });
+    res.status(201).json({ slider: sliderFromContent(item) });
+  });
+  app.patch('/api/v1/admin/sliders/:id', requireFinePermission(store, 'offer.update'), async (req, res) => {
+    const input = toInput(sliderPatchSchema, req.body);
+    const current = await store.findContent(String(req.params.id));
+    assert(current && current.type === 'banner' && current.metadata?.sliderSource === 'home', 404, 'SLIDER_NOT_FOUND', 'Slider not found');
+    // A patch may change any subset of fields, but the resulting slider must
+    // still be a valid document (merged validation, never per-field only).
+    const { id: _id, type: _type, createdAt: _createdAt, updatedAt: _updatedAt, ...fields } = sliderFromContent(current);
+    void _id; void _type; void _createdAt; void _updatedAt;
+    const parsed = sliderInputSchema.safeParse({ ...fields, ...input });
+    assert(parsed.success, 400, 'SLIDER_INVALID', parsed.success ? '' : parsed.error.issues[0]?.message || 'Fix the highlighted fields before saving');
+    const item = await store.updateContent(current.id, sliderContentPatch(parsed.data, current.metadata));
+    assert(item, 404, 'SLIDER_NOT_FOUND', 'Slider not found');
+    await store.audit('admin.slider_updated', { ...clientMeta(req), userId: req.user!.id, metadata: { sliderId: item.id, title: item.title } });
+    res.json({ slider: sliderFromContent(item) });
+  });
+  app.post('/api/v1/admin/sliders/:id/publish', requireFinePermission(store, 'offer.update'), async (req, res) => {
+    const current = await store.findContent(String(req.params.id));
+    assert(current && current.type === 'banner' && current.metadata?.sliderSource === 'home', 404, 'SLIDER_NOT_FOUND', 'Slider not found');
+    const { id: _id, type: _type, createdAt: _createdAt, updatedAt: _updatedAt, ...fields } = sliderFromContent(current);
+    void _id; void _type; void _createdAt; void _updatedAt;
+    const parsed = sliderInputSchema.safeParse({ ...fields, status: 'published' });
+    assert(parsed.success, 400, 'SLIDER_NOT_PUBLISHABLE', parsed.success ? '' : parsed.error.issues[0]?.message || 'Add a cover image and valid links before publishing');
+    const item = await store.updateContent(current.id, { ...sliderContentPatch(parsed.data, current.metadata), status: 'published' });
+    await store.audit('admin.slider_published', { ...clientMeta(req), userId: req.user!.id, metadata: { sliderId: item!.id, title: item!.title } });
+    res.json({ slider: sliderFromContent(item!) });
+  });
+  app.post('/api/v1/admin/sliders/:id/unpublish', requireFinePermission(store, 'offer.update'), async (req, res) => {
+    const current = await store.findContent(String(req.params.id));
+    assert(current && current.type === 'banner' && current.metadata?.sliderSource === 'home', 404, 'SLIDER_NOT_FOUND', 'Slider not found');
+    const item = await store.updateContent(current.id, { status: 'draft' });
+    await store.audit('admin.slider_unpublished', { ...clientMeta(req), userId: req.user!.id, metadata: { sliderId: item!.id } });
+    res.json({ slider: sliderFromContent(item!) });
+  });
+  app.delete('/api/v1/admin/sliders/:id', requireFinePermission(store, 'offer.delete'), async (req, res) => {
+    const item = await store.archiveContent(String(req.params.id));
+    assert(item && item.type === 'banner', 404, 'SLIDER_NOT_FOUND', 'Slider not found');
+    await store.audit('admin.slider_archived', { ...clientMeta(req), userId: req.user!.id, metadata: { sliderId: item.id, title: item.title } });
+    res.json({ slider: sliderFromContent(item) });
+  });
+  app.delete('/api/v1/admin/sliders/:id/permanent', requireFinePermission(store, 'offer.delete'), async (req, res) => {
+    const current = await store.findContent(String(req.params.id));
+    assert(current?.status === 'archived', 409, 'SLIDER_NOT_ARCHIVED', 'Archive the slider before deleting it permanently');
+    const deleted = await store.deleteContent(String(req.params.id));
+    assert(deleted, 404, 'SLIDER_NOT_FOUND', 'Slider not found');
+    await store.audit('admin.slider_deleted', { ...clientMeta(req), userId: req.user!.id, metadata: { sliderId: String(req.params.id) } });
+    res.status(204).send();
+  });
 
   app.get('/api/v1/admin/media', requireFinePermission(store, 'media.view'), async (req, res) => res.json(await store.listMediaAssets({ q: req.query.q ? String(req.query.q) : undefined, folder: req.query.folder ? String(req.query.folder) : undefined, status: req.query.status === 'active' || req.query.status === 'archived' || req.query.status === 'failed' ? req.query.status : 'all', page: Number(req.query.page) || 1, pageSize: Number(req.query.pageSize) || 24 })));
   app.post('/api/v1/admin/media', requireFinePermission(store, 'media.upload'), rateLimit('media-upload', 20, 60), mediaUpload.single('file'), async (req: Request & { file?: Express.Multer.File }, res) => { assert(req.file, 400, 'IMAGE_REQUIRED', 'Choose an image to upload'); const folder = toInput(mediaFolderSchema, String(req.body.folder || 'general')); const altText = typeof req.body.altText === 'string' ? req.body.altText : undefined; const uploaded = await media.upload(req.file.buffer, { folder, originalFilename: req.file.originalname, declaredMime: req.file.mimetype, altText }); let asset; try { asset = await store.createMediaAsset({ ...uploaded, status: 'active', uploadedBy: req.user!.id }); } catch (error) { await media.delete(uploaded.publicId).catch(() => undefined); throw error; } await store.audit('admin.media_uploaded', { ...clientMeta(req), userId: req.user!.id, metadata: { mediaId: asset.id, publicId: asset.publicId, folder: asset.folder } }); res.status(201).json({ media: asset }); });

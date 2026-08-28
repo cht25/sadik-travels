@@ -225,7 +225,9 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
     const cart = await commerce.getCart(req.user!.id);
     const items = [...cart.items];
     const existing = items.find(item => item.productId === product!.id && JSON.stringify(item.meta || {}) === JSON.stringify(input.meta || {}));
-    if (existing) existing.quantity = Math.min(30, existing.quantity + input.quantity);
+    const newQuantity = Math.min(30, (existing?.quantity || 0) + input.quantity);
+    assert(newQuantity <= product!.availability, 409, 'PRODUCT_UNAVAILABLE', `Only ${product!.availability} left — reduce the quantity and try again`);
+    if (existing) existing.quantity = newQuantity;
     else items.push({
       id: randomUUID(), productType: product!.type, productId: product!.id, slug: product!.slug, title: product!.title,
       imageUrl: product!.heroImage?.url || product!.images?.[0]?.url, unitPrice: product!.price,
@@ -285,21 +287,55 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
       assert(items.length > 0, 400, 'CART_EMPTY', 'Your cart is empty');
     }
 
+    // Re-read every line product from the database at checkout time. A product
+    // that was unpublished, marked non-bookable or sold out after it was added
+    // to the cart can never be checked out — the browser cannot bypass this.
+    for (const item of items) {
+      const product = await commerce.findCatalogProduct(item.productId);
+      assert(product && product.status === 'published', 404, 'PRODUCT_NOT_FOUND', 'This product is no longer available');
+      assert(product!.bookable !== false, 409, 'PRODUCT_NOT_BOOKABLE', 'This item cannot be booked online');
+      assert(Number(product!.availability) >= item.quantity, 409, 'PRODUCT_UNAVAILABLE', `Only ${Number(product!.availability)} left for this item — reduce the quantity`);
+    }
+
     const couponCode = input.couponCode || (input.source === 'cart' ? (await commerce.getCart(req.user!.id)).couponCode : undefined);
     const pricing = await commerce.priceCart(items, { couponCode, userId: req.user!.id });
     assert(pricing.total >= 0, 400, 'INVALID_TOTAL', 'The order total could not be calculated');
 
+    // Reserve inventory atomically. The conditional update fails when stock is
+    // insufficient, so two concurrent checkouts can never oversell the same
+    // unit, and every reservation is rolled back if any line fails.
+    const consumed: Array<{ productId: string; quantity: number }> = [];
+    try {
+      for (const item of items) {
+        const reserved = await commerce.consumeCatalogAvailability(item.productId, item.quantity);
+        if (!reserved) {
+          const product = await commerce.findCatalogProduct(item.productId);
+          throw new AppError(409, 'PRODUCT_UNAVAILABLE', `Only ${Number(product?.availability || 0)} left for this item — reduce the quantity`);
+        }
+        consumed.push({ productId: item.productId, quantity: item.quantity });
+      }
+    } catch (error) {
+      await Promise.all(consumed.map(entry => commerce.restoreCatalogAvailability(entry.productId, entry.quantity)));
+      throw error;
+    }
+
     const primaryType = pricing.items[0]?.productType || 'order';
     const bookingTypes = ['holiday_package', 'home'];
-    const order = await commerce.createOrder({
-      userId: req.user!.id, kind: bookingTypes.includes(primaryType) ? 'booking' : 'order', primaryType,
-      items: pricing.items, customer: input.customer, travelers: input.travelers as OrderTraveler[],
-      travelDate: input.travelDate, notes: input.notes,
-      subtotal: pricing.subtotal, discount: 0, couponCode: pricing.couponCode, couponDiscount: pricing.couponDiscount,
-      tax: pricing.tax, serviceFee: pricing.serviceFee, total: pricing.total, currency: pricing.currency,
-      paymentMethod: input.paymentMethod, paymentStatus: 'pending', status: 'pending',
-      contactEmail: input.customer.email.toLowerCase(), contactPhone: input.customer.phone
-    });
+    let order;
+    try {
+      order = await commerce.createOrder({
+        userId: req.user!.id, kind: bookingTypes.includes(primaryType) ? 'booking' : 'order', primaryType,
+        items: pricing.items, customer: input.customer, travelers: input.travelers as OrderTraveler[],
+        travelDate: input.travelDate, notes: input.notes,
+        subtotal: pricing.subtotal, discount: 0, couponCode: pricing.couponCode, couponDiscount: pricing.couponDiscount,
+        tax: pricing.tax, serviceFee: pricing.serviceFee, total: pricing.total, currency: pricing.currency,
+        paymentMethod: input.paymentMethod, paymentStatus: 'pending', status: 'pending',
+        contactEmail: input.customer.email.toLowerCase(), contactPhone: input.customer.phone
+      });
+    } catch (error) {
+      await Promise.all(consumed.map(entry => commerce.restoreCatalogAvailability(entry.productId, entry.quantity)));
+      throw error;
+    }
 
     if (pricing.couponCode) {
       const coupon = await commerce.findCoupon(pricing.couponCode);
@@ -337,6 +373,7 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
     assert(order, 404, 'ORDER_NOT_FOUND', 'Booking not found');
     assert(['pending', 'confirmed', 'processing'].includes(order!.status), 409, 'ORDER_NOT_CANCELLABLE', 'This booking can no longer be cancelled online');
     const updated = await commerce.updateOrder(order!.id, { status: 'cancelled' }, { at: new Date().toISOString(), status: 'cancelled', note: 'Cancelled by customer', actorId: req.user!.id });
+    await restoreOrderAvailability(order!);
     await store.audit('order.cancelled', { ...clientMeta(req), userId: req.user!.id, metadata: { orderId: order!.id } });
     await notify(req.user!.id, 'Booking cancelled', `Booking ${order!.orderNumber} has been cancelled.`, { event: NOTIFICATION_EVENT.BOOKING_CANCELLED, orderId: order!.id, notifyAdmins: true });
     res.json({ order: updated });
@@ -408,6 +445,18 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
     } as any);
     res.status(201).json({ review, message: 'Thank you. Your review is awaiting moderation.' });
   });
+
+  /**
+   * Availability is a real, server-authoritative inventory count on the
+   * persisted catalogue record: a successful booking consumes it, a
+   * cancellation returns it. Restoring is idempotent at the caller level
+   * (only a booking that was not already cancelled can ever be cancelled).
+   */
+  const restoreOrderAvailability = async (order: { items: Array<{ productId: string; quantity: number }> }) => {
+    for (const item of order.items) {
+      await commerce.restoreCatalogAvailability(item.productId, item.quantity);
+    }
+  };
 
   /* ======================================================  ADMIN: CATALOG  */
   app.get('/api/v1/admin/catalog', requireAnyFinePermission(store, ['catalog.view', 'home.view']), async (req, res) => {
@@ -509,6 +558,7 @@ export function registerCommerceRoutes(app: Express, deps: { store: Store; comme
     if (input.status) patch.status = input.status;
     if (input.paymentStatus) patch.paymentStatus = input.paymentStatus;
     const updated = await commerce.updateOrder(order!.id, patch, { at: new Date().toISOString(), status: input.status || input.paymentStatus || 'updated', note: input.note, actorId: req.user!.id });
+    if (input.status === 'cancelled' && order!.status !== 'cancelled') await restoreOrderAvailability(order!);
     if (input.paymentStatus === 'paid') { await commerce.markInvoicePaid(order!.id); await notify(order!.userId, 'Payment received', `We have received payment for booking ${order!.orderNumber}.`, { event: NOTIFICATION_EVENT.PAYMENT_SUCCESS, orderId: order!.id, notifyAdmins: true }); }
     if (input.status === 'confirmed') await notify(order!.userId, 'Booking confirmed', `Your booking ${order!.orderNumber} is confirmed.`, { event: NOTIFICATION_EVENT.BOOKING_CONFIRMED, orderId: order!.id });
     await store.audit('order.updated', { ...clientMeta(req), userId: req.user!.id, metadata: { orderId: order!.id, ...patch } });

@@ -51,8 +51,8 @@
   };
   const go = (href) => (window.navigate ? window.navigate(href) : (location.href = href));
 
-  const empty = (title, message, action = '') => `<div class="admin-card"><div class="admin-empty"><strong>${esc(title)}</strong><p>${esc(message)}</p>${action}</div></div>`;
-  const tableWrap = (inner) => `<div class="admin-card"><div class="table-scroll"><table class="admin-table">${inner}</table></div></div>`;
+  const empty = (title, message, action = '', iconName = 'ticket') => `<div class="admin-card admin-empty-card"><div class="empty-icon">${window.icon ? window.icon(iconName) : ''}</div><strong>${esc(title)}</strong><p>${esc(message)}</p>${action}</div>`;
+  const tableWrap = (inner) => `<div class="admin-card admin-table-card"><div class="table-scroll"><table class="admin-table">${inner}</table></div></div>`;
 
   function pager(result, base) {
     if (!result || result.pageCount <= 1) return '';
@@ -89,11 +89,11 @@
     outlet().innerHTML = header('Catalogue', type ? titleCase(type) : 'All products',
       'Every holiday package, home & villa and destination sold on the website is managed here.',
       `${can('catalog.create') ? '<button class="admin-primary" data-ac-new-product>+ New product</button>' : ''}<button class="admin-secondary" data-ac-refresh>Refresh</button>`)
-      + `<div class="admin-card">
-          <form class="admin-filter-row" id="acCatalogFilter">
-            <input name="q" placeholder="Search title, destination, airline…" value="${attr(search)}" />
-            <select name="type"><option value="">All types</option>${CATALOG_TYPES.map(([value, label]) => `<option value="${value}" ${type === value ? 'selected' : ''}>${label}</option>`).join('')}</select>
-            <select name="status"><option value="">All statuses</option>${['draft', 'published', 'archived'].map((value) => `<option value="${value}" ${status === value ? 'selected' : ''}>${titleCase(value)}</option>`).join('')}</select>
+      + `<section class="admin-card admin-filter-card">
+          <form class="filter-bar" id="acCatalogFilter">
+            <input class="filter-search" name="q" placeholder="Search title, destination, airline…" value="${attr(search)}" />
+            <select class="filter-select" name="type"><option value="">All types</option>${CATALOG_TYPES.map(([value, label]) => `<option value="${value}" ${type === value ? 'selected' : ''}>${label}</option>`).join('')}</select>
+            <select class="filter-select" name="status"><option value="">All statuses</option>${['draft', 'published', 'archived'].map((value) => `<option value="${value}" ${status === value ? 'selected' : ''}>${titleCase(value)}</option>`).join('')}</select>
             <button class="admin-primary" type="submit">Apply</button>
           </form>
           <div class="ac-stat-row">${CATALOG_TYPES.filter(([value]) => typeStats[value]).map(([value, label]) => `
@@ -118,7 +118,7 @@
               <td class="ac-row-actions">
                 ${can('catalog.update') ? `<button class="table-action" data-ac-edit="${attr(product.id)}">Edit</button>` : ''}
                 ${can('catalog.update') ? `<button class="table-action" data-ac-toggle="${attr(product.id)}" data-status="${product.status === 'published' ? 'draft' : 'published'}">${product.status === 'published' ? 'Unpublish' : 'Publish'}</button>` : ''}
-                ${can('catalog.delete') ? `<button class="table-action danger" data-ac-archive="${attr(product.id)}">Archive</button>` : ''}
+                ${can('catalog.delete') ? `<button class="table-action danger" data-ac-archive="${attr(product.id)}">Archive</button><button class="table-action danger" data-ac-delete="${attr(product.id)}">Delete</button>` : ''}
               </td>
             </tr>`).join('')}</tbody>`) + pager(result, `/admin/catalog?${params}`)
         : empty('No products found', 'Adjust the filters or create a new product to publish it on the website.',
@@ -147,6 +147,13 @@
       if (!confirmed) return;
       try { await request(`/admin/catalog/${button.dataset.acArchive}`, { method: 'DELETE' }); notify('Product archived', 'success'); refresh(); }
       catch (error) { notify(error.message || 'Archive failed', 'error'); }
+    }));
+    qa('[data-ac-delete]').forEach((button) => button.addEventListener('click', async () => {
+      const confirmed = window.confirmAction ? await window.confirmAction('Delete product permanently?', 'This removes the product and its booking history reference from the catalogue. Existing orders keep their stored snapshot. This cannot be undone.', 'Delete permanently') : window.confirm('Delete this product permanently?');
+      if (!confirmed) return;
+      button.disabled = true;
+      try { await request(`/admin/catalog/${button.dataset.acDelete}?permanent=true`, { method: 'DELETE' }); notify('Product deleted permanently', 'success'); refresh(); }
+      catch (error) { notify(error.message || 'Delete failed', 'error'); button.disabled = false; }
     }));
   }
 
@@ -222,7 +229,7 @@
           </label>
         </div>
         <div class="admin-modal-actions">
-          <button type="button" class="admin-secondary" data-close-modal>Cancel</button>
+          <button type="button" class="admin-secondary" data-modal-close>Cancel</button>
           <button type="submit" class="admin-primary">${editing ? 'Save product' : 'Create product'}</button>
         </div>
       </form>`;
@@ -293,12 +300,12 @@
           <div class="ac-stat"><strong>${money(stats.revenue)}</strong><span>Paid revenue</span></div>
           ${stats.byStatus.slice(0, 4).map((row) => `<div class="ac-stat"><strong>${row.count}</strong><span>${esc(titleCase(row.status))}</span></div>`).join('')}
         </div>` : '')
-      + `<div class="admin-card"><form class="admin-filter-row" id="acOrderFilter">
-          <input name="q" placeholder="Order number, customer, email…" value="${attr(current.query.get('q') || '')}" />
-          <select name="status"><option value="">All statuses</option>${['pending', 'confirmed', 'processing', 'completed', 'cancelled', 'refunded', 'failed'].map((value) => `<option value="${value}" ${current.query.get('status') === value ? 'selected' : ''}>${titleCase(value)}</option>`).join('')}</select>
-          <select name="paymentStatus"><option value="">All payments</option>${['pending', 'processing', 'paid', 'failed', 'refunded'].map((value) => `<option value="${value}" ${current.query.get('paymentStatus') === value ? 'selected' : ''}>${titleCase(value)}</option>`).join('')}</select>
+      + `<section class="admin-card admin-filter-card"><div class="card-header"><div><h2>Find an order</h2><p>Search by order number, customer or email and filter by order or payment status.</p></div></div><form class="filter-bar" id="acOrderFilter">
+          <input class="filter-search" name="q" placeholder="Order number, customer, email…" value="${attr(current.query.get('q') || '')}" />
+          <select class="filter-select" name="status"><option value="">All statuses</option>${['pending', 'confirmed', 'processing', 'completed', 'cancelled', 'refunded', 'failed'].map((value) => `<option value="${value}" ${current.query.get('status') === value ? 'selected' : ''}>${titleCase(value)}</option>`).join('')}</select>
+          <select class="filter-select" name="paymentStatus"><option value="">All payments</option>${['pending', 'processing', 'paid', 'failed', 'refunded'].map((value) => `<option value="${value}" ${current.query.get('paymentStatus') === value ? 'selected' : ''}>${titleCase(value)}</option>`).join('')}</select>
           <button class="admin-primary" type="submit">Apply</button>
-        </form></div>`
+        </form></section>`
       + (result.orders.length ? tableWrap(`
           <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Created</th><th></th></tr></thead>
           <tbody>${result.orders.map((order) => `
@@ -425,12 +432,12 @@
     const result = await request(`/admin/coupons?${params}`);
 
     outlet().innerHTML = header('E-commerce', 'Coupons & promo codes', 'Discount rules are validated on the server at checkout — a coupon can never be forged from the browser.',
-      `${can('coupon.create') ? '<button class="admin-primary" data-ac-new-coupon>+ New coupon</button>' : ''}<button class="admin-secondary" data-ac-refresh>Refresh</button>`)
-      + `<div class="admin-card"><form class="admin-filter-row" id="acCouponFilter">
-          <input name="q" placeholder="Search code" value="${attr(current.query.get('q') || '')}" />
-          <select name="status"><option value="">All statuses</option>${['active', 'paused', 'expired'].map((value) => `<option value="${value}" ${current.query.get('status') === value ? 'selected' : ''}>${titleCase(value)}</option>`).join('')}</select>
+      `${can('coupon.create') ? '<button class="admin-primary" data-ac-new-coupon>+ New Coupon</button>' : ''}<button class="admin-secondary" data-ac-refresh>Refresh</button>`)
+      + `<section class="admin-card admin-filter-card"><div class="card-header"><div><h2>Find a coupon</h2><p>Search promo codes by exact code text, or filter by lifecycle status.</p></div></div><form class="filter-bar" id="acCouponFilter">
+          <input class="filter-search" name="q" placeholder="Search code" value="${attr(current.query.get('q') || '')}" />
+          <select class="filter-select" name="status"><option value="">All statuses</option>${['active', 'paused', 'expired'].map((value) => `<option value="${value}" ${current.query.get('status') === value ? 'selected' : ''}>${titleCase(value)}</option>`).join('')}</select>
           <button class="admin-primary" type="submit">Apply</button>
-        </form></div>`
+        </form></section>`
       + (result.coupons.length ? tableWrap(`
           <thead><tr><th>Code</th><th>Discount</th><th>Minimum</th><th>Usage</th><th>Valid</th><th>Status</th><th></th></tr></thead>
           <tbody>${result.coupons.map((coupon) => `
@@ -447,7 +454,7 @@
               </td>
             </tr>`).join('')}</tbody>`) + pager(result, `/admin/coupons?${params}`)
         : empty('No coupons yet', 'Create a coupon to run a campaign. Discounts are applied and verified server side.',
-            can('coupon.create') ? '<button class="admin-primary" data-ac-new-coupon>+ New coupon</button>' : ''));
+            can('coupon.create') ? '<button class="admin-primary" data-ac-new-coupon>+ New Coupon</button>' : '', 'tag'));
 
     q('#acCouponFilter')?.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -485,7 +492,7 @@
           ${field('Applicable product types', 'applicableTypes', (coupon?.applicableTypes || []).join('\n'), { textarea: true, rows: 3, wide: true, hint: 'One type per line (holiday_package, home, destination). Empty = all types.' })}
         </div>
         <div class="admin-modal-actions">
-          <button type="button" class="admin-secondary" data-close-modal>Cancel</button>
+          <button type="button" class="admin-secondary" data-modal-close>Cancel</button>
           <button type="submit" class="admin-primary">${coupon ? 'Save coupon' : 'Create coupon'}</button>
         </div>
       </form>`;
@@ -528,12 +535,12 @@
     const result = await request(`/admin/reviews?${params}`);
 
     outlet().innerHTML = header('Community', 'Reviews & ratings', 'Only customers with a confirmed booking can post. Approve a review to publish it and update the product rating.', '<button class="admin-secondary" data-ac-refresh>Refresh</button>')
-      + `<div class="admin-card"><form class="admin-filter-row" id="acReviewFilter">
-          <input name="q" placeholder="Search review text" value="${attr(current.query.get('q') || '')}" />
-          <select name="status"><option value="">All</option>${['pending', 'approved', 'rejected'].map((value) => `<option value="${value}" ${current.query.get('status') === value ? 'selected' : ''}>${titleCase(value)}</option>`).join('')}</select>
+      + `<section class="admin-card admin-filter-card"><div class="card-header"><div><h2>Find a review</h2><p>Search review copy or filter by moderation status.</p></div></div><form class="filter-bar" id="acReviewFilter">
+          <input class="filter-search" name="q" placeholder="Search review text" value="${attr(current.query.get('q') || '')}" />
+          <select class="filter-select" name="status"><option value="">All</option>${['pending', 'approved', 'rejected'].map((value) => `<option value="${value}" ${current.query.get('status') === value ? 'selected' : ''}>${titleCase(value)}</option>`).join('')}</select>
           <button class="admin-primary" type="submit">Apply</button>
         </form></div>`
-      + (result.reviews.length ? `<div class="admin-card"><div class="ac-review-list">${result.reviews.map((review) => `
+      + (result.reviews.length ? `<div class="admin-card admin-section-card"><div class="ac-review-list">${result.reviews.map((review) => `
           <article class="ac-review">
             <div class="ac-review-head">
               <div><strong>${esc(review.userName || 'Customer')}</strong><small>${esc(review.productTitle || titleCase(review.productType))} · ${day(review.createdAt)}</small></div>

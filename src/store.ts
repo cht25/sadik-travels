@@ -132,6 +132,7 @@ const DEFAULT_NAVIGATION: Array<Omit<CreateNavItem,'id'>> = [
   { groupName:'Communication', label:'Live Support Inbox', route:'/admin/live-support', icon:'headset', permission:'support_view', sortOrder:60, visible:true, enabled:true },
   { groupName:'Communication', label:'Support Tickets', route:'/admin/support', icon:'message', permission:'support_view', sortOrder:61, visible:true, enabled:true },
   { groupName:'Communication', label:'SMS & Notifications', route:'/admin/notifications', icon:'bell', permission:'notifications_send', sortOrder:62, visible:true, enabled:true },
+  { groupName:'Website', label:'Home Sliders', route:'/admin/sliders', icon:'sliders', permission:'content_view', sortOrder:69, visible:true, enabled:true },
   { groupName:'Website', label:'Website Content', route:'/admin/content', icon:'spark', permission:'content_view', sortOrder:70, visible:true, enabled:true },
   { groupName:'Website', label:'Media Library', route:'/admin/media', icon:'image', permission:'media_view', sortOrder:71, visible:true, enabled:true },
   { groupName:'Website', label:'Customer Navigation', route:'/admin/navigation', icon:'menu', permission:'navigation_manage', sortOrder:72, visible:true, enabled:true },
@@ -236,7 +237,45 @@ export class MongoStore implements Store {
   private async remove(kind: string, id: string) { return (await this.modelFor(kind).deleteOne({ id })).deletedCount === 1; }
   private async paged<T>(items: T[], currentPage?: number, currentSize?: number) { const activePage = page(currentPage); const size = pageSize(currentSize); return { items: items.slice((activePage - 1) * size, activePage * size), total: items.length, page: activePage, pageSize: size, pageCount: Math.max(1, Math.ceil(items.length / size)) }; }
 
-  async listNavigation(visibleOnly = false) { let items = await this.all<AdminNavItem>('navigation'); if (!items.length) { const time = now(); items = await Promise.all(DEFAULT_NAVIGATION.map(input => this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }))); } else { const known = new Set(items.map(item => `${item.groupName}|${item.label}|${item.route}`)); const missing = DEFAULT_NAVIGATION.filter(input => !known.has(`${input.groupName}|${input.label}|${input.route}`)); if (missing.length) { const time = now(); const added = await Promise.all(missing.map(input => this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }))); items = [...items, ...added]; } } items = items.map(item => { const remapped = LEGACY_ADMIN_NAV_ROUTE_REMAP.get((item.route || '').split('?')[0]); return remapped && item.route !== remapped ? { ...item, route: remapped } : item; }); const canonical = new Map(DEFAULT_NAVIGATION.map(item => [item.route, item])); items = items.map(item => canonical.has(item.route) ? { ...item, permission: canonical.get(item.route)!.permission } : item); items = items.filter(item => !isRetiredAdminNavItem(item)); items = items.filter(item => !visibleOnly || (item.visible && item.enabled)); const dedup = new Map<string, AdminNavItem>(); for (const item of items) { const routeKey = (item.route || '').split('?')[0]; const key = routeKey; const existing = dedup.get(key); if (!existing || (item.sortOrder ?? 0) < (existing.sortOrder ?? 0) || ((item.sortOrder ?? 0) === (existing.sortOrder ?? 0) && item.label.localeCompare(existing.label) < 0)) dedup.set(key, item); } return Array.from(dedup.values()).sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label)); }
+  async listNavigation(visibleOnly = false) {
+    let items = await this.all<AdminNavItem>('navigation');
+    if (!items.length) {
+      const time = now();
+      items = await Promise.all(DEFAULT_NAVIGATION.map(input => this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time })));
+    } else {
+      const known = new Set(items.map(item => `${item.groupName}|${item.label}|${item.route}`));
+      const missing = DEFAULT_NAVIGATION.filter(input => !known.has(`${input.groupName}|${input.label}|${input.route}`));
+      if (missing.length) {
+        const time = now();
+        const added = await Promise.all(missing.map(input => this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time })));
+        items = [...items, ...added];
+      }
+    }
+    items = items.map(item => {
+      const remapped = LEGACY_ADMIN_NAV_ROUTE_REMAP.get((item.route || '').split('?')[0]);
+      return remapped && item.route !== remapped ? { ...item, route: remapped } : item;
+    });
+    const canonical = new Map(DEFAULT_NAVIGATION.map(item => [item.route, item]));
+    items = items.map(item => canonical.has(item.route) ? { ...item, permission: canonical.get(item.route)!.permission } : item);
+    items = items.filter(item => !isRetiredAdminNavItem(item));
+    items = items.filter(item => !visibleOnly || (item.visible && item.enabled));
+    const dedup = new Map<string, AdminNavItem>();
+    for (const item of items) {
+      const route = item.route || '';
+      const [basePath, queryString = ''] = route.split('?');
+      // A catalogue link without a concrete ?type= discriminator is not a real
+      // module entry; the sidebar shows one entry per vertical, never a bare list.
+      if (basePath === '/admin/catalog' && !new URLSearchParams(queryString).get('type')) continue;
+      // Deduplicate on the FULL route (path + query). Collapsing on the base path
+      // only silently merged /admin/catalog?type=home, ?type=holiday_package and
+      // ?type=destination into one entry, so the Holiday Packages link never rendered.
+      const key = route;
+      const existing = dedup.get(key);
+      if (!existing || (item.sortOrder ?? 0) < (existing.sortOrder ?? 0)
+        || ((item.sortOrder ?? 0) === (existing.sortOrder ?? 0) && item.label.localeCompare(existing.label) < 0)) dedup.set(key, item);
+    }
+    return Array.from(dedup.values()).sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
+  }
   async createNavigation(input: CreateNavItem) { if (isRetiredAdminNavItem(input)) throw new AppError(400, 'RETIRED_NAV_ITEM', 'This navigation item belongs to a removed module and can no longer be created'); const time = now(); return this.insert('navigation', { id: randomUUID(), ...input, createdAt: time, updatedAt: time }); }
   async updateNavigation(id: string, patch: UpdateNavItem) { const current = await this.one<AdminNavItem>('navigation', id); if (isRetiredAdminNavItem({ ...current, ...patch })) throw new AppError(400, 'RETIRED_NAV_ITEM', 'This navigation item belongs to a removed module and can no longer be saved'); return this.patch<AdminNavItem>('navigation', id, { ...patch, updatedAt: now() }); }
   async deleteNavigation(id: string) { return this.remove('navigation', id); }
